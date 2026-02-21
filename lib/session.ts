@@ -1,4 +1,5 @@
 import type { TranslationPair, JobResults, ClinicalGrade } from "@/lib/types";
+import { getJobResultsIDB, setJobResultsIDB } from "@/lib/idb";
 
 const STORAGE_KEYS = {
   data: "medtranslate:data",
@@ -73,12 +74,37 @@ export function setSessionJobId(jobId: string | undefined) {
 }
 
 // Job Results (from backend)
+// Sync version — reads from localStorage only (used as fast initial check).
 export function getSessionJobResults() {
   return readJSON<JobResults>(STORAGE_KEYS.jobResults);
 }
 
+// Sync setter — tries localStorage but silently ignores quota errors.
+// Callers should prefer setSessionJobResultsAsync() for reliable persistence.
 export function setSessionJobResults(results: JobResults | undefined) {
-  writeJSON(STORAGE_KEYS.jobResults, results);
+  if (!canUseStorage()) return;
+  if (results == null) {
+    localStorage.removeItem(STORAGE_KEYS.jobResults);
+    return;
+  }
+  try {
+    localStorage.setItem(STORAGE_KEYS.jobResults, JSON.stringify(results));
+  } catch {
+    // Quota exceeded — IndexedDB write handled by async variant.
+  }
+}
+
+// Async getter — tries IndexedDB first, falls back to localStorage.
+export async function getSessionJobResultsAsync(): Promise<JobResults | undefined> {
+  const fromIDB = await getJobResultsIDB();
+  if (fromIDB) return fromIDB;
+  return getSessionJobResults();
+}
+
+// Async setter — writes to IndexedDB (large-data safe) and attempts localStorage.
+export async function setSessionJobResultsAsync(results: JobResults | undefined): Promise<void> {
+  await setJobResultsIDB(results);
+  setSessionJobResults(results);
 }
 
 // Clinical grades (client-side grading persisted separately)
@@ -113,4 +139,6 @@ export function clearSessionState() {
   setSessionJobResults(undefined);
   setSessionGrades(undefined);
   setSessionCsvFileName(undefined);
+  // Also clear IndexedDB (fire-and-forget)
+  setJobResultsIDB(undefined).catch(() => {});
 }

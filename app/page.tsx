@@ -10,7 +10,7 @@ import {
   setSessionData,
   setSessionPrompt,
   setSessionRowLimit,
-  setSessionJobResults,
+  setSessionJobResultsAsync,
   setSessionJobId,
   setSessionCsvFileName,
 } from "@/lib/session";
@@ -120,7 +120,7 @@ export default function UploadPage() {
     setSessionData(dataToUse);
     setSessionPrompt(systemPrompt);
     setSessionRowLimit(limit);
-    setSessionJobResults(undefined);
+    setSessionJobResultsAsync(undefined);
     setSessionJobId(undefined);
     router.push("/translate");
   }, [rowMode, customRowCount, rows, systemPrompt, router]);

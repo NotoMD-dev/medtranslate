@@ -11,10 +11,10 @@ import {
   getSessionData,
   getSessionPrompt,
   getSessionJobId,
-  getSessionJobResults,
+  getSessionJobResultsAsync,
   getSessionGrades,
   setSessionJobId,
-  setSessionJobResults,
+  setSessionJobResultsAsync,
   setSessionGrades,
 } from "@/lib/session";
 
@@ -33,30 +33,31 @@ export default function TranslatePage() {
 
   // Restore persisted job results on mount
   useEffect(() => {
-    const persistedResults = getSessionJobResults();
     const persistedGrades = getSessionGrades();
-
-    if (persistedResults && persistedResults.status === "complete") {
-      setJobResults(persistedResults);
-      setPageState("complete");
-      setRowCount(persistedResults.sentence_metrics.length);
-    } else if (persistedResults && persistedResults.status === "failed") {
-      setJobResults(persistedResults);
-      setPageState("failed");
-    } else {
-      const data = getSessionData();
-      if (data) setRowCount(data.length);
-    }
-
     if (persistedGrades) {
       setGrades(persistedGrades);
     }
 
-    // If there's a running job, resume polling
-    const jobId = getSessionJobId();
-    if (jobId && (!persistedResults || (persistedResults.status !== "complete" && persistedResults.status !== "failed"))) {
-      resumePolling(jobId);
-    }
+    // Load results async (IndexedDB first, then localStorage fallback)
+    getSessionJobResultsAsync().then((persistedResults) => {
+      if (persistedResults && persistedResults.status === "complete") {
+        setJobResults(persistedResults);
+        setPageState("complete");
+        setRowCount(persistedResults.sentence_metrics.length);
+      } else if (persistedResults && persistedResults.status === "failed") {
+        setJobResults(persistedResults);
+        setPageState("failed");
+      } else {
+        const data = getSessionData();
+        if (data) setRowCount(data.length);
+      }
+
+      // If there's a running job, resume polling
+      const jobId = getSessionJobId();
+      if (jobId && (!persistedResults || (persistedResults.status !== "complete" && persistedResults.status !== "failed"))) {
+        resumePolling(jobId);
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -82,7 +83,7 @@ export default function TranslatePage() {
       });
 
       setJobResults(results);
-      setSessionJobResults(results);
+      await setSessionJobResultsAsync(results);
       setPageState(results.status === "complete" ? "complete" : "failed");
     } catch (err) {
       setError((err as Error).message);
@@ -135,7 +136,7 @@ export default function TranslatePage() {
       });
 
       setJobResults(results);
-      setSessionJobResults(results);
+      await setSessionJobResultsAsync(results);
       setPageState(results.status === "complete" ? "complete" : "failed");
 
       if (results.status === "failed") {
