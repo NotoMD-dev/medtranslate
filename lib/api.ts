@@ -82,9 +82,14 @@ export async function pollUntilDone(
   jobId: string,
   onStatus: (status: JobStatusResponse) => void,
   intervalMs: number = 2000,
+  signal?: AbortSignal,
 ): Promise<JobResults> {
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    if (signal?.aborted) {
+      throw new DOMException("Translation stopped by user", "AbortError");
+    }
+
     const status = await pollJobStatus(jobId);
     onStatus(status);
 
@@ -92,6 +97,13 @@ export async function pollUntilDone(
       return fetchJobResults(jobId);
     }
 
-    await new Promise((r) => setTimeout(r, intervalMs));
+    if (signal?.aborted) {
+      throw new DOMException("Translation stopped by user", "AbortError");
+    }
+
+    await new Promise((r) => {
+      const timer = setTimeout(r, intervalMs);
+      signal?.addEventListener("abort", () => { clearTimeout(timer); r(undefined); }, { once: true });
+    });
   }
 }

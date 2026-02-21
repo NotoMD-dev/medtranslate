@@ -12,7 +12,7 @@ import {
   getSessionPrompt,
   getSessionJobId,
   getSessionJobResultsAsync,
-  getSessionGrades,
+  getSessionGradesAsync,
   setSessionJobId,
   setSessionJobResultsAsync,
   setSessionGrades,
@@ -29,14 +29,14 @@ export default function TranslatePage() {
   const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
   const [rowCount, setRowCount] = useState(0);
   const [computeBertscore, setComputeBertscore] = useState(false);
-  const abortRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const latestResultsRef = useRef<JobResults | null>(null);
 
   // Restore persisted job results on mount
   useEffect(() => {
-    const persistedGrades = getSessionGrades();
-    if (persistedGrades) {
-      setGrades(persistedGrades);
-    }
+    getSessionGradesAsync().then((persistedGrades) => {
+      if (persistedGrades) setGrades(persistedGrades);
+    });
 
     // Load results async (IndexedDB first, then localStorage fallback)
     getSessionJobResultsAsync().then((persistedResults) => {
@@ -63,11 +63,12 @@ export default function TranslatePage() {
 
   const resumePolling = useCallback(async (jobId: string) => {
     setPageState("running");
-    abortRef.current = false;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const results = await pollUntilDone(jobId, async (status) => {
-        if (abortRef.current) return;
+        if (controller.signal.aborted) return;
         setJobStatus(status);
         setRowCount(status.total);
 
@@ -76,16 +77,27 @@ export default function TranslatePage() {
           const partial = await fetchJobResults(jobId);
           if (partial && partial.sentence_metrics.length > 0) {
             setJobResults(partial);
+            latestResultsRef.current = partial;
           }
         } catch {
           // Partial results not yet available — ignore
         }
-      });
+      }, 2000, controller.signal);
 
       setJobResults(results);
+      latestResultsRef.current = results;
       await setSessionJobResultsAsync(results);
       setPageState(results.status === "complete" ? "complete" : "failed");
     } catch (err) {
+      if ((err as DOMException).name === "AbortError") {
+        // User stopped translation — save partial results
+        const partial = latestResultsRef.current;
+        if (partial && partial.sentence_metrics.length > 0) {
+          await setSessionJobResultsAsync(partial);
+        }
+        setPageState("complete");
+        return;
+      }
       setError((err as Error).message);
       setPageState("failed");
     }
@@ -101,8 +113,10 @@ export default function TranslatePage() {
     setPageState("submitting");
     setError(null);
     setJobResults(null);
+    latestResultsRef.current = null;
     setJobStatus(null);
-    abortRef.current = false;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
@@ -121,7 +135,7 @@ export default function TranslatePage() {
       setPageState("running");
 
       const results = await pollUntilDone(job_id, async (status) => {
-        if (abortRef.current) return;
+        if (controller.signal.aborted) return;
         setJobStatus(status);
 
         // Fetch partial results for real-time table display
@@ -129,13 +143,15 @@ export default function TranslatePage() {
           const partial = await fetchJobResults(job_id);
           if (partial && partial.sentence_metrics.length > 0) {
             setJobResults(partial);
+            latestResultsRef.current = partial;
           }
         } catch {
           // Partial results not yet available — ignore
         }
-      });
+      }, 2000, controller.signal);
 
       setJobResults(results);
+      latestResultsRef.current = results;
       await setSessionJobResultsAsync(results);
       setPageState(results.status === "complete" ? "complete" : "failed");
 
@@ -143,10 +159,24 @@ export default function TranslatePage() {
         setError("Job failed on the backend. Check server logs for details.");
       }
     } catch (err) {
+      if ((err as DOMException).name === "AbortError") {
+        // User stopped translation — save and show partial results
+        const partial = latestResultsRef.current;
+        if (partial && partial.sentence_metrics.length > 0) {
+          await setSessionJobResultsAsync(partial);
+        }
+        setPageState("complete");
+        return;
+      }
       setError((err as Error).message);
       setPageState("failed");
     }
   }, [computeBertscore]);
+
+  const handleStop = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+  }, []);
 
   const handleGrade = useCallback(
     (pairId: string, grade: ClinicalGrade) => {
@@ -236,9 +266,17 @@ export default function TranslatePage() {
                   : "Run Translations"}
               </button>
             ) : (
-              <div className="px-7 py-2.5 rounded-xl text-accent-blue text-sm font-bold border border-accent-blue bg-transparent">
-                {pageState === "submitting" ? "Submitting..." : "Running..."}
-              </div>
+              <button
+                onClick={handleStop}
+                className="px-7 py-2.5 rounded-xl text-sm font-bold border cursor-pointer transition-colors"
+                style={{
+                  color: pageState === "submitting" ? "#60a5fa" : "#f87171",
+                  borderColor: pageState === "submitting" ? "#60a5fa" : "#f87171",
+                  background: pageState === "submitting" ? "transparent" : "rgba(248,113,113,0.1)",
+                }}
+              >
+                {pageState === "submitting" ? "Submitting..." : "Stop Translation"}
+              </button>
             )}
 
             <button
