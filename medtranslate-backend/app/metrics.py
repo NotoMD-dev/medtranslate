@@ -74,13 +74,14 @@ def compute_bertscore_batch(
         batch_size = 64
 
     _P, _R, F1 = bert_score_fn(
-        candidates,
-        references,
-        lang="en",
-        rescale_with_baseline=True,
-        batch_size=batch_size,
-        verbose=False,
-    )
+    candidates,
+    references,
+    model_type="roberta-base",  # lighter model for Render
+    lang="en",
+    rescale_with_baseline=True,
+    batch_size=batch_size,
+    verbose=False,
+)
 
     return F1.tolist()
 
