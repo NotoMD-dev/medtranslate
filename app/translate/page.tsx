@@ -8,6 +8,12 @@ import { computeAllMetrics } from "@/lib/metrics";
 import { exportResultsCSV, downloadFile } from "@/lib/csv";
 import type { TranslationResult, ClinicalGrade } from "@/lib/types";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/types";
+import {
+  getSessionData,
+  getSessionPrompt,
+  getSessionResults,
+  setSessionResults,
+} from "@/lib/session";
 
 export default function TranslatePage() {
   const [results, setResults] = useState<TranslationResult[]>([]);
@@ -20,7 +26,7 @@ export default function TranslatePage() {
   useEffect(() => {
     if (results.length > 0) return;
 
-    const persisted = globalThis.__medtranslate_results;
+    const persisted = getSessionResults();
     if (persisted && persisted.length > 0) {
       setResults(persisted);
       // Restore progress counts
@@ -31,7 +37,7 @@ export default function TranslatePage() {
       return;
     }
 
-    const data = globalThis.__medtranslate_data;
+    const data = getSessionData();
     if (data && data.length > 0) {
       setResults(
         data.map((r, i) => ({
@@ -50,7 +56,7 @@ export default function TranslatePage() {
   // Persist results to globalThis whenever they change
   useEffect(() => {
     if (results.length > 0) {
-      globalThis.__medtranslate_results = results;
+      setSessionResults(results);
     }
   }, [results]);
 
@@ -61,7 +67,7 @@ export default function TranslatePage() {
     setProgress({ done: 0, total });
 
     const systemPrompt =
-      globalThis.__medtranslate_prompt || DEFAULT_SYSTEM_PROMPT;
+      getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
 
     for (let i = 0; i < total; i++) {
       if (abortRef.current) break;

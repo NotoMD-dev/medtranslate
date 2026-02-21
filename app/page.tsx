@@ -5,15 +5,14 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { parseCSV, parseXLSX } from "@/lib/csv";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/types";
+import {
+  clearSessionState,
+  setSessionData,
+  setSessionPrompt,
+  setSessionResults,
+  setSessionRowLimit,
+} from "@/lib/session";
 import type { TranslationPair } from "@/lib/types";
-
-// Global state (would use zustand/context in production)
-declare global {
-  var __medtranslate_data: TranslationPair[] | undefined;
-  var __medtranslate_prompt: string | undefined;
-  var __medtranslate_rowLimit: number | undefined;
-  var __medtranslate_results: import("@/lib/types").TranslationResult[] | undefined;
-}
 
 export default function UploadPage() {
   const router = useRouter();
@@ -46,8 +45,8 @@ export default function UploadPage() {
             const buffer = ev.target?.result as ArrayBuffer;
             const parsed = parseXLSX(buffer);
             setRows(parsed);
-            globalThis.__medtranslate_data = parsed;
-            globalThis.__medtranslate_prompt = systemPrompt;
+            setSessionData(parsed);
+            setSessionPrompt(systemPrompt);
           } catch (err) {
             setError((err as Error).message);
           }
@@ -59,8 +58,8 @@ export default function UploadPage() {
           try {
             const parsed = parseCSV(ev.target?.result as string);
             setRows(parsed);
-            globalThis.__medtranslate_data = parsed;
-            globalThis.__medtranslate_prompt = systemPrompt;
+            setSessionData(parsed);
+            setSessionPrompt(systemPrompt);
           } catch (err) {
             setError((err as Error).message);
           }
@@ -95,10 +94,7 @@ export default function UploadPage() {
     setError(null);
     setRowMode("all");
     setCustomRowCount("");
-    globalThis.__medtranslate_data = undefined;
-    globalThis.__medtranslate_prompt = undefined;
-    globalThis.__medtranslate_rowLimit = undefined;
-    globalThis.__medtranslate_results = undefined;
+    clearSessionState();
     if (fileRef.current) {
       fileRef.current.value = "";
     }
@@ -117,9 +113,10 @@ export default function UploadPage() {
 
     // Apply row limit to global data
     const dataToUse = limit ? rows.slice(0, limit) : rows;
-    globalThis.__medtranslate_data = dataToUse;
-    globalThis.__medtranslate_prompt = systemPrompt;
-    globalThis.__medtranslate_rowLimit = limit;
+    setSessionData(dataToUse);
+    setSessionPrompt(systemPrompt);
+    setSessionRowLimit(limit);
+    setSessionResults(undefined);
     router.push("/translate");
   }, [rowMode, customRowCount, rows, systemPrompt, router]);
 
@@ -325,7 +322,7 @@ export default function UploadPage() {
             value={systemPrompt}
             onChange={(e) => {
               setSystemPrompt(e.target.value);
-              globalThis.__medtranslate_prompt = e.target.value;
+              setSessionPrompt(e.target.value);
             }}
             className="w-full h-28 bg-surface-700 border border-surface-600 rounded-xl p-4 text-slate-200 text-[13px] font-mono leading-relaxed resize-y focus:outline-none focus:border-accent-blue"
           />
