@@ -1,5 +1,3 @@
-/*app/metrics/page.tsx*/
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -7,41 +5,40 @@ import Header from "@/components/Header";
 import MetricsCard from "@/components/MetricsCard";
 import { CLINICAL_GRADES } from "@/lib/types";
 import { summarizeMetric } from "@/lib/metrics";
-import type { TranslationResult } from "@/lib/types";
-import { getSessionResults } from "@/lib/session";
+import type { JobResults, ClinicalGrade } from "@/lib/types";
+import { getSessionJobResults, getSessionGrades } from "@/lib/session";
 
 export default function MetricsPage() {
-  const [results, setResults] = useState<TranslationResult[]>([]);
+  const [jobResults, setJobResults] = useState<JobResults | null>(null);
+  const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
 
-  // Load persisted results from globalThis
   useEffect(() => {
-    const persisted = getSessionResults();
-    if (persisted && persisted.length > 0) {
-      setResults(persisted);
-    }
+    const persisted = getSessionJobResults();
+    if (persisted) setJobResults(persisted);
+    const persistedGrades = getSessionGrades();
+    if (persistedGrades) setGrades(persistedGrades);
   }, []);
 
-  const completed = results.filter((r) => r._status === "complete");
+  const sentences = jobResults?.sentence_metrics ?? [];
+  const completed = sentences.filter(
+    (s) => s.llm_english_translation && !s.error
+  );
 
-  // Aggregate metric values from completed results
-  const bleuValues = completed
-    .map((r) => r._bleu)
-    .filter((v): v is number => v != null);
+  // Aggregate metric values from backend results
   const meteorValues = completed
-    .map((r) => r._meteor)
+    .map((r) => r.meteor)
     .filter((v): v is number => v != null);
   const bertValues = completed
-    .map((r) => r._bert_proxy)
+    .map((r) => r.bertscore_f1)
     .filter((v): v is number => v != null);
 
-  const bleuSummary = summarizeMetric(bleuValues);
   const meteorSummary = summarizeMetric(meteorValues);
   const bertSummary = summarizeMetric(bertValues);
 
   // Clinical grade distribution
-  const graded = completed.filter((r) => r._clinical_grade != null);
+  const graded = completed.filter((r) => grades[r.pair_id] != null);
   const gradeCounts = CLINICAL_GRADES.map(
-    (g) => graded.filter((r) => r._clinical_grade === g.grade).length
+    (g) => graded.filter((r) => grades[r.pair_id] === g.grade).length
   );
   const totalGraded = graded.length;
 
@@ -61,19 +58,21 @@ export default function MetricsPage() {
 
   const sourceMetrics = sources.map((src) => {
     const srcCompleted = completed.filter((r) => r.source === src.key);
-    const srcBleu = srcCompleted
-      .map((r) => r._bleu)
-      .filter((v): v is number => v != null);
     const srcMeteor = srcCompleted
-      .map((r) => r._meteor)
+      .map((r) => r.meteor)
+      .filter((v): v is number => v != null);
+    const srcBert = srcCompleted
+      .map((r) => r.bertscore_f1)
       .filter((v): v is number => v != null);
     return {
       ...src,
       count: srcCompleted.length,
-      bleu: srcBleu.length > 0 ? summarizeMetric(srcBleu).mean : null,
       meteor: srcMeteor.length > 0 ? summarizeMetric(srcMeteor).mean : null,
+      bert: srcBert.length > 0 ? summarizeMetric(srcBert).mean : null,
     };
   });
+
+  const corpusBleu = jobResults?.corpus_metrics;
 
   return (
     <div className="min-h-screen">
@@ -84,7 +83,7 @@ export default function MetricsPage() {
         </h2>
         {completed.length > 0 && (
           <p className="text-slate-500 text-[13px] mb-6">
-            {completed.length} of {results.length} translations completed
+            {completed.length} of {sentences.length} translations completed
           </p>
         )}
         {completed.length === 0 && (
@@ -93,24 +92,60 @@ export default function MetricsPage() {
           </p>
         )}
 
-        {/* Metric cards */}
-        <div className="grid grid-cols-3 gap-4 mb-7">
-          <MetricsCard
-            label="BLEU"
-            value={bleuValues.length > 0 ? bleuSummary.mean : null}
-            description="N-gram overlap"
-            count={bleuValues.length}
-          />
+        {/* Corpus BLEU (from backend sacrebleu) */}
+        {corpusBleu && (
+          <div className="mb-7">
+            <div className="text-[12px] font-semibold text-slate-400 tracking-wider mb-3">
+              CORPUS BLEU (sacrebleu)
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
+                <div className="text-[11px] text-slate-500 font-semibold tracking-widest mb-2">
+                  OVERALL
+                </div>
+                <div className="text-4xl font-light font-mono text-slate-100 tracking-tight">
+                  {corpusBleu.overall.bleu_score.toFixed(2)}
+                </div>
+                <div className="text-[10px] text-slate-600 mt-2 font-mono break-all">
+                  {corpusBleu.overall.bleu_signature}
+                </div>
+              </div>
+              {corpusBleu.clinspen && (
+                <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
+                  <div className="text-[11px] font-semibold tracking-widest mb-2" style={{ color: "#7dd3fc" }}>
+                    ClinSpEn
+                  </div>
+                  <div className="text-4xl font-light font-mono text-slate-100 tracking-tight">
+                    {corpusBleu.clinspen.bleu_score.toFixed(2)}
+                  </div>
+                </div>
+              )}
+              {corpusBleu.umass && (
+                <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
+                  <div className="text-[11px] font-semibold tracking-widest mb-2" style={{ color: "#fda4af" }}>
+                    UMass
+                  </div>
+                  <div className="text-4xl font-light font-mono text-slate-100 tracking-tight">
+                    {corpusBleu.umass.bleu_score.toFixed(2)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Sentence-level metric cards */}
+        <div className="grid grid-cols-2 gap-4 mb-7">
           <MetricsCard
             label="METEOR"
             value={meteorValues.length > 0 ? meteorSummary.mean : null}
-            description="Synonym-aware matching"
+            description="WordNet + stemming (NLTK)"
             count={meteorValues.length}
           />
           <MetricsCard
-            label="BERTProxy"
+            label="BERTScore F1"
             value={bertValues.length > 0 ? bertSummary.mean : null}
-            description="Semantic similarity"
+            description="Rescaled with baseline"
             count={bertValues.length}
           />
         </div>
@@ -173,15 +208,15 @@ export default function MetricsPage() {
                 </div>
                 <div className="flex gap-5">
                   <div>
-                    <span className="text-[10px] text-slate-500">BLEU</span>{" "}
-                    <span className="text-base font-mono text-slate-100 ml-1">
-                      {src.bleu != null ? src.bleu.toFixed(3) : "--"}
-                    </span>
-                  </div>
-                  <div>
                     <span className="text-[10px] text-slate-500">METEOR</span>{" "}
                     <span className="text-base font-mono text-slate-100 ml-1">
                       {src.meteor != null ? src.meteor.toFixed(3) : "--"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500">BERTScore</span>{" "}
+                    <span className="text-base font-mono text-slate-100 ml-1">
+                      {src.bert != null ? src.bert.toFixed(3) : "--"}
                     </span>
                   </div>
                   <div>
@@ -195,6 +230,21 @@ export default function MetricsPage() {
             ))}
           </div>
         </div>
+
+        {/* Library versions */}
+        {jobResults?.library_versions && (
+          <div className="mt-6 bg-surface-800 border border-surface-700 rounded-xl p-4">
+            <div className="text-[11px] text-slate-500 font-semibold tracking-widest mb-2">
+              LIBRARY VERSIONS (REPRODUCIBILITY)
+            </div>
+            <div className="flex gap-6 text-[12px] text-slate-400 font-mono">
+              <span>sacrebleu: {jobResults.library_versions.sacrebleu}</span>
+              <span>nltk: {jobResults.library_versions.nltk}</span>
+              <span>bert-score: {jobResults.library_versions.bert_score}</span>
+              <span>torch: {jobResults.library_versions.torch}</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

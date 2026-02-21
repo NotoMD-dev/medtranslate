@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import type { TranslationPair, TranslationResult } from "./types";
+import type { TranslationPair, SentenceMetrics, ClinicalGrade } from "./types";
 
 /**
  * Parse an XLSX ArrayBuffer into TranslationPair objects.
@@ -106,9 +106,12 @@ function parseCSVLine(line: string): string[] {
 }
 
 /**
- * Export TranslationResult array to CSV string.
+ * Convert TranslationPair[] to a CSV File suitable for backend upload.
  */
-export function exportResultsCSV(results: TranslationResult[]): string {
+export function pairsToCSVFile(
+  pairs: TranslationPair[],
+  filename: string = "dataset.csv",
+): File {
   const headers = [
     "pair_id",
     "source",
@@ -116,10 +119,50 @@ export function exportResultsCSV(results: TranslationResult[]): string {
     "english_reference",
     "spanish_source",
     "llm_english_translation",
-    "bleu_score",
+  ];
+
+  const escape = (v: string): string => {
+    if (v.includes(",") || v.includes('"') || v.includes("\n")) {
+      return `"${v.replace(/"/g, '""')}"`;
+    }
+    return v;
+  };
+
+  const csvRows = pairs.map((r) =>
+    [
+      r.pair_id,
+      r.source,
+      r.content_type,
+      r.english_reference,
+      r.spanish_source,
+      r.llm_english_translation,
+    ]
+      .map(escape)
+      .join(",")
+  );
+
+  const csvContent = [headers.join(","), ...csvRows].join("\n");
+  return new File([csvContent], filename, { type: "text/csv" });
+}
+
+/**
+ * Export sentence metrics results to CSV string.
+ */
+export function exportResultsCSV(
+  sentences: SentenceMetrics[],
+  grades?: Record<string, ClinicalGrade>,
+): string {
+  const headers = [
+    "pair_id",
+    "source",
+    "content_type",
+    "english_reference",
+    "spanish_source",
+    "llm_english_translation",
     "meteor_score",
-    "bert_proxy_score",
+    "bertscore_f1",
     "clinical_significance_grade",
+    "error",
   ];
 
   const escape = (v: string | number | null | undefined): string => {
@@ -130,7 +173,7 @@ export function exportResultsCSV(results: TranslationResult[]): string {
     return s;
   };
 
-  const rows = results.map((r) =>
+  const rows = sentences.map((r) =>
     [
       r.pair_id,
       r.source,
@@ -138,10 +181,10 @@ export function exportResultsCSV(results: TranslationResult[]): string {
       r.english_reference,
       r.spanish_source,
       r.llm_english_translation,
-      r._bleu != null ? r._bleu.toFixed(4) : "",
-      r._meteor != null ? r._meteor.toFixed(4) : "",
-      r._bert_proxy != null ? r._bert_proxy.toFixed(4) : "",
-      r._clinical_grade != null ? r._clinical_grade : "",
+      r.meteor != null ? r.meteor.toFixed(4) : "",
+      r.bertscore_f1 != null ? r.bertscore_f1.toFixed(4) : "",
+      grades?.[r.pair_id] != null ? grades[r.pair_id] : "",
+      r.error ?? "",
     ]
       .map(escape)
       .join(",")

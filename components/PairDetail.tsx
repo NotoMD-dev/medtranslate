@@ -1,19 +1,20 @@
-import type { TranslationResult, ClinicalGrade } from "@/lib/types";
+import type { SentenceMetrics, ClinicalGrade } from "@/lib/types";
 import GradeSelector from "./GradeSelector";
 
 interface Props {
-  result: TranslationResult;
+  sentence: SentenceMetrics;
+  grade: ClinicalGrade | null;
   onGrade: (grade: ClinicalGrade) => void;
   onClose: () => void;
 }
 
-export default function PairDetail({ result, onGrade, onClose }: Props) {
+export default function PairDetail({ sentence, grade, onGrade, onClose }: Props) {
   return (
     <div className="bg-surface-800 rounded-[14px] border border-surface-700 p-6">
       <div className="flex justify-between items-start mb-5">
         <div className="text-sm font-semibold text-slate-100">
           Pair Detail:{" "}
-          <span className="font-mono text-accent-blue">{result.pair_id}</span>
+          <span className="font-mono text-accent-blue">{sentence.pair_id}</span>
         </div>
         <button
           onClick={onClose}
@@ -30,7 +31,7 @@ export default function PairDetail({ result, onGrade, onClose }: Props) {
             SPANISH SOURCE
           </div>
           <div className="bg-surface-700 rounded-lg p-3.5 text-[13px] leading-relaxed max-h-44 overflow-auto text-slate-300">
-            {result.spanish_source}
+            {sentence.spanish_source}
           </div>
         </div>
         <div>
@@ -38,7 +39,7 @@ export default function PairDetail({ result, onGrade, onClose }: Props) {
             ENGLISH REFERENCE (Gold Standard)
           </div>
           <div className="bg-surface-700 rounded-lg p-3.5 text-[13px] leading-relaxed max-h-44 overflow-auto text-cyan-200">
-            {result.english_reference}
+            {sentence.english_reference}
           </div>
         </div>
         <div>
@@ -46,7 +47,7 @@ export default function PairDetail({ result, onGrade, onClose }: Props) {
             LLM TRANSLATION
           </div>
           <div className="bg-surface-700 rounded-lg p-3.5 text-[13px] leading-relaxed max-h-44 overflow-auto text-violet-300">
-            {result.llm_english_translation || "Pending..."}
+            {sentence.llm_english_translation || "Pending..."}
           </div>
         </div>
       </div>
@@ -56,9 +57,8 @@ export default function PairDetail({ result, onGrade, onClose }: Props) {
         <div className="flex gap-3">
           {(
             [
-              ["BLEU", result._bleu],
-              ["METEOR", result._meteor],
-              ["BERTProxy", result._bert_proxy],
+              ["METEOR", sentence.meteor],
+              ["BERTScore F1", sentence.bertscore_f1],
             ] as [string, number | null][]
           ).map(([label, val]) => (
             <div
@@ -75,9 +75,15 @@ export default function PairDetail({ result, onGrade, onClose }: Props) {
           ))}
         </div>
         <div className="ml-auto">
-          <GradeSelector value={result._clinical_grade} onChange={onGrade} />
+          <GradeSelector value={grade} onChange={onGrade} />
         </div>
       </div>
+
+      {sentence.error && (
+        <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-[12px]">
+          {sentence.error}
+        </div>
+      )}
     </div>
   );
 }

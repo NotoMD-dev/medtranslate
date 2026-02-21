@@ -1,10 +1,13 @@
-import type { TranslationPair, TranslationResult } from "@/lib/types";
+import type { TranslationPair, JobResults, ClinicalGrade } from "@/lib/types";
 
 const STORAGE_KEYS = {
   data: "medtranslate:data",
   prompt: "medtranslate:prompt",
   rowLimit: "medtranslate:rowLimit",
-  results: "medtranslate:results",
+  jobId: "medtranslate:jobId",
+  jobResults: "medtranslate:jobResults",
+  grades: "medtranslate:grades",
+  csvFile: "medtranslate:csvFile",
 } as const;
 
 function canUseStorage() {
@@ -60,18 +63,54 @@ export function setSessionRowLimit(rowLimit: number | undefined) {
   writeJSON(STORAGE_KEYS.rowLimit, rowLimit);
 }
 
-// Results
-export function getSessionResults() {
-  return readJSON<TranslationResult[]>(STORAGE_KEYS.results);
+// Job ID
+export function getSessionJobId() {
+  return readJSON<string>(STORAGE_KEYS.jobId);
 }
 
-export function setSessionResults(results: TranslationResult[] | undefined) {
-  writeJSON(STORAGE_KEYS.results, results);
+export function setSessionJobId(jobId: string | undefined) {
+  writeJSON(STORAGE_KEYS.jobId, jobId);
+}
+
+// Job Results (from backend)
+export function getSessionJobResults() {
+  return readJSON<JobResults>(STORAGE_KEYS.jobResults);
+}
+
+export function setSessionJobResults(results: JobResults | undefined) {
+  writeJSON(STORAGE_KEYS.jobResults, results);
+}
+
+// Clinical grades (client-side grading persisted separately)
+export function getSessionGrades() {
+  return readJSON<Record<string, ClinicalGrade>>(STORAGE_KEYS.grades);
+}
+
+export function setSessionGrades(grades: Record<string, ClinicalGrade> | undefined) {
+  writeJSON(STORAGE_KEYS.grades, grades);
+}
+
+// CSV file name (for display only)
+export function getSessionCsvFileName() {
+  if (!canUseStorage()) return undefined;
+  return localStorage.getItem(STORAGE_KEYS.csvFile) || undefined;
+}
+
+export function setSessionCsvFileName(name: string | undefined) {
+  if (!canUseStorage()) return;
+  if (name == null) {
+    localStorage.removeItem(STORAGE_KEYS.csvFile);
+  } else {
+    localStorage.setItem(STORAGE_KEYS.csvFile, name);
+  }
 }
 
 export function clearSessionState() {
   setSessionData(undefined);
   setSessionPrompt(undefined);
   setSessionRowLimit(undefined);
-  setSessionResults(undefined);
+  setSessionJobId(undefined);
+  setSessionJobResults(undefined);
+  setSessionGrades(undefined);
+  setSessionCsvFileName(undefined);
 }

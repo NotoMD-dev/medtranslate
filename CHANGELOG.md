@@ -4,76 +4,77 @@ All notable changes to the MedTranslate project are documented in this file. The
 
 ---
 
+## [1.0.0] - 2026-02-21
+
+### Changed — Backend-Driven Architecture Migration
+
+Migrated from a demo (client-side metrics, direct OpenAI calls from Next.js API route) to a **publication-grade backend-validated architecture**. All translation and metric computation now occurs server-side in a dedicated FastAPI backend.
+
+#### Backend Added (`medtranslate-backend/`)
+
+- **FastAPI application** (`app/main.py`): Three endpoints — `POST /v1/jobs`, `GET /v1/jobs/{id}`, `GET /v1/jobs/{id}/results`
+- **Translation module** (`app/translate.py`): OpenAI Python SDK with retry logic and rate-limit awareness
+- **Metrics module** (`app/metrics.py`):
+  - Corpus BLEU via `sacrebleu` with default 13a tokenization and signature reporting
+  - Sentence-level METEOR via NLTK `single_meteor_score` with full WordNet + Porter stemming
+  - BERTScore via `bert-score` with `rescale_with_baseline=True`
+  - Library version reporting for reproducibility
+- **Job system** (`app/jobs.py`): In-memory async job store with background execution
+- **Pydantic schemas** (`app/schemas.py`): Typed request/response models
+- **Configuration** (`app/config.py`): Environment-variable-based settings
+- **Dockerfile**: Python 3.11 with NLTK data pre-downloaded
+- **requirements.txt**: fastapi, uvicorn, openai, sacrebleu, nltk, bert-score, torch, numpy, pydantic, python-multipart, pandas
+
+#### Frontend Changed
+
+- **Removed**: `app/api/translate/route.ts` — no more direct OpenAI calls from the frontend
+- **Removed**: All client-side metric computation functions from `lib/metrics.ts` (computeBLEU, computeMETEOR, computeBERTProxy, computeAllMetrics)
+- **Removed**: `openai` and `@anthropic-ai/sdk` npm dependencies
+- **Added**: `lib/api.ts` — backend API client with `submitJob()`, `pollJobStatus()`, `fetchJobResults()`, `pollUntilDone()`
+- **Updated**: `lib/types.ts` — added backend types (`JobResults`, `SentenceMetrics`, `CorpusMetrics`, `LibraryVersions`, etc.); removed `TranslationResult` and `MetricsSummary`
+- **Updated**: `lib/session.ts` — stores `jobId`, `jobResults`, and clinical `grades` instead of `TranslationResult[]`
+- **Updated**: `lib/csv.ts` — added `pairsToCSVFile()` for backend upload; updated `exportResultsCSV()` for new data model
+- **Updated**: `app/translate/page.tsx` — submits jobs to backend, polls progress, displays backend results
+- **Updated**: `app/metrics/page.tsx` — displays corpus BLEU from sacrebleu, sentence METEOR/BERTScore, library versions
+- **Updated**: `app/review/page.tsx` — uses backend sentence metrics for review flagging
+- **Updated**: `components/PairDetail.tsx` — uses `SentenceMetrics` type with METEOR and BERTScore F1
+- **Added**: `.env.example` with `NEXT_PUBLIC_BACKEND_URL`
+
+#### Documentation Updated
+
+- `ARCHITECTURE.md` — Added backend service diagram, removed client-side metrics description
+- `API_SPEC.md` — Documented all job endpoints (`POST /v1/jobs`, `GET /v1/jobs/{id}`, `GET /v1/jobs/{id}/results`)
+- `METRICS_VALIDATION.md` — Recorded library versions, documented reproducibility strategy
+- `DATA_SCHEMA.md` — Added `JobResults`, `CorpusMetrics`, `SentenceMetrics` structures
+- `SECURITY.md` — Documented: no API keys client-side, HTTPS required, no persistent PHI storage, log scrubbing
+- `CHANGELOG.md` — This entry
+- `README.md` — Added local run instructions for both services, Render deployment steps
+
+---
+
 ## [0.1.0] - 2026-02-21
 
 ### Added
 
-- **Initial platform release**: Full clinical translation research platform for evaluating LLM-generated Spanish-to-English medical translations.
+- **Initial platform release**: Full clinical translation research platform with client-side metrics (demo grade).
 
 #### Web Application
-- **Upload page** (`app/page.tsx`): CSV and XLSX file upload with drag-and-drop support, system prompt configuration, and configurable row limits.
-- **Translate page** (`app/translate/page.tsx`): Batch translation runner with live progress bar, per-row status tracking, abort capability, and CSV export.
-- **Review page** (`app/review/page.tsx`): Clinical safety review interface that surfaces translation pairs with BLEU < 0.4 for physician adjudication using the 0–3 Clinical Significance Scale.
-- **Metrics page** (`app/metrics/page.tsx`): Aggregate metrics dashboard showing mean BLEU, METEOR, and BERTProxy scores, clinical grade distributions, and source-level performance comparisons.
-- **Translation API route** (`app/api/translate/route.ts`): Server-side endpoint supporting both OpenAI and Anthropic LLM providers with automatic routing based on model name.
-
-#### Components
-- `Header`: Navigation bar with Upload/Translate/Review/Metrics workflow tabs.
-- `MetricsCard`: Metric value display card with label, mean, and sample count.
-- `PairDetail`: Three-column detail panel showing Spanish source, English reference, and LLM translation with inline metric scores and grade selector.
-- `GradeSelector`: Four-button control for assigning clinical significance grades 0–3.
-- `StatusPill`: Colored status badge (pending, translating, scoring, complete, error).
+- Upload page with CSV/XLSX support, drag-and-drop, system prompt configuration, row limits
+- Translate page with batch translation, live progress, per-row status tracking
+- Review page with BLEU-based flagging and clinical significance grading
+- Metrics page with aggregate scores and source-level comparisons
+- Translation API route supporting both OpenAI and Anthropic providers
 
 #### Libraries
-- `lib/metrics.ts`: Client-side BLEU (with Method 1 smoothing), METEOR (with fragmentation penalty), and BERTProxy (n-gram cosine similarity) implementations.
-- `lib/csv.ts`: CSV parsing, XLSX parsing, CSV export, and browser file download utilities.
-- `lib/session.ts`: localStorage-based session state persistence for data, prompt, row limit, and results.
-- `lib/types.ts`: TypeScript interfaces for `TranslationPair`, `TranslationResult`, `ClinicalGrade`, `MetricsSummary`, and `TranslationConfig`.
+- `lib/metrics.ts`: Client-side BLEU, METEOR, BERTProxy (n-gram cosine similarity)
+- `lib/csv.ts`: CSV/XLSX parsing and export
+- `lib/session.ts`: localStorage persistence
 
 #### Python Scripts
-- `scripts/build_dataset.py`: Unified corpus builder that combines ClinSpEn clinical case reports and UMass EHR pairs into a single normalized CSV.
-- `scripts/translate_batch.py`: Headless batch translation runner with checkpoint support (every 50 rows), configurable delay, start index, and row limit.
-- `scripts/metrics/compute_all.py`: Research-grade metrics pipeline computing BLEU (NLTK), METEOR (NLTK with WordNet), and BERTScore (precision, recall, F1) with per-source breakdowns.
-
-#### Configuration
-- Next.js 15 with App Router and 10 MB body size limit.
-- Tailwind CSS with custom dark theme (surface colors, accent colors, clinical grade colors).
-- IBM Plex Sans and IBM Plex Mono typography via Google Fonts.
-- `.env.example` template for API key configuration.
-- `.gitignore` covering environment files, data files, build artifacts, and IDE files.
+- `scripts/build_dataset.py`: Corpus unification
+- `scripts/translate_batch.py`: Headless batch translation
+- `scripts/metrics/compute_all.py`: Research-grade metrics pipeline
 
 ### Fixed
-
-- **BLEU smoothing alignment** (`f8b09e0`): Added Method 1 smoothing to client-side BLEU computation to match the Python NLTK backend, preventing sentence-level BLEU from collapsing to zero when any n-gram order has no matches.
-
-- **State persistence across tabs** (`13011f8`, `6db2980`): Fixed state loss when navigating between Upload, Translate, Review, and Metrics tabs. Translation results, system prompt, and uploaded data now persist across tab navigation via localStorage.
-
-- **Session persistence across page reloads** (`5d2f92e`, `9e85cf2`, `f4ad59d`): Implemented localStorage-based session management so that translation progress, uploaded datasets, and configuration survive page refreshes and browser restarts.
-
-- **Metrics page wiring** (`6db2980`): Connected the Metrics page to the shared session store so it correctly reads completed translation results and computes aggregate statistics.
-
-### Enhanced
-
-- **XLSX upload support** (`18084aa`): Added support for uploading `.xlsx` and `.xls` files in addition to `.csv`, using the `xlsx` library for parsing.
-- **File delete** (`18084aa`): Added a "Remove file" button on the Upload page to clear the current dataset and reset session state.
-- **Custom row limit** (`18084aa`): Added the ability to select "Entire file" or "Custom number of rows" before starting batch translation, allowing researchers to run partial experiments.
-
----
-
-## Version History Summary
-
-| Date | Commit | Change |
-|---|---|---|
-| 2026-02-20 | `f436f22` | Initial commit: full platform with all pages, components, libraries, and scripts |
-| 2026-02-20 | `8509136` | Updated `.env.example` template |
-| 2026-02-20 | `a7e8296` | Regenerated lockfile after merge |
-| 2026-02-21 | `18084aa` | Added XLSX upload support, file delete, and custom row limit |
-| 2026-02-21 | `9f87cc7` | Added `next-env.d.ts` generated by Next.js build |
-| 2026-02-21 | `f587ece` | Expanded architecture and metric documentation in README |
-| 2026-02-21 | `8e6dc76` | Committed lockfile, TypeScript version pin, and tsbuildinfo |
-| 2026-02-21 | `6db2980` | Fixed state persistence across tab navigation and wired up Metrics page |
-| 2026-02-21 | `13011f8` | Persisted translation state across tabs and pages |
-| 2026-02-21 | `f8b09e0` | Added Method 1 smoothing to client-side BLEU to match Python backend |
-| 2026-02-20 | `9e85cf2` | Updated translate page for data persistence |
-| 2026-02-20 | `5d2f92e` | Updated session library for cross-session persistence |
-| 2026-02-21 | `f4ad59d` | Improved translation page state persistence during navigation |
+- BLEU smoothing alignment with Python backend
+- State persistence across tabs and page reloads

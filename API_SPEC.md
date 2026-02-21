@@ -1,47 +1,63 @@
 # API Specification
 
-This document describes the HTTP API exposed by MedTranslate. The application has a single API endpoint used for translating Spanish clinical text into English via LLM providers.
+This document describes the HTTP API exposed by the MedTranslate backend (FastAPI). The backend handles all translation and metric computation. The frontend submits jobs, polls status, and fetches results.
 
-## Base URL
+## Base URLs
 
 ```
-http://localhost:3000   (development)
+http://localhost:8000       (local development)
+https://your-app.onrender.com  (production — Render)
 ```
 
 ---
 
-## `POST /api/translate`
+## `POST /v1/jobs`
 
-Translates a single Spanish clinical text string into English using the specified LLM provider.
+Submit a CSV file and model configuration to start a translation + metrics job.
 
-**Source file**: `app/api/translate/route.ts`
+**Source file**: `medtranslate-backend/app/main.py`
 
 ### Request
 
-**Content-Type**: `application/json`
+**Content-Type**: `multipart/form-data`
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `text` | `string` | Yes | — | The Spanish clinical text to translate |
-| `systemPrompt` | `string` | No | *(see below)* | System prompt instructing the LLM on translation behavior |
-| `model` | `string` | No | `"gpt-4o"` (OpenAI) or `"claude-sonnet-4-20250514"` (Anthropic) | The LLM model identifier |
+| `file` | file (CSV) | Yes | — | CSV file with at least a `spanish_source` column |
+| `model` | string | No | `"gpt-4o"` | OpenAI model identifier |
+| `system_prompt` | string | No | *(medical interpreter prompt)* | System prompt for the LLM |
+| `temperature` | float | No | `0.0` | Sampling temperature |
+| `max_tokens` | int | No | `1024` | Maximum tokens in the LLM response |
 
-**Default system prompt** (used by the UI if not overridden):
+**Required CSV columns**: `spanish_source`
 
+**Optional CSV columns**: `pair_id`, `source`, `content_type`, `english_reference`, `llm_english_translation`
+
+### Response — Success
+
+**Status**: `202 Accepted`
+
+```json
+{
+  "job_id": "a1b2c3d4e5f6"
+}
 ```
-You are a medical interpreter. Translate the following Spanish clinical text
-into English, preserving all medical terminology and clinical meaning.
-Output ONLY the English translation, nothing else.
+
+### Response — Error
+
+**Status**: `400 Bad Request`
+
+```json
+{
+  "detail": "CSV must contain a \"spanish_source\" column"
+}
 ```
 
-### Provider Routing
+---
 
-The API route determines the provider based on the `model` field:
+## `GET /v1/jobs/{job_id}`
 
-| Condition | Provider | API Endpoint |
-|---|---|---|
-| `model` starts with `"claude"` | Anthropic | `https://api.anthropic.com/v1/messages` |
-| All other values | OpenAI | `https://api.openai.com/v1/chat/completions` |
+Poll the status and progress of a running job.
 
 ### Response — Success
 
@@ -49,164 +65,156 @@ The API route determines the provider based on the `model` field:
 
 ```json
 {
-  "translation": "The patient presents with acute abdominal pain..."
+  "job_id": "a1b2c3d4e5f6",
+  "status": "running",
+  "total": 1000,
+  "translated": 450,
+  "scored": 320,
+  "failed_rows": 2,
+  "error": null
 }
 ```
 
 | Field | Type | Description |
 |---|---|---|
-| `translation` | `string` | The English translation returned by the LLM |
+| `job_id` | string | The job identifier |
+| `status` | string | One of: `queued`, `running`, `complete`, `failed` |
+| `total` | int | Total rows in the dataset |
+| `translated` | int | Rows translated so far |
+| `scored` | int | Rows with metrics computed so far |
+| `failed_rows` | int | Rows that failed translation |
+| `error` | string \| null | Error message if status is `failed` |
 
-### Response — Validation Error
+### Response — Not Found
 
-**Status**: `400 Bad Request`
-
-Returned when the `text` field is missing or empty.
-
-```json
-{
-  "error": "Missing text"
-}
-```
-
-### Response — Configuration Error
-
-**Status**: `500 Internal Server Error`
-
-Returned when the required API key environment variable is not set.
+**Status**: `404 Not Found`
 
 ```json
 {
-  "error": "OPENAI_API_KEY not configured"
-}
-```
-
-```json
-{
-  "error": "ANTHROPIC_API_KEY not configured"
-}
-```
-
-### Response — Provider Error
-
-**Status**: `500 Internal Server Error`
-
-Returned when the upstream LLM API returns a non-OK response.
-
-```json
-{
-  "error": "OpenAI API error: 429 {\"error\":{\"message\":\"Rate limit exceeded\"}}"
-}
-```
-
-```json
-{
-  "error": "Anthropic API error: 400 {\"error\":{\"message\":\"Invalid model\"}}"
+  "detail": "Job not found"
 }
 ```
 
 ---
 
-## Provider API Details
+## `GET /v1/jobs/{job_id}/results`
 
-### OpenAI
+Retrieve complete results after a job finishes.
 
-The route calls the OpenAI Chat Completions API with the following parameters:
+### Response — Success
 
-| Parameter | Value |
+**Status**: `200 OK`
+
+```json
+{
+  "job_id": "a1b2c3d4e5f6",
+  "status": "complete",
+  "corpus_metrics": {
+    "overall": {
+      "bleu_score": 42.31,
+      "bleu_signature": "BLEU = 42.31 65.2/48.3/37.1/29.0 (BP = 0.987 ...)"
+    },
+    "clinspen": {
+      "bleu_score": 44.56,
+      "bleu_signature": "BLEU = 44.56 ..."
+    },
+    "umass": {
+      "bleu_score": 39.12,
+      "bleu_signature": "BLEU = 39.12 ..."
+    }
+  },
+  "sentence_metrics": [
+    {
+      "pair_id": "clinspen_doc1_L5",
+      "source": "ClinSpEn_ClinicalCases",
+      "content_type": "clinical_case_report",
+      "spanish_source": "El paciente presenta dolor abdominal agudo...",
+      "english_reference": "The patient presents with acute abdominal pain...",
+      "llm_english_translation": "The patient presents with acute abdominal pain...",
+      "meteor": 0.8723,
+      "bertscore_f1": 0.9234,
+      "error": null
+    }
+  ],
+  "library_versions": {
+    "sacrebleu": "2.4.3",
+    "nltk": "3.9.1",
+    "bert_score": "0.3.13",
+    "torch": "2.5.1"
+  },
+  "model_config": {
+    "model": "gpt-4o",
+    "system_prompt": "You are a medical interpreter...",
+    "temperature": 0.0,
+    "max_tokens": 1024
+  }
+}
+```
+
+### Key Fields
+
+| Field | Description |
 |---|---|
-| `model` | Passed from request (default: `"gpt-4o"`) |
-| `temperature` | `0` (deterministic output) |
-| `max_tokens` | `1024` |
-| `messages[0]` | `{ role: "system", content: systemPrompt }` |
-| `messages[1]` | `{ role: "user", content: text }` |
-
-**Authentication**: `Authorization: Bearer ${OPENAI_API_KEY}`
-
-### Anthropic
-
-The route calls the Anthropic Messages API with the following parameters:
-
-| Parameter | Value |
-|---|---|
-| `model` | Passed from request (default: `"claude-sonnet-4-20250514"`) |
-| `max_tokens` | `1024` |
-| `system` | `systemPrompt` |
-| `messages[0]` | `{ role: "user", content: text }` |
-
-**Authentication**: `x-api-key: ${ANTHROPIC_API_KEY}`, `anthropic-version: 2023-06-01`
+| `corpus_metrics.overall` | Corpus-level BLEU for the entire dataset (sacrebleu) |
+| `corpus_metrics.clinspen` | Corpus BLEU for ClinSpEn rows only |
+| `corpus_metrics.umass` | Corpus BLEU for UMass rows only |
+| `sentence_metrics[].meteor` | Per-sentence METEOR (NLTK, with WordNet + stemming) |
+| `sentence_metrics[].bertscore_f1` | Per-sentence BERTScore F1 (rescaled with baseline) |
+| `library_versions` | Exact library versions for reproducibility reporting |
 
 ---
 
 ## Environment Variables
 
-| Variable | Required For | Description |
-|---|---|---|
-| `OPENAI_API_KEY` | OpenAI models | OpenAI API key (starts with `sk-`) |
-| `ANTHROPIC_API_KEY` | Anthropic models | Anthropic API key (starts with `sk-ant-`) |
+### Backend
 
-These must be set in `.env.local` (gitignored). A template is provided in `.env.example`.
+| Variable | Required | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | Yes | OpenAI API key for translations |
+| `CORS_ORIGINS` | No | Comma-separated allowed origins (defaults to localhost:3000) |
+| `DEFAULT_MODEL` | No | Default model name (defaults to `gpt-4o`) |
+
+### Frontend
+
+| Variable | Required | Description |
+|---|---|---|
+| `NEXT_PUBLIC_BACKEND_URL` | Yes | URL of the FastAPI backend |
+
+---
+
+## Metric Computation Details
+
+### Corpus BLEU
+
+- Library: `sacrebleu`
+- Tokenization: 13a (default)
+- Returns score and full signature string
+- Computed for: overall, ClinSpEn-only, UMass-only
+- Sentence-level BLEU is NOT used for publication results
+
+### METEOR
+
+- Library: `nltk.translate.meteor_score.single_meteor_score`
+- Includes: WordNet synonym matching, Porter stemming, alignment penalty
+- Computed per sentence
+
+### BERTScore
+
+- Library: `bert-score`
+- `rescale_with_baseline=True`
+- Returns F1 score per sentence
+- Library versions recorded for reproducibility
 
 ---
 
 ## Client Usage
 
-The web UI calls this endpoint from `app/translate/page.tsx` during batch translation:
-
 ```typescript
-const resp = await fetch("/api/translate", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    text: row.spanish_source,
-    systemPrompt,
-    model: "gpt-4o",
-  }),
-});
+import { submitJob, pollUntilDone } from "@/lib/api";
 
-const data = await resp.json();
-// data.translation contains the English translation
-// data.error contains an error message if the request failed
+const { job_id } = await submitJob(csvFile, config);
+const results = await pollUntilDone(job_id, onStatus);
+// results.corpus_metrics, results.sentence_metrics, etc.
 ```
 
-Translations are executed sequentially (one row at a time) with no built-in retry logic. The UI tracks success and failure states per row and allows the user to abort the batch at any point.
-
----
-
-## Rate Limits and Throughput
-
-The API does not implement its own rate limiting. Throughput is constrained by the upstream LLM provider's rate limits:
-
-- **OpenAI**: Varies by plan and model. Typically 500–10,000 RPM for paid accounts.
-- **Anthropic**: Varies by tier. Typically 50–4,000 RPM.
-
-The Python batch script (`scripts/translate_batch.py`) includes a configurable `--delay` parameter (default 0.1s) between API calls to help manage rate limits during large-scale offline runs.
-
----
-
-## Offline Translation Script
-
-For headless batch translation without the web UI, use `scripts/translate_batch.py`:
-
-```bash
-python scripts/translate_batch.py \
-  --input data/unified_translation_dataset.csv \
-  --output data/results_with_translations.csv \
-  --model gpt-4o \
-  --api openai \
-  --delay 0.1 \
-  --start 0 \
-  --limit 100
-```
-
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--input` | `string` | *(required)* | Input CSV file path |
-| `--output` | `string` | *(required)* | Output CSV file path |
-| `--model` | `string` | `"gpt-4o"` | Model name |
-| `--api` | `string` | `"openai"` | Provider (`openai` or `anthropic`) |
-| `--start` | `int` | `0` | Row index to start from (for resuming) |
-| `--limit` | `int` | `None` | Maximum rows to translate |
-| `--delay` | `float` | `0.1` | Seconds between API calls |
-
-The script checkpoints progress to the output file every 50 rows, allowing resumption from the last checkpoint if interrupted.
+No metrics are computed client-side. All values displayed in the UI come from the backend.
