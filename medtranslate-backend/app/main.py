@@ -36,7 +36,7 @@ app.add_middleware(
 @app.post("/v1/jobs", response_model=JobCreated, status_code=202)
 async def submit_job(
     file: UploadFile = File(...),
-    model: str = Form("gpt-4o"),
+    model: str = Form("5.2"),
     system_prompt: str = Form(DEFAULT_SYSTEM_PROMPT),
     temperature: float = Form(0.0),
     max_tokens: int = Form(1024),
