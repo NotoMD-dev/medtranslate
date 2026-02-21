@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional
@@ -70,9 +71,40 @@ class Job:
 
 _jobs: dict[str, Job] = {}
 
+# ---------------------------------------------------------------------------
+# Global rate limiter (token-bucket) — limits requests/second across all jobs
+# ---------------------------------------------------------------------------
+
+class _RateLimiter:
+    """Async token-bucket rate limiter."""
+
+    def __init__(self, rate: float):
+        self._rate = rate  # tokens (requests) per second
+        self._tokens = rate
+        self._last = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last
+            self._tokens = min(self._rate, self._tokens + elapsed * self._rate)
+            self._last = now
+
+            if self._tokens < 1.0:
+                wait = (1.0 - self._tokens) / self._rate
+                await asyncio.sleep(wait)
+                self._tokens = 0.0
+                self._last = time.monotonic()
+            else:
+                self._tokens -= 1.0
+
+
+# Default lowered slightly for stability; override in Render env vars.
+_GLOBAL_RATE = float(os.getenv("TRANSLATE_REQUESTS_PER_SECOND", "1"))
+_rate_limiter = _RateLimiter(_GLOBAL_RATE)
+
 # Only one job executes at a time to avoid compounding rate-limit pressure.
-# The per-request token-bucket rate limiter now lives in translate.py so that
-# every API call (including retries) is gated.
 _job_lock = asyncio.Lock()
 
 
@@ -149,7 +181,9 @@ async def _execute_job_inner(job_id: str, job: Job) -> None:
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TRANSLATIONS)
 
     async def _translate_one(index: int, row: InputRow):
+        # Important: acquire semaphore first, THEN rate-limit right before the outbound call.
         async with semaphore:
+            await _rate_limiter.acquire()
             try:
                 translation = await translate_text(
                     row.spanish_source,
