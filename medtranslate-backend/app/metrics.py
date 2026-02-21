@@ -8,16 +8,17 @@ from typing import Optional
 
 import nltk
 import sacrebleu
+from nltk.tokenize import word_tokenize
 from nltk.translate.meteor_score import meteor_score
 
 logger = logging.getLogger(__name__)
 
 # Ensure required NLTK resources
-for resource in ("wordnet", "omw-1.4", "punkt"):
+for resource in ("wordnet", "omw-1.4", "punkt_tab"):
     try:
         nltk.data.find(
             f"corpora/{resource}"
-            if resource != "punkt"
+            if resource != "punkt_tab"
             else f"tokenizers/{resource}"
         )
     except LookupError:
@@ -33,7 +34,7 @@ def compute_corpus_bleu(
     references: list[str],
 ) -> tuple[float, str]:
     bleu = sacrebleu.corpus_bleu(hypotheses, [references])
-    return bleu.score, bleu.signature
+    return bleu.score, bleu.format()
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +48,7 @@ def compute_meteor(candidate: str, reference: str) -> float:
     if not candidate or not reference:
         return 0.0
 
-    return float(meteor_score([reference], candidate))
+    return float(meteor_score([word_tokenize(reference)], word_tokenize(candidate)))
 
 
 # ---------------------------------------------------------------------------
