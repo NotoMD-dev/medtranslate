@@ -6,15 +6,16 @@ import MetricsCard from "@/components/MetricsCard";
 import { CLINICAL_GRADES } from "@/lib/types";
 import { summarizeMetric } from "@/lib/metrics";
 import type { JobResults, ClinicalGrade } from "@/lib/types";
-import { getSessionJobResults, getSessionGrades } from "@/lib/session";
+import { getSessionJobResultsAsync, getSessionGrades } from "@/lib/session";
 
 export default function MetricsPage() {
   const [jobResults, setJobResults] = useState<JobResults | null>(null);
   const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
 
   useEffect(() => {
-    const persisted = getSessionJobResults();
-    if (persisted) setJobResults(persisted);
+    getSessionJobResultsAsync().then((persisted) => {
+      if (persisted) setJobResults(persisted);
+    });
     const persistedGrades = getSessionGrades();
     if (persistedGrades) setGrades(persistedGrades);
   }, []);

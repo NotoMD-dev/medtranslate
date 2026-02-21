@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import Header from "@/components/Header";
 import PairDetail from "@/components/PairDetail";
 import { CLINICAL_GRADES } from "@/lib/types";
-import { getSessionJobResults, getSessionGrades, setSessionGrades } from "@/lib/session";
+import { getSessionJobResultsAsync, getSessionGrades, setSessionGrades } from "@/lib/session";
 import type { JobResults, SentenceMetrics, ClinicalGrade } from "@/lib/types";
 
 export default function ReviewPage() {
@@ -13,8 +13,9 @@ export default function ReviewPage() {
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
 
   useEffect(() => {
-    const persisted = getSessionJobResults();
-    if (persisted) setJobResults(persisted);
+    getSessionJobResultsAsync().then((persisted) => {
+      if (persisted) setJobResults(persisted);
+    });
     const persistedGrades = getSessionGrades();
     if (persistedGrades) setGrades(persistedGrades);
   }, []);
