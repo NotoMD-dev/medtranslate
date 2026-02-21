@@ -220,7 +220,7 @@ export default function TranslatePage() {
           <div className="bg-surface-800 rounded-[14px] border border-surface-700 p-16 text-center">
             <div className="text-slate-500 text-lg mb-2">No dataset loaded</div>
             <p className="text-slate-600 text-sm">
-              Go to the Upload tab to load your CSV first.
+              Go to the Upload tab to load your CSV or XLSX first.
             </p>
           </div>
         )}
