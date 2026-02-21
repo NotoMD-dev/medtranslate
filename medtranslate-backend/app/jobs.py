@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional
@@ -70,6 +71,41 @@ class Job:
 
 _jobs: dict[str, Job] = {}
 
+# ---------------------------------------------------------------------------
+# Global rate limiter (token-bucket) — limits requests/second across all jobs
+# ---------------------------------------------------------------------------
+
+class _RateLimiter:
+    """Async token-bucket rate limiter."""
+
+    def __init__(self, rate: float):
+        self._rate = rate  # tokens (requests) per second
+        self._tokens = rate
+        self._last = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last
+            self._tokens = min(self._rate, self._tokens + elapsed * self._rate)
+            self._last = now
+
+            if self._tokens < 1.0:
+                wait = (1.0 - self._tokens) / self._rate
+                await asyncio.sleep(wait)
+                self._tokens = 0.0
+                self._last = time.monotonic()
+            else:
+                self._tokens -= 1.0
+
+
+_GLOBAL_RATE = float(os.getenv("TRANSLATE_REQUESTS_PER_SECOND", "3"))
+_rate_limiter = _RateLimiter(_GLOBAL_RATE)
+
+# Only one job executes at a time to avoid compounding rate-limit pressure.
+_job_lock = asyncio.Lock()
+
 
 def create_job(rows: list[InputRow], config: ModelConfig) -> str:
     job_id = uuid.uuid4().hex[:12]
@@ -120,6 +156,12 @@ async def execute_job(job_id: str) -> None:
     if job is None:
         return
 
+    # Wait for any other running job to finish before starting.
+    async with _job_lock:
+        await _execute_job_inner(job_id, job)
+
+
+async def _execute_job_inner(job_id: str, job: Job) -> None:
     job.status = JobStatus.running
     total = len(job.rows)
     logger.info("Job %s: starting (%d rows)", job_id, total)
@@ -132,14 +174,18 @@ async def execute_job(job_id: str) -> None:
 
     # Tunable concurrency controls
     MAX_CONCURRENT_TRANSLATIONS = int(
-        os.getenv("MAX_CONCURRENT_TRANSLATIONS", "10")
+        os.getenv("MAX_CONCURRENT_TRANSLATIONS", "3")
     )
     CHUNK_SIZE = int(
-        os.getenv("TRANSLATION_CHUNK_SIZE", "200")
+        os.getenv("TRANSLATION_CHUNK_SIZE", "50")
+    )
+    INTER_CHUNK_DELAY = float(
+        os.getenv("TRANSLATION_INTER_CHUNK_DELAY", "1.0")
     )
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TRANSLATIONS)
 
     async def _translate_one(index: int, row: InputRow):
+        await _rate_limiter.acquire()
         async with semaphore:
             try:
                 translation = await translate_text(
@@ -210,7 +256,9 @@ async def execute_job(job_id: str) -> None:
                     error=error,
                 )
 
-        await asyncio.sleep(0)
+        # Pause between chunks to avoid rate-limit pressure
+        if end < total:
+            await asyncio.sleep(INTER_CHUNK_DELAY)
 
     # ------------------------------------------------------------------
     # Phase 2: METEOR (moved entirely off event loop)
