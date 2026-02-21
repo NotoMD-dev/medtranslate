@@ -24,10 +24,10 @@ class JobStatus(str, Enum):
 # ---------------------------------------------------------------------------
 
 class ModelConfig(BaseModel):
-    model: str = "gpt-4o"
+    model: str = "gpt-5.2"
     system_prompt: Optional[str] = None
     temperature: float = 0.0
-    max_tokens: int = 1024
+    max_tokens: int = 512
     compute_bertscore: bool = False  # opt-in: avoids ~400MB torch load
 
 

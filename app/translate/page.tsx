@@ -31,11 +31,23 @@ export default function TranslatePage() {
   const [computeBertscore, setComputeBertscore] = useState(false);
   const abortRef = useRef(false);
 
-  // Restore persisted job results on mount
+  // Restore persisted job results on mount.
+  // Check synchronously first whether a job might still be running so we
+  // can block the Run button *before* the async IndexedDB read resolves.
+  // This closes the race window where a user could accidentally submit a
+  // second job during the brief async gap.
   useEffect(() => {
     const persistedGrades = getSessionGrades();
     if (persistedGrades) {
       setGrades(persistedGrades);
+    }
+
+    // If a job ID exists in session, assume it may still be running and
+    // disable the Run button immediately (will be corrected once the
+    // async read finishes).
+    const pendingJobId = getSessionJobId();
+    if (pendingJobId) {
+      setPageState("running");
     }
 
     // Load results async (IndexedDB first, then localStorage fallback)
@@ -50,12 +62,15 @@ export default function TranslatePage() {
       } else {
         const data = getSessionData();
         if (data) setRowCount(data.length);
-      }
 
-      // If there's a running job, resume polling
-      const jobId = getSessionJobId();
-      if (jobId && (!persistedResults || (persistedResults.status !== "complete" && persistedResults.status !== "failed"))) {
-        resumePolling(jobId);
+        // Only resume polling if the job hasn't finished
+        if (pendingJobId) {
+          resumePolling(pendingJobId);
+          return; // pageState is already "running"
+        }
+
+        // No pending job — allow interaction
+        setPageState("idle");
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,10 +124,10 @@ export default function TranslatePage() {
       const csvFile = pairsToCSVFile(data);
 
       const { job_id } = await submitJob(csvFile, {
-        model: "gpt-4o",
+        model: "gpt-5.2",
         systemPrompt,
         temperature: 0,
-        maxTokens: 1024,
+        maxTokens: 512,
         computeBertscore,
       });
 
