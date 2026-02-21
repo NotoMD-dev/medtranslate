@@ -128,16 +128,15 @@ async def execute_job(job_id: str) -> None:
     model = job.model_config.model
     temperature = job.model_config.temperature
     max_tokens = job.model_config.max_tokens
-    compute_bertscore = getattr(job.model_config, "compute_bertscore", True)
+    compute_bertscore = getattr(job.model_config, "compute_bertscore", False)
 
     # Tunable concurrency controls
-    
     MAX_CONCURRENT_TRANSLATIONS = int(
-    os.getenv("MAX_CONCURRENT_TRANSLATIONS", "10")
-)
+        os.getenv("MAX_CONCURRENT_TRANSLATIONS", "10")
+    )
     CHUNK_SIZE = int(
-    os.getenv("TRANSLATION_CHUNK_SIZE", "200")
-)
+        os.getenv("TRANSLATION_CHUNK_SIZE", "200")
+    )
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TRANSLATIONS)
 
     async def _translate_one(index: int, row: InputRow):
@@ -154,8 +153,23 @@ async def execute_job(job_id: str) -> None:
             except Exception as exc:
                 return index, "", str(exc)
 
+    # Pre-populate sentence_metrics with all rows (pending state)
+    # so the frontend can display the table immediately during polling.
+    job.sentence_metrics = [
+        SentenceMetrics(
+            pair_id=row.pair_id,
+            source=row.source,
+            content_type=row.content_type,
+            spanish_source=row.spanish_source,
+            english_reference=row.english_reference,
+            llm_english_translation="",
+        )
+        for row in job.rows
+    ]
+
     # ------------------------------------------------------------------
     # Phase 1: Concurrent translation (chunked)
+    # Sentence metrics are updated incrementally as translations complete.
     # ------------------------------------------------------------------
     for start in range(0, total, CHUNK_SIZE):
         end = min(start + CHUNK_SIZE, total)
@@ -173,20 +187,27 @@ async def execute_job(job_id: str) -> None:
             if error is None:
                 row.llm_english_translation = translation
                 job.translated += 1
+                # Update sentence_metrics in-place for real-time display
+                job.sentence_metrics[index] = SentenceMetrics(
+                    pair_id=row.pair_id,
+                    source=row.source,
+                    content_type=row.content_type,
+                    spanish_source=row.spanish_source,
+                    english_reference=row.english_reference,
+                    llm_english_translation=translation,
+                )
             else:
                 logger.error("Job %s row %d translation failed: %s", job_id, index, error)
                 row.llm_english_translation = ""
                 job.failed_rows += 1
-                job.sentence_metrics.append(
-                    SentenceMetrics(
-                        pair_id=row.pair_id,
-                        source=row.source,
-                        content_type=row.content_type,
-                        spanish_source=row.spanish_source,
-                        english_reference=row.english_reference,
-                        llm_english_translation="",
-                        error=error,
-                    )
+                job.sentence_metrics[index] = SentenceMetrics(
+                    pair_id=row.pair_id,
+                    source=row.source,
+                    content_type=row.content_type,
+                    spanish_source=row.spanish_source,
+                    english_reference=row.english_reference,
+                    llm_english_translation="",
+                    error=error,
                 )
 
         await asyncio.sleep(0)
@@ -214,72 +235,21 @@ async def execute_job(job_id: str) -> None:
     meteor_scores = await asyncio.to_thread(_meteor_pass, successfully_translated)
     job.scored = len(meteor_scores)
 
-    # ------------------------------------------------------------------
-    # Phase 3: BERTScore (optional)
-    # ------------------------------------------------------------------
-    candidates_for_bert = [
-        row.llm_english_translation for _, row in successfully_translated
-    ]
-    references_for_bert = [
-        row.english_reference for _, row in successfully_translated
-    ]
-
-    if compute_bertscore:
-        logger.info("Job %s: computing BERTScore", job_id)
-        try:
-            bert_f1_scores = await asyncio.to_thread(
-                compute_bertscore_batch,
-                candidates_for_bert,
-                references_for_bert,
-            )
-        except Exception as exc:
-            logger.error("Job %s BERTScore batch failed: %s", job_id, exc)
-            bert_f1_scores = [None] * len(candidates_for_bert)
-    else:
-        logger.info("Job %s: skipping BERTScore (toggle off)", job_id)
-        bert_f1_scores = [None] * len(candidates_for_bert)
-
-    # ------------------------------------------------------------------
-    # Phase 4: Build sentence metrics
-    # ------------------------------------------------------------------
-    sentence_metrics_map: dict[str, SentenceMetrics] = {}
-
-    # Preserve earlier translation failures
-    for sm in job.sentence_metrics:
-        sentence_metrics_map[sm.pair_id] = sm
-
+    # Update sentence_metrics with METEOR scores
     for idx, (i, row) in enumerate(successfully_translated):
-        sentence_metrics_map[row.pair_id] = SentenceMetrics(
+        meteor_val = meteor_scores[idx] if idx < len(meteor_scores) else None
+        job.sentence_metrics[i] = SentenceMetrics(
             pair_id=row.pair_id,
             source=row.source,
             content_type=row.content_type,
             spanish_source=row.spanish_source,
             english_reference=row.english_reference,
             llm_english_translation=row.llm_english_translation,
-            meteor=meteor_scores[idx] if idx < len(meteor_scores) else None,
-            bertscore_f1=float(bert_f1_scores[idx]) if idx < len(bert_f1_scores) and bert_f1_scores[idx] is not None else None,
+            meteor=meteor_val,
         )
 
-    # Ensure all rows present
-    for row in job.rows:
-        if row.pair_id not in sentence_metrics_map:
-            sentence_metrics_map[row.pair_id] = SentenceMetrics(
-                pair_id=row.pair_id,
-                source=row.source,
-                content_type=row.content_type,
-                spanish_source=row.spanish_source,
-                english_reference=row.english_reference,
-                llm_english_translation=row.llm_english_translation,
-            )
-
-    job.sentence_metrics = [
-        sentence_metrics_map[row.pair_id]
-        for row in job.rows
-        if row.pair_id in sentence_metrics_map
-    ]
-
     # ------------------------------------------------------------------
-    # Phase 5: Corpus BLEU
+    # Phase 3: Corpus BLEU (sacrebleu) — computed BEFORE optional BERTScore
     # ------------------------------------------------------------------
     logger.info("Job %s: computing corpus BLEU", job_id)
 
@@ -337,7 +307,51 @@ async def execute_job(job_id: str) -> None:
     )
 
     # ------------------------------------------------------------------
-    # Phase 6: Version capture
+    # Phase 4: BERTScore (optional — only if user toggled it on)
+    # This is the expensive step (~400MB torch load).
+    # ------------------------------------------------------------------
+    if compute_bertscore:
+        logger.info("Job %s: computing BERTScore (user opted in)", job_id)
+        candidates_for_bert = [
+            row.llm_english_translation for _, row in successfully_translated
+        ]
+        references_for_bert = [
+            row.english_reference for _, row in successfully_translated
+        ]
+
+        try:
+            bert_f1_scores = await asyncio.to_thread(
+                compute_bertscore_batch,
+                candidates_for_bert,
+                references_for_bert,
+            )
+        except Exception as exc:
+            logger.error("Job %s BERTScore batch failed: %s", job_id, exc)
+            bert_f1_scores = [None] * len(candidates_for_bert)
+
+        # Update sentence_metrics with BERTScore
+        for idx, (i, row) in enumerate(successfully_translated):
+            existing = job.sentence_metrics[i]
+            bert_val = (
+                float(bert_f1_scores[idx])
+                if idx < len(bert_f1_scores) and bert_f1_scores[idx] is not None
+                else None
+            )
+            job.sentence_metrics[i] = SentenceMetrics(
+                pair_id=existing.pair_id,
+                source=existing.source,
+                content_type=existing.content_type,
+                spanish_source=existing.spanish_source,
+                english_reference=existing.english_reference,
+                llm_english_translation=existing.llm_english_translation,
+                meteor=existing.meteor,
+                bertscore_f1=bert_val,
+            )
+    else:
+        logger.info("Job %s: skipping BERTScore (not requested)", job_id)
+
+    # ------------------------------------------------------------------
+    # Phase 5: Version capture
     # ------------------------------------------------------------------
     try:
         versions = get_library_versions()

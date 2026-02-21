@@ -44,8 +44,8 @@ export interface DatasetCorpusMetrics {
 export interface LibraryVersions {
   sacrebleu: string;
   nltk: string;
-  bert_score: string;
-  torch: string;
+  bert_score?: string;
+  torch?: string;
 }
 
 export interface ModelConfig {

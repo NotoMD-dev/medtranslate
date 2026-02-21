@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import Header from "@/components/Header";
 import PairDetail from "@/components/PairDetail";
 import { pairsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
-import { submitJob, pollUntilDone, pollJobStatus } from "@/lib/api";
+import { submitJob, pollUntilDone, fetchJobResults, pollJobStatus } from "@/lib/api";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/types";
 import type { JobStatusResponse, JobResults, SentenceMetrics, ClinicalGrade } from "@/lib/types";
 import {
@@ -28,6 +28,7 @@ export default function TranslatePage() {
   const [error, setError] = useState<string | null>(null);
   const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
   const [rowCount, setRowCount] = useState(0);
+  const [computeBertscore, setComputeBertscore] = useState(false);
   const abortRef = useRef(false);
 
   // Restore persisted job results on mount
@@ -64,10 +65,20 @@ export default function TranslatePage() {
     abortRef.current = false;
 
     try {
-      const results = await pollUntilDone(jobId, (status) => {
+      const results = await pollUntilDone(jobId, async (status) => {
         if (abortRef.current) return;
         setJobStatus(status);
         setRowCount(status.total);
+
+        // Fetch partial results for real-time table display
+        try {
+          const partial = await fetchJobResults(jobId);
+          if (partial && partial.sentence_metrics.length > 0) {
+            setJobResults(partial);
+          }
+        } catch {
+          // Partial results not yet available — ignore
+        }
       });
 
       setJobResults(results);
@@ -101,15 +112,26 @@ export default function TranslatePage() {
         systemPrompt,
         temperature: 0,
         maxTokens: 1024,
+        computeBertscore,
       });
 
       setSessionJobId(job_id);
       setRowCount(data.length);
       setPageState("running");
 
-      const results = await pollUntilDone(job_id, (status) => {
+      const results = await pollUntilDone(job_id, async (status) => {
         if (abortRef.current) return;
         setJobStatus(status);
+
+        // Fetch partial results for real-time table display
+        try {
+          const partial = await fetchJobResults(job_id);
+          if (partial && partial.sentence_metrics.length > 0) {
+            setJobResults(partial);
+          }
+        } catch {
+          // Partial results not yet available — ignore
+        }
       });
 
       setJobResults(results);
@@ -123,7 +145,7 @@ export default function TranslatePage() {
       setError((err as Error).message);
       setPageState("failed");
     }
-  }, []);
+  }, [computeBertscore]);
 
   const handleGrade = useCallback(
     (pairId: string, grade: ClinicalGrade) => {
@@ -156,6 +178,9 @@ export default function TranslatePage() {
       }
     : { done: 0, total: 0, pct: 0 };
 
+  // Determine which metric columns to show based on available data
+  const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
+
   return (
     <div className="min-h-screen">
       <Header />
@@ -174,7 +199,25 @@ export default function TranslatePage() {
             </p>
           </div>
 
-          <div className="flex gap-2.5">
+          <div className="flex items-center gap-3">
+            {/* BERTScore toggle */}
+            {(pageState === "idle" || pageState === "complete" || pageState === "failed") && (
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={computeBertscore}
+                  onChange={(e) => setComputeBertscore(e.target.checked)}
+                  className="w-4 h-4 rounded border-surface-600 bg-surface-700 accent-indigo-500"
+                />
+                <span className="text-[12px] text-slate-400">
+                  Include BERTScore
+                </span>
+                <span className="text-[10px] text-slate-600" title="BERTScore requires ~400MB additional memory and uses a RoBERTa model for semantic similarity scoring.">
+                  (resource-intensive)
+                </span>
+              </label>
+            )}
+
             {pageState === "idle" || pageState === "complete" || pageState === "failed" ? (
               <button
                 onClick={handleRun}
@@ -260,8 +303,12 @@ export default function TranslatePage() {
           <div className="mb-5 bg-surface-800 border border-surface-700 rounded-xl p-3 flex gap-4 text-[11px] text-slate-500">
             <span>sacrebleu {jobResults.library_versions.sacrebleu}</span>
             <span>nltk {jobResults.library_versions.nltk}</span>
-            <span>bert-score {jobResults.library_versions.bert_score}</span>
-            <span>torch {jobResults.library_versions.torch}</span>
+            {jobResults.library_versions.bert_score && jobResults.library_versions.bert_score !== "not loaded" && (
+              <span>bert-score {jobResults.library_versions.bert_score}</span>
+            )}
+            {jobResults.library_versions.torch && jobResults.library_versions.torch !== "not loaded" && (
+              <span>torch {jobResults.library_versions.torch}</span>
+            )}
           </div>
         )}
 
@@ -270,7 +317,7 @@ export default function TranslatePage() {
           <div className="mb-5 grid grid-cols-3 gap-3">
             <div className="bg-surface-800 border border-surface-700 rounded-xl p-4">
               <div className="text-[10px] text-slate-500 font-semibold tracking-widest mb-1">
-                CORPUS BLEU (OVERALL)
+                SACREBLEU (OVERALL)
               </div>
               <div className="text-2xl font-mono font-light text-slate-100">
                 {jobResults.corpus_metrics.overall.bleu_score.toFixed(2)}
@@ -282,7 +329,7 @@ export default function TranslatePage() {
             {jobResults.corpus_metrics.clinspen && (
               <div className="bg-surface-800 border border-surface-700 rounded-xl p-4">
                 <div className="text-[10px] font-semibold tracking-widest mb-1" style={{ color: "#7dd3fc" }}>
-                  CORPUS BLEU (ClinSpEn)
+                  SACREBLEU (ClinSpEn)
                 </div>
                 <div className="text-2xl font-mono font-light text-slate-100">
                   {jobResults.corpus_metrics.clinspen.bleu_score.toFixed(2)}
@@ -292,7 +339,7 @@ export default function TranslatePage() {
             {jobResults.corpus_metrics.umass && (
               <div className="bg-surface-800 border border-surface-700 rounded-xl p-4">
                 <div className="text-[10px] font-semibold tracking-widest mb-1" style={{ color: "#fda4af" }}>
-                  CORPUS BLEU (UMass)
+                  SACREBLEU (UMass)
                 </div>
                 <div className="text-2xl font-mono font-light text-slate-100">
                   {jobResults.corpus_metrics.umass.bleu_score.toFixed(2)}
@@ -309,16 +356,22 @@ export default function TranslatePage() {
               <table className="w-full text-[13px]" style={{ borderCollapse: "collapse" }}>
                 <thead>
                   <tr className="bg-surface-700 sticky top-0 z-10">
-                    {["#", "Source", "Spanish (input)", "LLM English (output)", "METEOR", "BERTScore", "Status"].map(
-                      (h) => (
-                        <th
-                          key={h}
-                          className="px-3.5 py-2.5 text-left font-semibold text-slate-400 text-[11px] tracking-wider border-b border-surface-600"
-                        >
-                          {h}
-                        </th>
-                      )
-                    )}
+                    {[
+                      "#",
+                      "Source",
+                      "Spanish (input)",
+                      "LLM English (output)",
+                      "METEOR",
+                      ...(hasBertscore ? ["BERTScore"] : []),
+                      "Status",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className="px-3.5 py-2.5 text-left font-semibold text-slate-400 text-[11px] tracking-wider border-b border-surface-600"
+                      >
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
 
@@ -390,21 +443,23 @@ export default function TranslatePage() {
                           {r.meteor != null ? r.meteor.toFixed(3) : "--"}
                         </td>
 
-                        <td
-                          className="px-3.5 py-2.5 font-mono text-[12px]"
-                          style={{
-                            color:
-                              r.bertscore_f1 != null
-                                ? r.bertscore_f1 > 0.5
-                                  ? "#10b981"
-                                  : r.bertscore_f1 > 0.2
-                                  ? "#f59e0b"
-                                  : "#ef4444"
-                                : "#475569",
-                          }}
-                        >
-                          {r.bertscore_f1 != null ? r.bertscore_f1.toFixed(3) : "--"}
-                        </td>
+                        {hasBertscore && (
+                          <td
+                            className="px-3.5 py-2.5 font-mono text-[12px]"
+                            style={{
+                              color:
+                                r.bertscore_f1 != null
+                                  ? r.bertscore_f1 > 0.5
+                                    ? "#10b981"
+                                    : r.bertscore_f1 > 0.2
+                                    ? "#f59e0b"
+                                    : "#ef4444"
+                                  : "#475569",
+                            }}
+                          >
+                            {r.bertscore_f1 != null ? r.bertscore_f1.toFixed(3) : "--"}
+                          </td>
+                        )}
 
                         <td className="px-3.5 py-2.5">
                           <span

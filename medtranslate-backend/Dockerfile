@@ -7,9 +7,9 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install Python dependencies (CPU-only torch to reduce memory footprint)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
 # Download required NLTK data (WordNet for METEOR)
 RUN python -m nltk.downloader wordnet omw-1.4 punkt punkt_tab

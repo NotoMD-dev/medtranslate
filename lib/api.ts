@@ -26,6 +26,7 @@ export async function submitJob(
     systemPrompt: string;
     temperature: number;
     maxTokens: number;
+    computeBertscore?: boolean;
   },
 ): Promise<JobCreated> {
   const form = new FormData();
@@ -34,6 +35,7 @@ export async function submitJob(
   form.append("system_prompt", config.systemPrompt);
   form.append("temperature", String(config.temperature));
   form.append("max_tokens", String(config.maxTokens));
+  form.append("compute_bertscore", String(config.computeBertscore ?? false));
 
   const resp = await fetch(`${BACKEND_URL}/v1/jobs`, {
     method: "POST",

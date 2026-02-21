@@ -28,7 +28,7 @@ class ModelConfig(BaseModel):
     system_prompt: Optional[str] = None
     temperature: float = 0.0
     max_tokens: int = 1024
-    compute_bertscore: bool = True  # NEW toggle
+    compute_bertscore: bool = False  # opt-in: avoids ~400MB torch load
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +75,8 @@ class DatasetCorpusMetrics(BaseModel):
 class LibraryVersions(BaseModel):
     sacrebleu: str
     nltk: str
-    bert_score: str
-    torch: str
+    bert_score: str = "not loaded"
+    torch: str = "not loaded"
 
 
 class JobResults(BaseModel):
