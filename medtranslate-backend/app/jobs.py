@@ -107,7 +107,7 @@ def get_job_results(job_id: str) -> Optional[JobResults]:
         corpus_metrics=job.corpus_metrics,
         sentence_metrics=job.sentence_metrics,
         library_versions=job.library_versions,
-        model_config=job.model_config,
+        translation_config=job.model_config,
     )
 
 

@@ -85,4 +85,4 @@ class JobResults(BaseModel):
     corpus_metrics: Optional[DatasetCorpusMetrics] = None
     sentence_metrics: list[SentenceMetrics] = []
     library_versions: Optional[LibraryVersions] = None
-    model_config: Optional[ModelConfig] = None
+    translation_config: Optional[ModelConfig] = None
