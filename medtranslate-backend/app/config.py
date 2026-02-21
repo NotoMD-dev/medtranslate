@@ -25,9 +25,12 @@ DEFAULT_SYSTEM_PROMPT: str = (
 DEFAULT_TEMPERATURE: float = 0.0
 DEFAULT_MAX_TOKENS: int = int(os.environ.get("DEFAULT_MAX_TOKENS", "512"))
 
-# Translation retry settings (now configurable but same defaults)
-TRANSLATE_MAX_RETRIES: int = int(os.environ.get("TRANSLATE_MAX_RETRIES", "3"))
-TRANSLATE_RETRY_DELAY: float = float(os.environ.get("TRANSLATE_RETRY_DELAY", "2.0"))
+# Translation retry settings.
+# 5 retries × 4 s base with exponential back-off gives a ~60 s recovery window,
+# long enough to survive a full per-minute rate-limit cycle.
+TRANSLATE_MAX_RETRIES: int = int(os.environ.get("TRANSLATE_MAX_RETRIES", "5"))
+TRANSLATE_RETRY_DELAY: float = float(os.environ.get("TRANSLATE_RETRY_DELAY", "4.0"))
+TRANSLATE_MAX_BACKOFF: float = float(os.environ.get("TRANSLATE_MAX_BACKOFF", "30.0"))
 
 # Disable OpenAI SDK auto-retries by default so only app-level backoff runs.
 OPENAI_MAX_RETRIES: int = int(os.environ.get("OPENAI_MAX_RETRIES", "0"))

@@ -19,6 +19,7 @@ from app.config import (
     OPENAI_API_KEY,
     OPENAI_CONCURRENCY,
     OPENAI_MAX_RETRIES,
+    TRANSLATE_MAX_BACKOFF,
     TRANSLATE_MAX_RETRIES,
     TRANSLATE_RETRY_DELAY,
 )
@@ -94,6 +95,11 @@ def _get_semaphore() -> asyncio.Semaphore:
 
 
 def _retry_after_seconds(exc: Exception) -> Optional[float]:
+    """Extract a wait-time hint from the 429 response headers.
+
+    Checks the standard ``Retry-After`` header first, then falls back to
+    OpenAI's ``x-ratelimit-reset-requests`` (format: ``"6s"``, ``"200ms"``).
+    """
     try:
         resp = getattr(exc, "response", None)
         if resp is None:
@@ -101,10 +107,45 @@ def _retry_after_seconds(exc: Exception) -> Optional[float]:
         headers = getattr(resp, "headers", None)
         if not headers:
             return None
-        ra = headers.get("retry-after") or headers.get("Retry-After")
-        if ra is None:
-            return None
-        return float(ra)
+
+        # Standard header (seconds as a plain number)
+        ra = headers.get("retry-after")
+        if ra is not None:
+            val = float(ra)
+            logger.debug("Retry-After header present: %s (%.1fs)", ra, val)
+            return val
+
+        # OpenAI-specific header, e.g. "6s", "200ms", "1m30s"
+        reset = headers.get("x-ratelimit-reset-requests")
+        if reset is not None:
+            val = _parse_duration(reset)
+            if val is not None:
+                logger.debug("x-ratelimit-reset-requests header: %s (%.1fs)", reset, val)
+                return val
+
+        logger.debug("No retry-after hint in 429 response headers")
+        return None
+    except Exception:
+        return None
+
+
+def _parse_duration(s: str) -> Optional[float]:
+    """Parse a compact duration like ``'6s'``, ``'200ms'``, or ``'1m30s'``."""
+    import re
+
+    try:
+        total = 0.0
+        for value, unit in re.findall(r"(\d+(?:\.\d+)?)\s*(ms|s|m|h)", s):
+            n = float(value)
+            if unit == "ms":
+                total += n / 1000
+            elif unit == "s":
+                total += n
+            elif unit == "m":
+                total += n * 60
+            elif unit == "h":
+                total += n * 3600
+        return total if total > 0 else None
     except Exception:
         return None
 
@@ -151,11 +192,11 @@ async def translate_text(
 
             retry_after = _retry_after_seconds(exc)
             if retry_after is not None and retry_after > 0:
-                wait = retry_after
+                wait = min(retry_after, TRANSLATE_MAX_BACKOFF)
             else:
                 base = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
-                jitter = random.uniform(0, base * 0.5)
-                wait = base + jitter
+                wait = min(base + random.uniform(0, base * 0.5),
+                           TRANSLATE_MAX_BACKOFF)
 
             # Penalise the global rate limiter so *all* concurrent callers
             # slow down — not just this one.
@@ -180,8 +221,8 @@ async def translate_text(
             if exc.status_code >= 500:
                 last_error = exc
                 base = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
-                jitter = random.uniform(0, base * 0.5)
-                wait = base + jitter
+                wait = min(base + random.uniform(0, base * 0.5),
+                           TRANSLATE_MAX_BACKOFF)
 
                 if attempt < TRANSLATE_MAX_RETRIES:
                     logger.warning(
@@ -205,8 +246,8 @@ async def translate_text(
         except openai.APIConnectionError as exc:
             last_error = exc
             base = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
-            jitter = random.uniform(0, base * 0.5)
-            wait = base + jitter
+            wait = min(base + random.uniform(0, base * 0.5),
+                       TRANSLATE_MAX_BACKOFF)
 
             if attempt < TRANSLATE_MAX_RETRIES:
                 logger.warning(
