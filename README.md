@@ -173,6 +173,7 @@ This tool supports a corpus-based evaluation study using 6,876 sentence-aligned 
 | `OPENAI_API_KEY` | Yes | OpenAI API key (never exposed to frontend) |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins |
 | `DEFAULT_MODEL` | No | Default model (defaults to `gpt-4o`) |
+| `OPENAI_MAX_RETRIES` | No | OpenAI SDK retry count (defaults to `0` so only app backoff runs) |
 
 ## License
 

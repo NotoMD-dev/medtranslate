@@ -47,4 +47,5 @@ docker run -p 8000:8000 -e OPENAI_API_KEY=sk-... medtranslate-backend
 3. Set the root directory to `medtranslate-backend`
 4. Set environment: Docker
 5. Add environment variable: `OPENAI_API_KEY`
-6. Add `CORS_ORIGINS` with your Vercel frontend URL
+6. (Recommended) Set `OPENAI_MAX_RETRIES=0` to avoid rapid SDK auto-retries
+7. Add `CORS_ORIGINS` with your Vercel frontend URL
