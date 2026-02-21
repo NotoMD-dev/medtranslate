@@ -23,7 +23,7 @@ DEFAULT_SYSTEM_PROMPT: str = (
     "text into English, preserving all medical terminology and clinical meaning."
 )
 DEFAULT_TEMPERATURE: float = 0.0
-DEFAULT_MAX_TOKENS: int = 1024
+DEFAULT_MAX_TOKENS: int = int(os.environ.get("DEFAULT_MAX_TOKENS", "512"))
 
 # Translation retry settings (now configurable but same defaults)
 TRANSLATE_MAX_RETRIES: int = int(os.environ.get("TRANSLATE_MAX_RETRIES", "3"))
