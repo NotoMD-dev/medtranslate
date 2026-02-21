@@ -25,15 +25,13 @@ DEFAULT_SYSTEM_PROMPT: str = (
 DEFAULT_TEMPERATURE: float = 0.0
 DEFAULT_MAX_TOKENS: int = int(os.environ.get("DEFAULT_MAX_TOKENS", "512"))
 
-# Translation retry settings.
-# 5 retries × 4 s base with exponential back-off gives a ~60 s recovery window,
-# long enough to survive a full per-minute rate-limit cycle.
-TRANSLATE_MAX_RETRIES: int = int(os.environ.get("TRANSLATE_MAX_RETRIES", "5"))
-TRANSLATE_RETRY_DELAY: float = float(os.environ.get("TRANSLATE_RETRY_DELAY", "4.0"))
-TRANSLATE_MAX_BACKOFF: float = float(os.environ.get("TRANSLATE_MAX_BACKOFF", "30.0"))
+# App-level retries (connection errors, 5xx only — 429s are handled by SDK).
+TRANSLATE_MAX_RETRIES: int = int(os.environ.get("TRANSLATE_MAX_RETRIES", "3"))
+TRANSLATE_RETRY_DELAY: float = float(os.environ.get("TRANSLATE_RETRY_DELAY", "2.0"))
 
-# Disable OpenAI SDK auto-retries by default so only app-level backoff runs.
-OPENAI_MAX_RETRIES: int = int(os.environ.get("OPENAI_MAX_RETRIES", "0"))
+# OpenAI SDK auto-retries — handles 429 rate-limit back-off with proper
+# Retry-After header parsing, exponential back-off, and jitter.
+OPENAI_MAX_RETRIES: int = int(os.environ.get("OPENAI_MAX_RETRIES", "2"))
 
 # Global OpenAI concurrency (per process)
 # Limits how many simultaneous OpenAI requests can run.
