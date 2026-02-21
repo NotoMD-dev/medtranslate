@@ -31,20 +31,24 @@ function countMap(items: string[]): Map<string, number> {
 }
 
 /**
- * BLEU score (1-4 gram) with brevity penalty.
- * Standard corpus-level metric adapted for sentence-level use.
+ * BLEU score (1-4 gram) with brevity penalty and smoothing.
+ * Uses method1 smoothing (add epsilon to zero counts) to match the
+ * Python NLTK SmoothingFunction().method1 used in compute_all.py.
  */
 export function computeBLEU(candidate: string, reference: string): number {
   const cToks = tokenize(candidate);
   const rToks = tokenize(reference);
   if (cToks.length === 0 || rToks.length === 0) return 0;
 
+  const epsilon = 0.1;
   let logScore = 0;
   let count = 0;
 
   for (let n = 1; n <= Math.min(4, cToks.length); n++) {
     const cGrams = nGrams(cToks, n);
     const rGrams = nGrams(rToks, n);
+    if (cGrams.length === 0) continue;
+
     const rCounts = countMap(rGrams);
     const cCounts = countMap(cGrams);
 
@@ -53,10 +57,17 @@ export function computeBLEU(candidate: string, reference: string): number {
       clipped += Math.min(c, rCounts.get(gram) || 0);
     }
 
-    if (cGrams.length === 0 || clipped === 0) return 0;
-    logScore += Math.log(clipped / cGrams.length);
+    // Method1 smoothing: add epsilon when clipped count is zero
+    const precision =
+      clipped === 0
+        ? epsilon / cGrams.length
+        : clipped / cGrams.length;
+
+    logScore += Math.log(precision);
     count++;
   }
+
+  if (count === 0) return 0;
 
   // Brevity penalty
   const bp =
