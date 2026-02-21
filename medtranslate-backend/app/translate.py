@@ -15,6 +15,7 @@ from app.config import (
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TEMPERATURE,
     OPENAI_API_KEY,
+    OPENAI_CONCURRENCY,
     OPENAI_MAX_RETRIES,
     TRANSLATE_MAX_RETRIES,
     TRANSLATE_RETRY_DELAY,
@@ -23,6 +24,7 @@ from app.config import (
 logger = logging.getLogger(__name__)
 
 _client: Optional[openai.AsyncOpenAI] = None
+_semaphore: Optional[asyncio.Semaphore] = None
 
 
 def _get_client() -> openai.AsyncOpenAI:
@@ -35,6 +37,30 @@ def _get_client() -> openai.AsyncOpenAI:
             max_retries=OPENAI_MAX_RETRIES,
         )
     return _client
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    global _semaphore
+    if _semaphore is None:
+        limit = OPENAI_CONCURRENCY if OPENAI_CONCURRENCY and OPENAI_CONCURRENCY > 0 else 1
+        _semaphore = asyncio.Semaphore(limit)
+    return _semaphore
+
+
+def _retry_after_seconds(exc: Exception) -> Optional[float]:
+    try:
+        resp = getattr(exc, "response", None)
+        if resp is None:
+            return None
+        headers = getattr(resp, "headers", None)
+        if not headers:
+            return None
+        ra = headers.get("retry-after") or headers.get("Retry-After")
+        if ra is None:
+            return None
+        return float(ra)
+    except Exception:
+        return None
 
 
 async def translate_text(
@@ -51,27 +77,35 @@ async def translate_text(
     exponential back-off.
     """
     client = _get_client()
+    sem = _get_semaphore()
     last_error: Exception | None = None
 
     for attempt in range(1, TRANSLATE_MAX_RETRIES + 1):
         try:
-            response = await client.chat.completions.create(
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": text},
-                ],
-            )
+            async with sem:
+                response = await client.chat.completions.create(
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": text},
+                    ],
+                )
             content = response.choices[0].message.content
             return (content or "").strip()
 
         except openai.RateLimitError as exc:
             last_error = exc
-            base = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
-            jitter = random.uniform(0, base * 0.5)
-            wait = base + jitter
+
+            retry_after = _retry_after_seconds(exc)
+            if retry_after is not None and retry_after > 0:
+                wait = retry_after
+            else:
+                base = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
+                jitter = random.uniform(0, base * 0.5)
+                wait = base + jitter
+
             logger.warning(
                 "Rate limited (attempt %d/%d), retrying in %.1fs",
                 attempt,

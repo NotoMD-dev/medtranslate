@@ -100,7 +100,8 @@ class _RateLimiter:
                 self._tokens -= 1.0
 
 
-_GLOBAL_RATE = float(os.getenv("TRANSLATE_REQUESTS_PER_SECOND", "3"))
+# Default lowered slightly for stability; override in Render env vars.
+_GLOBAL_RATE = float(os.getenv("TRANSLATE_REQUESTS_PER_SECOND", "1"))
 _rate_limiter = _RateLimiter(_GLOBAL_RATE)
 
 # Only one job executes at a time to avoid compounding rate-limit pressure.
@@ -173,20 +174,16 @@ async def _execute_job_inner(job_id: str, job: Job) -> None:
     compute_bertscore = getattr(job.model_config, "compute_bertscore", False)
 
     # Tunable concurrency controls
-    MAX_CONCURRENT_TRANSLATIONS = int(
-        os.getenv("MAX_CONCURRENT_TRANSLATIONS", "3")
-    )
-    CHUNK_SIZE = int(
-        os.getenv("TRANSLATION_CHUNK_SIZE", "50")
-    )
-    INTER_CHUNK_DELAY = float(
-        os.getenv("TRANSLATION_INTER_CHUNK_DELAY", "1.0")
-    )
+    # Default lowered for stability; override in Render env vars.
+    MAX_CONCURRENT_TRANSLATIONS = int(os.getenv("MAX_CONCURRENT_TRANSLATIONS", "1"))
+    CHUNK_SIZE = int(os.getenv("TRANSLATION_CHUNK_SIZE", "25"))
+    INTER_CHUNK_DELAY = float(os.getenv("TRANSLATION_INTER_CHUNK_DELAY", "1.0"))
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TRANSLATIONS)
 
     async def _translate_one(index: int, row: InputRow):
-        await _rate_limiter.acquire()
+        # Important: acquire semaphore first, THEN rate-limit right before the outbound call.
         async with semaphore:
+            await _rate_limiter.acquire()
             try:
                 translation = await translate_text(
                     row.spanish_source,
