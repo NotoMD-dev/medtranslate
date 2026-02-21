@@ -41,6 +41,16 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
+# GET / — health check (used by Render and for connectivity verification)
+# ---------------------------------------------------------------------------
+
+@app.get("/")
+async def health_check():
+    """Return a simple health check response."""
+    return {"status": "ok", "service": "medtranslate-backend"}
+
+
+# ---------------------------------------------------------------------------
 # POST /v1/jobs
 # ---------------------------------------------------------------------------
 
