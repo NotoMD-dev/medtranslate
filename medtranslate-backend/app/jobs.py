@@ -1,7 +1,7 @@
 """In-memory job store and background job execution logic."""
 
 from __future__ import annotations
-
+import os
 import asyncio
 import logging
 import uuid
@@ -54,12 +54,10 @@ class Job:
     rows: list[InputRow] = field(default_factory=list)
     model_config: ModelConfig = field(default_factory=ModelConfig)
 
-    # Progress counters
     translated: int = 0
     scored: int = 0
     failed_rows: int = 0
 
-    # Results (populated during/after execution)
     sentence_metrics: list[SentenceMetrics] = field(default_factory=list)
     corpus_metrics: Optional[DatasetCorpusMetrics] = None
     library_versions: Optional[LibraryVersions] = None
@@ -74,7 +72,6 @@ _jobs: dict[str, Job] = {}
 
 
 def create_job(rows: list[InputRow], config: ModelConfig) -> str:
-    """Create a new job and return its ID."""
     job_id = uuid.uuid4().hex[:12]
     job = Job(job_id=job_id, rows=rows, model_config=config)
     _jobs[job_id] = job
@@ -115,15 +112,10 @@ def get_job_results(job_id: str) -> Optional[JobResults]:
 
 
 # ---------------------------------------------------------------------------
-# Job execution (runs in background task)
+# Job execution
 # ---------------------------------------------------------------------------
 
 async def execute_job(job_id: str) -> None:
-    """Run translation + metric computation for a job.
-
-    This is designed to be launched as a background asyncio task so
-    it does not block the API thread.
-    """
     job = _jobs.get(job_id)
     if job is None:
         return
@@ -132,49 +124,75 @@ async def execute_job(job_id: str) -> None:
     total = len(job.rows)
     logger.info("Job %s: starting (%d rows)", job_id, total)
 
-    # ------------------------------------------------------------------
-    # Phase 1: Translate row-by-row
-    # ------------------------------------------------------------------
     system_prompt = job.model_config.system_prompt or ""
     model = job.model_config.model
     temperature = job.model_config.temperature
     max_tokens = job.model_config.max_tokens
+    compute_bertscore = getattr(job.model_config, "compute_bertscore", True)
 
-    for i, row in enumerate(job.rows):
-        try:
-            translation = await translate_text(
-                row.spanish_source,
-                model=model,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            row.llm_english_translation = translation
-            job.translated += 1
-        except Exception as exc:
-            logger.error("Job %s row %d translation failed: %s", job_id, i, exc)
-            row.llm_english_translation = ""
-            job.failed_rows += 1
-            # Store partial failure but continue processing
-            job.sentence_metrics.append(
-                SentenceMetrics(
-                    pair_id=row.pair_id,
-                    source=row.source,
-                    content_type=row.content_type,
-                    spanish_source=row.spanish_source,
-                    english_reference=row.english_reference,
-                    llm_english_translation="",
-                    error=str(exc),
+    # Tunable concurrency controls
+    
+    MAX_CONCURRENT_TRANSLATIONS = int(
+    os.getenv("MAX_CONCURRENT_TRANSLATIONS", "10")
+)
+    CHUNK_SIZE = int(
+    os.getenv("TRANSLATION_CHUNK_SIZE", "200")
+)
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_TRANSLATIONS)
+
+    async def _translate_one(index: int, row: InputRow):
+        async with semaphore:
+            try:
+                translation = await translate_text(
+                    row.spanish_source,
+                    model=model,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
                 )
-            )
-            continue
-
-        # Yield control periodically so the event loop remains responsive
-        if (i + 1) % 5 == 0:
-            await asyncio.sleep(0)
+                return index, translation, None
+            except Exception as exc:
+                return index, "", str(exc)
 
     # ------------------------------------------------------------------
-    # Phase 2: Compute sentence-level metrics (METEOR)
+    # Phase 1: Concurrent translation (chunked)
+    # ------------------------------------------------------------------
+    for start in range(0, total, CHUNK_SIZE):
+        end = min(start + CHUNK_SIZE, total)
+        tasks = [
+            asyncio.create_task(_translate_one(i, job.rows[i]))
+            for i in range(start, end)
+        ]
+
+        results = await asyncio.gather(*tasks)
+
+        # Apply results deterministically
+        for index, translation, error in sorted(results, key=lambda x: x[0]):
+            row = job.rows[index]
+
+            if error is None:
+                row.llm_english_translation = translation
+                job.translated += 1
+            else:
+                logger.error("Job %s row %d translation failed: %s", job_id, index, error)
+                row.llm_english_translation = ""
+                job.failed_rows += 1
+                job.sentence_metrics.append(
+                    SentenceMetrics(
+                        pair_id=row.pair_id,
+                        source=row.source,
+                        content_type=row.content_type,
+                        spanish_source=row.spanish_source,
+                        english_reference=row.english_reference,
+                        llm_english_translation="",
+                        error=error,
+                    )
+                )
+
+        await asyncio.sleep(0)
+
+    # ------------------------------------------------------------------
+    # Phase 2: METEOR (moved entirely off event loop)
     # ------------------------------------------------------------------
     logger.info("Job %s: computing sentence-level METEOR", job_id)
 
@@ -184,25 +202,21 @@ async def execute_job(job_id: str) -> None:
         if row.llm_english_translation and row.english_reference
     ]
 
-    meteor_scores: list[Optional[float]] = []
-    for idx, (i, row) in enumerate(successfully_translated):
-        try:
-            m = compute_meteor(row.llm_english_translation, row.english_reference)
-            meteor_scores.append(m)
-        except Exception as exc:
-            logger.error("Job %s row %d METEOR failed: %s", job_id, i, exc)
-            meteor_scores.append(None)
-        job.scored = idx + 1
+    def _meteor_pass(rows_subset):
+        results = []
+        for i, row in rows_subset:
+            try:
+                results.append(compute_meteor(row.llm_english_translation, row.english_reference))
+            except Exception:
+                results.append(None)
+        return results
 
-        # Yield periodically
-        if (idx + 1) % 20 == 0:
-            await asyncio.sleep(0)
+    meteor_scores = await asyncio.to_thread(_meteor_pass, successfully_translated)
+    job.scored = len(meteor_scores)
 
     # ------------------------------------------------------------------
-    # Phase 3: Compute BERTScore in batch
+    # Phase 3: BERTScore (optional)
     # ------------------------------------------------------------------
-    logger.info("Job %s: computing BERTScore", job_id)
-
     candidates_for_bert = [
         row.llm_english_translation for _, row in successfully_translated
     ]
@@ -210,27 +224,31 @@ async def execute_job(job_id: str) -> None:
         row.english_reference for _, row in successfully_translated
     ]
 
-    try:
-        bert_f1_scores = await asyncio.to_thread(
-            compute_bertscore_batch, candidates_for_bert, references_for_bert
-        )
-    except Exception as exc:
-        logger.error("Job %s BERTScore batch failed: %s", job_id, exc)
+    if compute_bertscore:
+        logger.info("Job %s: computing BERTScore", job_id)
+        try:
+            bert_f1_scores = await asyncio.to_thread(
+                compute_bertscore_batch,
+                candidates_for_bert,
+                references_for_bert,
+            )
+        except Exception as exc:
+            logger.error("Job %s BERTScore batch failed: %s", job_id, exc)
+            bert_f1_scores = [None] * len(candidates_for_bert)
+    else:
+        logger.info("Job %s: skipping BERTScore (toggle off)", job_id)
         bert_f1_scores = [None] * len(candidates_for_bert)
 
     # ------------------------------------------------------------------
-    # Phase 4: Build sentence metrics list
+    # Phase 4: Build sentence metrics
     # ------------------------------------------------------------------
-    # First, rebuild sentence_metrics from scratch (clear partial failures added earlier)
     sentence_metrics_map: dict[str, SentenceMetrics] = {}
 
-    # Add failed rows first
+    # Preserve earlier translation failures
     for sm in job.sentence_metrics:
         sentence_metrics_map[sm.pair_id] = sm
 
     for idx, (i, row) in enumerate(successfully_translated):
-        bert_val = bert_f1_scores[idx] if idx < len(bert_f1_scores) else None
-        meteor_val = meteor_scores[idx] if idx < len(meteor_scores) else None
         sentence_metrics_map[row.pair_id] = SentenceMetrics(
             pair_id=row.pair_id,
             source=row.source,
@@ -238,11 +256,11 @@ async def execute_job(job_id: str) -> None:
             spanish_source=row.spanish_source,
             english_reference=row.english_reference,
             llm_english_translation=row.llm_english_translation,
-            meteor=meteor_val,
-            bertscore_f1=float(bert_val) if bert_val is not None else None,
+            meteor=meteor_scores[idx] if idx < len(meteor_scores) else None,
+            bertscore_f1=float(bert_f1_scores[idx]) if idx < len(bert_f1_scores) and bert_f1_scores[idx] is not None else None,
         )
 
-    # Add rows without references (translated but no metrics)
+    # Ensure all rows present
     for row in job.rows:
         if row.pair_id not in sentence_metrics_map:
             sentence_metrics_map[row.pair_id] = SentenceMetrics(
@@ -254,7 +272,6 @@ async def execute_job(job_id: str) -> None:
                 llm_english_translation=row.llm_english_translation,
             )
 
-    # Preserve original row order
     job.sentence_metrics = [
         sentence_metrics_map[row.pair_id]
         for row in job.rows
@@ -262,7 +279,7 @@ async def execute_job(job_id: str) -> None:
     ]
 
     # ------------------------------------------------------------------
-    # Phase 5: Compute corpus BLEU (sacrebleu)
+    # Phase 5: Corpus BLEU
     # ------------------------------------------------------------------
     logger.info("Job %s: computing corpus BLEU", job_id)
 
@@ -271,12 +288,17 @@ async def execute_job(job_id: str) -> None:
 
     try:
         overall_score, overall_sig = compute_corpus_bleu(all_hyps, all_refs)
-        overall_corpus = CorpusMetrics(bleu_score=overall_score, bleu_signature=overall_sig)
+        overall_corpus = CorpusMetrics(
+            bleu_score=overall_score,
+            bleu_signature=overall_sig,
+        )
     except Exception as exc:
         logger.error("Job %s overall corpus BLEU failed: %s", job_id, exc)
-        overall_corpus = CorpusMetrics(bleu_score=0.0, bleu_signature=f"error: {exc}")
+        overall_corpus = CorpusMetrics(
+            bleu_score=0.0,
+            bleu_signature=f"error: {exc}",
+        )
 
-    # Per-dataset corpus BLEU
     clinspen_corpus = None
     umass_corpus = None
 
@@ -285,26 +307,28 @@ async def execute_job(job_id: str) -> None:
         for _, row in successfully_translated
         if row.source == "ClinSpEn_ClinicalCases"
     ]
+
     if clinspen_pairs:
         try:
             cs_hyps, cs_refs = zip(*clinspen_pairs)
             cs_score, cs_sig = compute_corpus_bleu(list(cs_hyps), list(cs_refs))
-            clinspen_corpus = CorpusMetrics(bleu_score=cs_score, bleu_signature=cs_sig)
-        except Exception as exc:
-            logger.error("Job %s ClinSpEn corpus BLEU failed: %s", job_id, exc)
+            clinspen_corpus = CorpusMetrics(cs_score, cs_sig)
+        except Exception:
+            pass
 
     umass_pairs = [
         (row.llm_english_translation, row.english_reference)
         for _, row in successfully_translated
         if row.source == "UMass_EHR"
     ]
+
     if umass_pairs:
         try:
             um_hyps, um_refs = zip(*umass_pairs)
             um_score, um_sig = compute_corpus_bleu(list(um_hyps), list(um_refs))
-            umass_corpus = CorpusMetrics(bleu_score=um_score, bleu_signature=um_sig)
-        except Exception as exc:
-            logger.error("Job %s UMass corpus BLEU failed: %s", job_id, exc)
+            umass_corpus = CorpusMetrics(um_score, um_sig)
+        except Exception:
+            pass
 
     job.corpus_metrics = DatasetCorpusMetrics(
         overall=overall_corpus,
@@ -313,7 +337,7 @@ async def execute_job(job_id: str) -> None:
     )
 
     # ------------------------------------------------------------------
-    # Phase 6: Record library versions
+    # Phase 6: Version capture
     # ------------------------------------------------------------------
     try:
         versions = get_library_versions()

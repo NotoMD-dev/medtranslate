@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +28,7 @@ class ModelConfig(BaseModel):
     system_prompt: Optional[str] = None
     temperature: float = 0.0
     max_tokens: int = 1024
+    compute_bertscore: bool = True  # NEW toggle
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +62,6 @@ class SentenceMetrics(BaseModel):
 
 
 class CorpusMetrics(BaseModel):
-    """Corpus-level BLEU computed via sacrebleu."""
     bleu_score: float
     bleu_signature: str
 

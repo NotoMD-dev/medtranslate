@@ -1,88 +1,77 @@
-"""Research-grade metric computation.
-
-All metric outputs match the reference Python library implementations exactly.
-No shortcuts or approximations are used.
-
-- Corpus BLEU: sacrebleu (default 13a tokenization)
-- METEOR: NLTK meteor_score with WordNet + stemming
-- BERTScore: bert-score with rescale_with_baseline=True
-"""
+"""Research-grade metric computation."""
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 import nltk
 import sacrebleu
 import torch
 from bert_score import score as bert_score_fn
-from nltk.translate.meteor_score import single_meteor_score
+from nltk.translate.meteor_score import meteor_score
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Ensure required NLTK data is available
-# ---------------------------------------------------------------------------
-for resource in ("wordnet", "omw-1.4", "punkt", "punkt_tab"):
+# Ensure required NLTK resources
+for resource in ("wordnet", "omw-1.4", "punkt"):
     try:
-        nltk.data.find(f"corpora/{resource}" if resource != "punkt" and resource != "punkt_tab" else f"tokenizers/{resource}")
+        nltk.data.find(
+            f"corpora/{resource}"
+            if resource != "punkt"
+            else f"tokenizers/{resource}"
+        )
     except LookupError:
         nltk.download(resource, quiet=True)
 
 
 # ---------------------------------------------------------------------------
-# Corpus BLEU (sacrebleu)
+# Corpus BLEU
 # ---------------------------------------------------------------------------
 
 def compute_corpus_bleu(
     hypotheses: list[str],
     references: list[str],
 ) -> tuple[float, str]:
-    """Compute corpus-level BLEU using sacrebleu with default 13a tokenization.
-
-    Returns (score, signature_string).
-    """
     bleu = sacrebleu.corpus_bleu(hypotheses, [references])
-    return bleu.score, str(bleu)
+    return bleu.score, bleu.signature
 
 
 # ---------------------------------------------------------------------------
-# Sentence-level METEOR (NLTK, full implementation)
+# METEOR (canonical NLTK implementation)
 # ---------------------------------------------------------------------------
 
 def compute_meteor(candidate: str, reference: str) -> float:
-    """Compute METEOR score with WordNet synonym matching and Porter stemming.
+    candidate = (candidate or "").strip()
+    reference = (reference or "").strip()
 
-    Uses NLTK's single_meteor_score which includes:
-    - Exact matching
-    - Porter stemming
-    - WordNet synonym matching
-    - Alignment penalty (fragmentation)
-    """
-    ref_tokens = nltk.word_tokenize(reference.lower())
-    cand_tokens = nltk.word_tokenize(candidate.lower())
-    if not cand_tokens or not ref_tokens:
+    if not candidate or not reference:
         return 0.0
-    return single_meteor_score(ref_tokens, cand_tokens)
+
+    return float(meteor_score([reference], candidate))
 
 
 # ---------------------------------------------------------------------------
-# BERTScore (HuggingFace bert-score, rescaled)
+# BERTScore
 # ---------------------------------------------------------------------------
 
 def compute_bertscore_batch(
     candidates: list[str],
     references: list[str],
-    batch_size: int = 64,
 ) -> list[float]:
-    """Compute BERTScore F1 for a batch of candidate/reference pairs.
-
-    Uses rescale_with_baseline=True as required for publication.
-    Returns list of F1 scores.
-    """
     if not candidates:
         return []
+
+    if len(candidates) != len(references):
+        raise ValueError(
+            f"BERTScore length mismatch: {len(candidates)} candidates vs {len(references)} references"
+        )
+
+    try:
+        batch_size = int(os.getenv("BERTSCORE_BATCH_SIZE", "64"))
+    except ValueError:
+        batch_size = 64
 
     _P, _R, F1 = bert_score_fn(
         candidates,
@@ -92,15 +81,15 @@ def compute_bertscore_batch(
         batch_size=batch_size,
         verbose=False,
     )
+
     return F1.tolist()
 
 
 # ---------------------------------------------------------------------------
-# Library version reporting
+# Version reporting
 # ---------------------------------------------------------------------------
 
 def get_library_versions() -> dict[str, str]:
-    """Return versions of all metric libraries for reproducibility."""
     import bert_score as bs
 
     return {

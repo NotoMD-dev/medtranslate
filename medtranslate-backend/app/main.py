@@ -1,10 +1,4 @@
-"""FastAPI application — MedTranslate backend.
-
-Endpoints:
-    POST /v1/jobs            — Submit a CSV and start a translation job
-    GET  /v1/jobs/{job_id}   — Poll job status and progress
-    GET  /v1/jobs/{job_id}/results — Retrieve full results
-"""
+"""FastAPI application — MedTranslate backend."""
 
 from __future__ import annotations
 
@@ -27,8 +21,7 @@ logging.basicConfig(
 
 app = FastAPI(
     title="MedTranslate Backend",
-    description="Backend-driven translation and research-grade metrics for clinical translation evaluation.",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 app.add_middleware(
@@ -40,10 +33,6 @@ app.add_middleware(
 )
 
 
-# ---------------------------------------------------------------------------
-# POST /v1/jobs
-# ---------------------------------------------------------------------------
-
 @app.post("/v1/jobs", response_model=JobCreated, status_code=202)
 async def submit_job(
     file: UploadFile = File(...),
@@ -51,8 +40,9 @@ async def submit_job(
     system_prompt: str = Form(DEFAULT_SYSTEM_PROMPT),
     temperature: float = Form(0.0),
     max_tokens: int = Form(1024),
+    compute_bertscore: bool = Form(True),
 ):
-    """Accept a CSV upload, parse rows, and launch a background job."""
+
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are accepted")
 
@@ -61,12 +51,10 @@ async def submit_job(
     reader = csv.DictReader(io.StringIO(text))
 
     if reader.fieldnames is None or "spanish_source" not in reader.fieldnames:
-        raise HTTPException(
-            status_code=400,
-            detail='CSV must contain a "spanish_source" column',
-        )
+        raise HTTPException(status_code=400, detail='CSV must contain "spanish_source" column')
 
     rows: list[InputRow] = []
+
     for i, raw in enumerate(reader):
         rows.append(
             InputRow(
@@ -87,37 +75,26 @@ async def submit_job(
         system_prompt=system_prompt,
         temperature=temperature,
         max_tokens=max_tokens,
+        compute_bertscore=compute_bertscore,
     )
 
     job_id = create_job(rows, config)
 
-    # Launch the job as a background task
     asyncio.create_task(execute_job(job_id))
 
     return JobCreated(job_id=job_id)
 
 
-# ---------------------------------------------------------------------------
-# GET /v1/jobs/{job_id}
-# ---------------------------------------------------------------------------
-
 @app.get("/v1/jobs/{job_id}", response_model=JobStatusResponse)
 async def poll_job_status(job_id: str):
-    """Return the current status and progress of a job."""
     status = get_job_status(job_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return status
 
 
-# ---------------------------------------------------------------------------
-# GET /v1/jobs/{job_id}/results
-# ---------------------------------------------------------------------------
-
 @app.get("/v1/jobs/{job_id}/results", response_model=JobResults)
 async def get_results(job_id: str):
-    """Return full results including corpus BLEU, sentence metrics, and
-    library versions."""
     results = get_job_results(job_id)
     if results is None:
         raise HTTPException(status_code=404, detail="Job not found")
