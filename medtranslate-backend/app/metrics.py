@@ -8,8 +8,6 @@ from typing import Optional
 
 import nltk
 import sacrebleu
-import torch
-from bert_score import score as bert_score_fn
 from nltk.translate.meteor_score import meteor_score
 
 logger = logging.getLogger(__name__)
@@ -53,7 +51,7 @@ def compute_meteor(candidate: str, reference: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# BERTScore
+# BERTScore (lazy-loaded to avoid ~400MB torch import at startup)
 # ---------------------------------------------------------------------------
 
 def compute_bertscore_batch(
@@ -73,15 +71,19 @@ def compute_bertscore_batch(
     except ValueError:
         batch_size = 64
 
+    # Lazy import: torch + bert_score are ~400MB in RAM.
+    # Only load when BERTScore is explicitly requested.
+    from bert_score import score as bert_score_fn
+
     _P, _R, F1 = bert_score_fn(
-    candidates,
-    references,
-    model_type="roberta-base",  # lighter model for Render
-    lang="en",
-    rescale_with_baseline=True,
-    batch_size=batch_size,
-    verbose=False,
-)
+        candidates,
+        references,
+        model_type="roberta-base",
+        lang="en",
+        rescale_with_baseline=True,
+        batch_size=batch_size,
+        verbose=False,
+    )
 
     return F1.tolist()
 
@@ -91,11 +93,19 @@ def compute_bertscore_batch(
 # ---------------------------------------------------------------------------
 
 def get_library_versions() -> dict[str, str]:
-    import bert_score as bs
-
-    return {
+    versions: dict[str, str] = {
         "sacrebleu": sacrebleu.__version__,
         "nltk": nltk.__version__,
-        "bert_score": bs.__version__,
-        "torch": torch.__version__,
     }
+
+    # Only report torch/bert-score versions if they are already imported
+    try:
+        import torch
+        import bert_score as bs
+        versions["torch"] = torch.__version__
+        versions["bert_score"] = bs.__version__
+    except ImportError:
+        versions["torch"] = "not loaded"
+        versions["bert_score"] = "not loaded"
+
+    return versions

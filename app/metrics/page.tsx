@@ -34,6 +34,7 @@ export default function MetricsPage() {
 
   const meteorSummary = summarizeMetric(meteorValues);
   const bertSummary = summarizeMetric(bertValues);
+  const hasBertscore = bertValues.length > 0;
 
   // Clinical grade distribution
   const graded = completed.filter((r) => grades[r.pair_id] != null);
@@ -92,11 +93,11 @@ export default function MetricsPage() {
           </p>
         )}
 
-        {/* Corpus BLEU (from backend sacrebleu) */}
+        {/* Corpus SacreBLEU (from backend sacrebleu) */}
         {corpusBleu && (
           <div className="mb-7">
             <div className="text-[12px] font-semibold text-slate-400 tracking-wider mb-3">
-              CORPUS BLEU (sacrebleu)
+              SACREBLEU (CORPUS-LEVEL)
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
@@ -135,20 +136,28 @@ export default function MetricsPage() {
         )}
 
         {/* Sentence-level metric cards */}
-        <div className="grid grid-cols-2 gap-4 mb-7">
+        <div className={`grid gap-4 mb-7 ${hasBertscore ? "grid-cols-2" : "grid-cols-1 max-w-md"}`}>
           <MetricsCard
             label="METEOR"
             value={meteorValues.length > 0 ? meteorSummary.mean : null}
             description="WordNet + stemming (NLTK)"
             count={meteorValues.length}
           />
-          <MetricsCard
-            label="BERTScore F1"
-            value={bertValues.length > 0 ? bertSummary.mean : null}
-            description="Rescaled with baseline"
-            count={bertValues.length}
-          />
+          {hasBertscore && (
+            <MetricsCard
+              label="BERTScore F1"
+              value={bertSummary.mean}
+              description="Rescaled with baseline (roberta-base)"
+              count={bertValues.length}
+            />
+          )}
         </div>
+
+        {!hasBertscore && completed.length > 0 && (
+          <div className="mb-7 p-3 bg-surface-800 border border-surface-700 rounded-xl text-slate-500 text-[12px]">
+            BERTScore was not computed for this run. To include it, enable the &quot;Include BERTScore&quot; toggle on the Translate page before running.
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-4">
           {/* Clinical grade distribution */}
@@ -213,12 +222,14 @@ export default function MetricsPage() {
                       {src.meteor != null ? src.meteor.toFixed(3) : "--"}
                     </span>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500">BERTScore</span>{" "}
-                    <span className="text-base font-mono text-slate-100 ml-1">
-                      {src.bert != null ? src.bert.toFixed(3) : "--"}
-                    </span>
-                  </div>
+                  {hasBertscore && (
+                    <div>
+                      <span className="text-[10px] text-slate-500">BERTScore</span>{" "}
+                      <span className="text-base font-mono text-slate-100 ml-1">
+                        {src.bert != null ? src.bert.toFixed(3) : "--"}
+                      </span>
+                    </div>
+                  )}
                   <div>
                     <span className="text-[10px] text-slate-500">n</span>{" "}
                     <span className="text-base font-mono text-slate-400 ml-1">
@@ -240,8 +251,12 @@ export default function MetricsPage() {
             <div className="flex gap-6 text-[12px] text-slate-400 font-mono">
               <span>sacrebleu: {jobResults.library_versions.sacrebleu}</span>
               <span>nltk: {jobResults.library_versions.nltk}</span>
-              <span>bert-score: {jobResults.library_versions.bert_score}</span>
-              <span>torch: {jobResults.library_versions.torch}</span>
+              {jobResults.library_versions.bert_score && jobResults.library_versions.bert_score !== "not loaded" && (
+                <span>bert-score: {jobResults.library_versions.bert_score}</span>
+              )}
+              {jobResults.library_versions.torch && jobResults.library_versions.torch !== "not loaded" && (
+                <span>torch: {jobResults.library_versions.torch}</span>
+              )}
             </div>
           </div>
         )}

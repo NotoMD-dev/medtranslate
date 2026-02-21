@@ -40,7 +40,7 @@ async def submit_job(
     system_prompt: str = Form(DEFAULT_SYSTEM_PROMPT),
     temperature: float = Form(0.0),
     max_tokens: int = Form(1024),
-    compute_bertscore: bool = Form(True),
+    compute_bertscore: bool = Form(False),
 ):
 
     if not file.filename or not file.filename.lower().endswith(".csv"):
