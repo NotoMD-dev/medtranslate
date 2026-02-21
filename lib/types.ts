@@ -1,21 +1,72 @@
-export interface TranslationPair {
-  pair_id: string;
-  source: "ClinSpEn_ClinicalCases" | "UMass_EHR";
-  content_type: "clinical_case_report" | "ehr_clinical_note";
-  english_reference: string;
-  spanish_source: string;
-  llm_english_translation: string;
+// ---------------------------------------------------------------------------
+// Backend job types (mirror the FastAPI schemas)
+// ---------------------------------------------------------------------------
+
+export type JobStatus = "queued" | "running" | "complete" | "failed";
+
+export interface JobCreated {
+  job_id: string;
 }
 
-export interface TranslationResult extends TranslationPair {
-  _index: number;
-  _status: "pending" | "translating" | "scoring" | "complete" | "error";
-  _bleu: number | null;
-  _meteor: number | null;
-  _bert_proxy: number | null;
-  _clinical_grade: ClinicalGrade | null;
-  _error_message?: string;
+export interface JobStatusResponse {
+  job_id: string;
+  status: JobStatus;
+  total: number;
+  translated: number;
+  scored: number;
+  failed_rows: number;
+  error: string | null;
 }
+
+export interface SentenceMetrics {
+  pair_id: string;
+  source: string;
+  content_type: string;
+  spanish_source: string;
+  english_reference: string;
+  llm_english_translation: string;
+  meteor: number | null;
+  bertscore_f1: number | null;
+  error: string | null;
+}
+
+export interface CorpusMetrics {
+  bleu_score: number;
+  bleu_signature: string;
+}
+
+export interface DatasetCorpusMetrics {
+  overall: CorpusMetrics;
+  clinspen: CorpusMetrics | null;
+  umass: CorpusMetrics | null;
+}
+
+export interface LibraryVersions {
+  sacrebleu: string;
+  nltk: string;
+  bert_score: string;
+  torch: string;
+}
+
+export interface ModelConfig {
+  model: string;
+  system_prompt: string | null;
+  temperature: number;
+  max_tokens: number;
+}
+
+export interface JobResults {
+  job_id: string;
+  status: JobStatus;
+  corpus_metrics: DatasetCorpusMetrics | null;
+  sentence_metrics: SentenceMetrics[];
+  library_versions: LibraryVersions | null;
+  model_config: ModelConfig | null;
+}
+
+// ---------------------------------------------------------------------------
+// Clinical grading (unchanged)
+// ---------------------------------------------------------------------------
 
 export type ClinicalGrade = 0 | 1 | 2 | 3;
 
@@ -58,12 +109,25 @@ export const CLINICAL_GRADES: ClinicalGradeInfo[] = [
   },
 ];
 
-export interface MetricsSummary {
-  count: number;
-  bleu: { mean: number; std: number; min: number; max: number };
-  meteor: { mean: number; std: number; min: number; max: number };
-  bert_proxy: { mean: number; std: number; min: number; max: number };
+// ---------------------------------------------------------------------------
+// Upload / dataset types
+// ---------------------------------------------------------------------------
+
+export interface TranslationPair {
+  pair_id: string;
+  source: "ClinSpEn_ClinicalCases" | "UMass_EHR";
+  content_type: "clinical_case_report" | "ehr_clinical_note";
+  english_reference: string;
+  spanish_source: string;
+  llm_english_translation: string;
 }
+
+// ---------------------------------------------------------------------------
+// Translation configuration defaults
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_SYSTEM_PROMPT =
+  "You are a medical interpreter. Translate the following Spanish clinical text into English, preserving all medical terminology and clinical meaning.";
 
 export interface TranslationConfig {
   model: string;
@@ -72,11 +136,8 @@ export interface TranslationConfig {
   maxTokens: number;
 }
 
-export const DEFAULT_SYSTEM_PROMPT =
-  "You are a medical interpreter. Translate the following Spanish clinical text into English, preserving all medical terminology and clinical meaning. Output ONLY the English translation, nothing else.";
-
 export const DEFAULT_CONFIG: TranslationConfig = {
-  model: "gpt-5.2",
+  model: "gpt-4o",
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   temperature: 0,
   maxTokens: 1024,

@@ -9,8 +9,10 @@ import {
   clearSessionState,
   setSessionData,
   setSessionPrompt,
-  setSessionResults,
   setSessionRowLimit,
+  setSessionJobResults,
+  setSessionJobId,
+  setSessionCsvFileName,
 } from "@/lib/session";
 import type { TranslationPair } from "@/lib/types";
 
@@ -47,6 +49,7 @@ export default function UploadPage() {
             setRows(parsed);
             setSessionData(parsed);
             setSessionPrompt(systemPrompt);
+            setSessionCsvFileName(file.name);
           } catch (err) {
             setError((err as Error).message);
           }
@@ -60,6 +63,7 @@ export default function UploadPage() {
             setRows(parsed);
             setSessionData(parsed);
             setSessionPrompt(systemPrompt);
+            setSessionCsvFileName(file.name);
           } catch (err) {
             setError((err as Error).message);
           }
@@ -116,7 +120,8 @@ export default function UploadPage() {
     setSessionData(dataToUse);
     setSessionPrompt(systemPrompt);
     setSessionRowLimit(limit);
-    setSessionResults(undefined);
+    setSessionJobResults(undefined);
+    setSessionJobId(undefined);
     router.push("/translate");
   }, [rowMode, customRowCount, rows, systemPrompt, router]);
 

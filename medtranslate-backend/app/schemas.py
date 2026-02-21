@@ -1,0 +1,88 @@
+"""Pydantic models for request/response validation."""
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
+
+class JobStatus(str, Enum):
+    queued = "queued"
+    running = "running"
+    complete = "complete"
+    failed = "failed"
+
+
+# ---------------------------------------------------------------------------
+# Request models
+# ---------------------------------------------------------------------------
+
+class ModelConfig(BaseModel):
+    model: str = "gpt-4o"
+    system_prompt: Optional[str] = None
+    temperature: float = 0.0
+    max_tokens: int = 1024
+
+
+# ---------------------------------------------------------------------------
+# Response models
+# ---------------------------------------------------------------------------
+
+class JobCreated(BaseModel):
+    job_id: str
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    total: int = 0
+    translated: int = 0
+    scored: int = 0
+    failed_rows: int = 0
+    error: Optional[str] = None
+
+
+class SentenceMetrics(BaseModel):
+    pair_id: str
+    source: str
+    content_type: str
+    spanish_source: str
+    english_reference: str
+    llm_english_translation: str
+    meteor: Optional[float] = None
+    bertscore_f1: Optional[float] = None
+    error: Optional[str] = None
+
+
+class CorpusMetrics(BaseModel):
+    """Corpus-level BLEU computed via sacrebleu."""
+    bleu_score: float
+    bleu_signature: str
+
+
+class DatasetCorpusMetrics(BaseModel):
+    overall: CorpusMetrics
+    clinspen: Optional[CorpusMetrics] = None
+    umass: Optional[CorpusMetrics] = None
+
+
+class LibraryVersions(BaseModel):
+    sacrebleu: str
+    nltk: str
+    bert_score: str
+    torch: str
+
+
+class JobResults(BaseModel):
+    job_id: str
+    status: JobStatus
+    corpus_metrics: Optional[DatasetCorpusMetrics] = None
+    sentence_metrics: list[SentenceMetrics] = []
+    library_versions: Optional[LibraryVersions] = None
+    model_config: Optional[ModelConfig] = None

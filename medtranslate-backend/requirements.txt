@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+openai
+sacrebleu
+nltk
+bert-score
+torch
+numpy
+pydantic
+python-multipart
+pandas
