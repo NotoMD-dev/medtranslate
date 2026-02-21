@@ -1,4 +1,42 @@
+import * as XLSX from "xlsx";
 import type { TranslationPair, TranslationResult } from "./types";
+
+/**
+ * Parse an XLSX ArrayBuffer into TranslationPair objects.
+ * Reads the first sheet and converts rows to objects using the header row.
+ */
+export function parseXLSX(buffer: ArrayBuffer): TranslationPair[] {
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) throw new Error("No sheets found in the workbook.");
+
+  const sheet = workbook.Sheets[sheetName];
+  const jsonRows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, {
+    defval: "",
+  });
+
+  if (jsonRows.length === 0) return [];
+
+  // Validate required columns
+  const headers = Object.keys(jsonRows[0]);
+  if (!headers.includes("spanish_source")) {
+    throw new Error(
+      `Missing required column: "spanish_source". Found: ${headers.join(", ")}`
+    );
+  }
+
+  return jsonRows.map((obj, i) => ({
+    pair_id: obj.pair_id || `row_${i + 1}`,
+    source:
+      (obj.source as TranslationPair["source"]) || "ClinSpEn_ClinicalCases",
+    content_type:
+      (obj.content_type as TranslationPair["content_type"]) ||
+      "clinical_case_report",
+    english_reference: obj.english_reference || "",
+    spanish_source: obj.spanish_source || "",
+    llm_english_translation: obj.llm_english_translation || "",
+  }));
+}
 
 /**
  * Parse a CSV string into TranslationPair objects.
