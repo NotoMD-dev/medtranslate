@@ -53,6 +53,75 @@ medtranslate/
 └── README.md
 ```
 
+## How the Application Works (End-to-End)
+
+MedTranslate follows a linear research workflow. Each stage writes data needed by the next stage.
+
+1. **Dataset preparation (offline Python script)**
+   - `scripts/build_dataset.py` combines ClinSpEn and UMass rows into one normalized CSV.
+   - Output includes the core aligned columns (`spanish_source`, `english_reference`, `source`) used throughout the app.
+
+2. **Upload and configuration (web UI)**
+   - In `app/page.tsx`, researchers upload the prepared CSV, select a model/provider, and configure a system prompt.
+   - Parsed rows are stored client-side and passed to downstream pages.
+
+3. **Batch translation (web UI + API route)**
+   - `app/translate/page.tsx` iterates through uploaded Spanish text and sends requests to `app/api/translate/route.ts`.
+   - The API route calls the selected LLM provider and returns English translations.
+   - The UI tracks progress and row-level statuses (success/error), producing a result table suitable for export.
+
+4. **Automated scoring (browser + optional Python backend)**
+   - Browser-side: `lib/metrics.ts` computes quick BLEU/METEOR/BERT-proxy estimates for immediate triage.
+   - Research-grade: `scripts/metrics/compute_all.py` computes BLEU, METEOR, and BERTScore (P/R/F1) using standard NLP libraries.
+
+5. **Clinical review and adjudication (web UI)**
+   - `app/review/page.tsx` prioritizes potentially risky translations (typically low metric scores).
+   - Physicians assign severity using the 0–3 Clinical Significance Scale.
+
+6. **Aggregate analysis dashboard (web UI)**
+   - `app/metrics/page.tsx` summarizes score distributions, means/variance, grade counts, and source-level comparisons.
+
+## Codebase Guide (What Lives Where)
+
+### `app/` — Route-level features
+- `app/page.tsx`: Project entry point; upload/configuration screen.
+- `app/translate/page.tsx`: Batch execution and status monitoring.
+- `app/review/page.tsx`: Human safety review workflow.
+- `app/metrics/page.tsx`: Aggregated metrics and study summary view.
+- `app/api/translate/route.ts`: Server endpoint that brokers translation requests to LLM providers.
+
+### `components/` — Reusable UI building blocks
+- `Header.tsx`: Shared top navigation and workflow tabs.
+- `MetricsCard.tsx`: Standard metric value display card.
+- `PairDetail.tsx`: Side-by-side source/reference/translation detail panel.
+- `GradeSelector.tsx`: Clinical significance grade control.
+- `StatusPill.tsx`: Compact status badges (e.g., translated, error, pending).
+
+### `lib/` — Shared non-UI logic
+- `types.ts`: Canonical TypeScript data models for rows, grades, and computed results.
+- `csv.ts`: CSV parsing and export helpers used by upload and download paths.
+- `metrics.ts`: Fast, client-safe metric implementations and summary helpers.
+
+### `scripts/` — Reproducible offline pipelines
+- `build_dataset.py`: Combines and normalizes source corpora into one study-ready CSV.
+- `translate_batch.py`: Non-UI batch translation runner for scripted experiments.
+- `metrics/compute_all.py`: Publication-oriented metric pipeline using NLTK + `bert_score`.
+
+## Data Model and Core CSV Columns
+
+The workflow assumes (at minimum) these fields:
+
+- `spanish_source`: Original Spanish sentence/note fragment.
+- `english_reference`: Human reference translation (gold standard).
+- `llm_english_translation`: Model-generated translation (added during translation stage).
+- `source`: Dataset origin label (`clinspen` or `umass`) for stratified analysis.
+
+Downstream scripts/pages may also add:
+
+- `bleu_score`, `meteor_score`
+- `bert_precision`, `bert_recall`, `bert_f1`
+- `clinical_grade` (0–3 physician adjudication)
+
 ## Quick Start
 
 ### Prerequisites
@@ -151,6 +220,38 @@ Physician-adjudicated grading of translation discrepancies:
 | **BLEU** | N-gram overlap (1-4 grams) | Standard MT benchmark, reproducible | Penalizes valid rephrasings |
 | **METEOR** | Synonym-aware matching with word order | Handles morphology and synonyms | English-centric stemmer |
 | **BERTScore** | Deep semantic similarity via contextual embeddings | Best proxy for meaning preservation | Requires GPU for large batches |
+
+### Metric Definitions (Research Context)
+
+#### BLEU (Bilingual Evaluation Understudy)
+- Computes modified n-gram precision between candidate translation and reference (commonly n=1..4).
+- Applies a **brevity penalty** so overly short outputs are not rewarded.
+- In this project:
+  - Browser metric (`lib/metrics.ts`) is a lightweight sentence-level approximation for fast triage.
+  - Python metric (`scripts/metrics/compute_all.py`) uses NLTK `sentence_bleu` with smoothing for publishable analysis.
+
+#### METEOR
+- Aligns candidate and reference tokens, then combines precision and recall (recall-weighted).
+- Includes penalties for fragmented alignments (poor word order) and can incorporate stems/synonyms.
+- In this project:
+  - Browser metric is simplified (token overlap + fragmentation penalty, no full synonym resources).
+  - Python metric uses NLTK `single_meteor_score` with WordNet resources for stronger linguistic matching.
+
+#### BERTScore
+- Embedding-based metric that compares contextual token representations from pretrained transformer models.
+- Produces:
+  - **Precision**: how much candidate content is supported by the reference.
+  - **Recall**: how much reference meaning is captured by the candidate.
+  - **F1**: harmonic mean of precision and recall; primary summary metric in many papers.
+- In this project:
+  - Browser uses a **BERT proxy** (n-gram cosine similarity) for instant feedback.
+  - Python pipeline computes true BERTScore via the `bert_score` package.
+
+### Interpreting Metric Values Safely
+
+- Higher automated scores usually indicate better lexical/semantic agreement with the reference, but they do **not** guarantee clinical safety.
+- Clinical translation risk often comes from small but critical errors (negation, dosage, temporality) that metrics can miss.
+- Therefore, MedTranslate pairs automated metrics with physician adjudication via the Clinical Significance Scale.
 
 ## Roadmap
 
