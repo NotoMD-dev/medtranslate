@@ -15,6 +15,7 @@ from app.config import (
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TEMPERATURE,
     OPENAI_API_KEY,
+    OPENAI_MAX_RETRIES,
     TRANSLATE_MAX_RETRIES,
     TRANSLATE_RETRY_DELAY,
 )
@@ -29,7 +30,10 @@ def _get_client() -> openai.AsyncOpenAI:
     if _client is None:
         if not OPENAI_API_KEY:
             raise RuntimeError("OPENAI_API_KEY is not configured")
-        _client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
+        _client = openai.AsyncOpenAI(
+            api_key=OPENAI_API_KEY,
+            max_retries=OPENAI_MAX_RETRIES,
+        )
     return _client
 
 

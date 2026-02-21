@@ -28,3 +28,6 @@ DEFAULT_MAX_TOKENS: int = 1024
 # Translation retry settings
 TRANSLATE_MAX_RETRIES: int = 3
 TRANSLATE_RETRY_DELAY: float = 2.0
+
+# Disable OpenAI SDK auto-retries by default so only app-level backoff runs.
+OPENAI_MAX_RETRIES: int = int(os.environ.get("OPENAI_MAX_RETRIES", "0"))
