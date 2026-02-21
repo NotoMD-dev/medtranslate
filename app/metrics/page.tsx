@@ -6,13 +6,14 @@ import MetricsCard from "@/components/MetricsCard";
 import { CLINICAL_GRADES } from "@/lib/types";
 import { summarizeMetric } from "@/lib/metrics";
 import type { TranslationResult } from "@/lib/types";
+import { getSessionResults } from "@/lib/session";
 
 export default function MetricsPage() {
   const [results, setResults] = useState<TranslationResult[]>([]);
 
   // Load persisted results from globalThis
   useEffect(() => {
-    const persisted = globalThis.__medtranslate_results;
+    const persisted = getSessionResults();
     if (persisted && persisted.length > 0) {
       setResults(persisted);
     }
