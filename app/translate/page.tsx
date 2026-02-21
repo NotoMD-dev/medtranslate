@@ -16,10 +16,23 @@ export default function TranslatePage() {
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const abortRef = useRef(false);
 
-  // Load data from global state on mount
+  // Load data from global state on mount — prefer persisted results
   useEffect(() => {
+    if (results.length > 0) return;
+
+    const persisted = globalThis.__medtranslate_results;
+    if (persisted && persisted.length > 0) {
+      setResults(persisted);
+      // Restore progress counts
+      const done = persisted.filter(
+        (r) => r._status === "complete" || r._status === "error"
+      ).length;
+      setProgress({ done, total: persisted.length });
+      return;
+    }
+
     const data = globalThis.__medtranslate_data;
-    if (data && data.length > 0 && results.length === 0) {
+    if (data && data.length > 0) {
       setResults(
         data.map((r, i) => ({
           ...r,
@@ -33,6 +46,13 @@ export default function TranslatePage() {
       );
     }
   }, [results.length]);
+
+  // Persist results to globalThis whenever they change
+  useEffect(() => {
+    if (results.length > 0) {
+      globalThis.__medtranslate_results = results;
+    }
+  }, [results]);
 
   const runTranslations = useCallback(async () => {
     setIsRunning(true);

@@ -12,6 +12,7 @@ declare global {
   var __medtranslate_data: TranslationPair[] | undefined;
   var __medtranslate_prompt: string | undefined;
   var __medtranslate_rowLimit: number | undefined;
+  var __medtranslate_results: import("@/lib/types").TranslationResult[] | undefined;
 }
 
 export default function UploadPage() {
@@ -97,6 +98,7 @@ export default function UploadPage() {
     globalThis.__medtranslate_data = undefined;
     globalThis.__medtranslate_prompt = undefined;
     globalThis.__medtranslate_rowLimit = undefined;
+    globalThis.__medtranslate_results = undefined;
     if (fileRef.current) {
       fileRef.current.value = "";
     }
