@@ -33,6 +33,18 @@ from app.config import (
 
 logger = logging.getLogger(__name__)
 
+
+def _uses_max_completion_tokens(model: str) -> bool:
+    """Return True if the model requires max_completion_tokens instead of max_tokens."""
+    model_lower = model.lower()
+    # o-series reasoning models always use max_completion_tokens
+    if model_lower.startswith(("o1", "o3", "o4")):
+        return True
+    # gpt-4o variants use max_completion_tokens
+    if "gpt-4o" in model_lower:
+        return True
+    return False
+
 _client: Optional[openai.AsyncOpenAI] = None
 _semaphore: Optional[asyncio.Semaphore] = None
 
@@ -112,10 +124,15 @@ async def translate_text(
         try:
             async with sem:
                 await _rate_limiter.acquire()
+                token_param = (
+                    {"max_completion_tokens": max_tokens}
+                    if _uses_max_completion_tokens(model)
+                    else {"max_tokens": max_tokens}
+                )
                 response = await client.chat.completions.create(
                     model=model,
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    **token_param,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": text},

@@ -25,14 +25,29 @@ SYSTEM_PROMPT = (
 )
 
 
+def _uses_max_completion_tokens(model: str) -> bool:
+    """Return True if the model requires max_completion_tokens instead of max_tokens."""
+    model_lower = model.lower()
+    if model_lower.startswith(("o1", "o3", "o4")):
+        return True
+    if "gpt-4o" in model_lower:
+        return True
+    return False
+
+
 def translate_openai(text: str, model: str) -> str:
     """Translate using OpenAI API."""
     import openai
     client = openai.OpenAI()
+    token_param = (
+        {"max_completion_tokens": 1024}
+        if _uses_max_completion_tokens(model)
+        else {"max_tokens": 1024}
+    )
     response = client.chat.completions.create(
         model=model,
         temperature=0,
-        max_tokens=1024,
+        **token_param,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": text},
