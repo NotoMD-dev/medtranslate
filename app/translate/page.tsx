@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import Header from "@/components/Header";
 import PairDetail from "@/components/PairDetail";
 import { pairsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
-import { submitJob, pollUntilDone, fetchJobResults, pollJobStatus } from "@/lib/api";
+import { submitJob, pollUntilDone, fetchJobResults, pollJobStatus, cancelJob } from "@/lib/api";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/types";
 import type { JobStatusResponse, JobResults, SentenceMetrics, ClinicalGrade } from "@/lib/types";
 import {
@@ -12,10 +12,10 @@ import {
   getSessionPrompt,
   getSessionJobId,
   getSessionJobResultsAsync,
-  getSessionGrades,
+  getSessionGradesAsync,
   setSessionJobId,
   setSessionJobResultsAsync,
-  setSessionGrades,
+  setSessionGradesAsync,
 } from "@/lib/session";
 
 type PageState = "idle" | "submitting" | "running" | "complete" | "failed";
@@ -30,13 +30,15 @@ export default function TranslatePage() {
   const [rowCount, setRowCount] = useState(0);
   const [computeBertscore, setComputeBertscore] = useState(false);
   const abortRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Restore persisted job results on mount
   useEffect(() => {
-    const persistedGrades = getSessionGrades();
-    if (persistedGrades) {
-      setGrades(persistedGrades);
-    }
+    getSessionGradesAsync().then((persistedGrades) => {
+      if (persistedGrades) {
+        setGrades(persistedGrades);
+      }
+    });
 
     // Load results async (IndexedDB first, then localStorage fallback)
     getSessionJobResultsAsync().then((persistedResults) => {
@@ -64,6 +66,8 @@ export default function TranslatePage() {
   const resumePolling = useCallback(async (jobId: string) => {
     setPageState("running");
     abortRef.current = false;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const results = await pollUntilDone(jobId, async (status) => {
@@ -80,14 +84,17 @@ export default function TranslatePage() {
         } catch {
           // Partial results not yet available — ignore
         }
-      });
+      }, 2000, controller.signal);
 
       setJobResults(results);
       await setSessionJobResultsAsync(results);
-      setPageState(results.status === "complete" ? "complete" : "failed");
+      const isStopped = results.status === "cancelled" || abortRef.current;
+      setPageState(isStopped ? "complete" : results.status === "complete" ? "complete" : "failed");
     } catch (err) {
-      setError((err as Error).message);
-      setPageState("failed");
+      if (!abortRef.current) {
+        setError((err as Error).message);
+        setPageState("failed");
+      }
     }
   }, []);
 
@@ -103,6 +110,8 @@ export default function TranslatePage() {
     setJobResults(null);
     setJobStatus(null);
     abortRef.current = false;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
@@ -133,26 +142,50 @@ export default function TranslatePage() {
         } catch {
           // Partial results not yet available — ignore
         }
-      });
+      }, 2000, controller.signal);
 
       setJobResults(results);
       await setSessionJobResultsAsync(results);
-      setPageState(results.status === "complete" ? "complete" : "failed");
+      const isStopped = results.status === "cancelled" || abortRef.current;
+      setPageState(isStopped ? "complete" : results.status === "complete" ? "complete" : "failed");
 
       if (results.status === "failed") {
         setError("Job failed on the backend. Check server logs for details.");
       }
     } catch (err) {
-      setError((err as Error).message);
-      setPageState("failed");
+      if (!abortRef.current) {
+        setError((err as Error).message);
+        setPageState("failed");
+      }
     }
   }, [computeBertscore]);
+
+  const handleAbort = useCallback(async () => {
+    abortRef.current = true;
+    abortControllerRef.current?.abort();
+
+    // Tell the backend to stop processing
+    const jobId = getSessionJobId();
+    if (jobId) {
+      try {
+        await cancelJob(jobId);
+      } catch {
+        // Best-effort — backend may already be done
+      }
+    }
+
+    // Save whatever partial results we have
+    if (jobResults) {
+      await setSessionJobResultsAsync(jobResults);
+    }
+    setPageState("complete");
+  }, [jobResults]);
 
   const handleGrade = useCallback(
     (pairId: string, grade: ClinicalGrade) => {
       setGrades((prev) => {
         const next = { ...prev, [pairId]: grade };
-        setSessionGrades(next);
+        setSessionGradesAsync(next);
         return next;
       });
     },
@@ -236,8 +269,18 @@ export default function TranslatePage() {
                   : "Run Translations"}
               </button>
             ) : (
-              <div className="px-7 py-2.5 rounded-xl text-accent-blue text-sm font-bold border border-accent-blue bg-transparent">
-                {pageState === "submitting" ? "Submitting..." : "Running..."}
+              <div className="flex items-center gap-2">
+                <div className="px-5 py-2.5 rounded-xl text-accent-blue text-sm font-bold border border-accent-blue bg-transparent">
+                  {pageState === "submitting" ? "Submitting..." : "Running..."}
+                </div>
+                {pageState === "running" && (
+                  <button
+                    onClick={handleAbort}
+                    className="px-5 py-2.5 rounded-xl text-red-400 text-sm font-bold border border-red-500/50 bg-red-500/10 cursor-pointer hover:bg-red-500/20 transition-colors"
+                  >
+                    Abort
+                  </button>
+                )}
               </div>
             )}
 

@@ -75,20 +75,38 @@ export async function fetchJobResults(jobId: string): Promise<JobResults> {
 }
 
 // ---------------------------------------------------------------------------
-// Polling helper — polls until complete/failed, calling onStatus each tick
+// POST /v1/jobs/{job_id}/cancel — cancel a running job
+// ---------------------------------------------------------------------------
+
+export async function cancelJob(jobId: string): Promise<void> {
+  const resp = await fetch(`${BACKEND_URL}/v1/jobs/${jobId}/cancel`, {
+    method: "POST",
+  });
+  if (!resp.ok) {
+    throw new Error(`Failed to cancel job: ${resp.status}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Polling helper — polls until complete/failed/cancelled, calling onStatus each tick
 // ---------------------------------------------------------------------------
 
 export async function pollUntilDone(
   jobId: string,
   onStatus: (status: JobStatusResponse) => void,
   intervalMs: number = 2000,
+  signal?: AbortSignal,
 ): Promise<JobResults> {
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    if (signal?.aborted) {
+      return fetchJobResults(jobId);
+    }
+
     const status = await pollJobStatus(jobId);
     onStatus(status);
 
-    if (status.status === "complete" || status.status === "failed") {
+    if (status.status === "complete" || status.status === "failed" || status.status === "cancelled") {
       return fetchJobResults(jobId);
     }
 

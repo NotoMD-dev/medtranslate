@@ -1,5 +1,5 @@
 import type { TranslationPair, JobResults, ClinicalGrade } from "@/lib/types";
-import { getJobResultsIDB, setJobResultsIDB } from "@/lib/idb";
+import { getJobResultsIDB, setJobResultsIDB, getGradesIDB, setGradesIDB } from "@/lib/idb";
 
 const STORAGE_KEYS = {
   data: "medtranslate:data",
@@ -113,7 +113,24 @@ export function getSessionGrades() {
 }
 
 export function setSessionGrades(grades: Record<string, ClinicalGrade> | undefined) {
-  writeJSON(STORAGE_KEYS.grades, grades);
+  try {
+    writeJSON(STORAGE_KEYS.grades, grades);
+  } catch {
+    // Quota exceeded — IndexedDB write handled by async variant.
+  }
+}
+
+// Async getter — tries IndexedDB first, falls back to localStorage.
+export async function getSessionGradesAsync(): Promise<Record<string, ClinicalGrade> | undefined> {
+  const fromIDB = await getGradesIDB();
+  if (fromIDB) return fromIDB;
+  return getSessionGrades();
+}
+
+// Async setter — writes to IndexedDB (large-data safe) and attempts localStorage.
+export async function setSessionGradesAsync(grades: Record<string, ClinicalGrade> | undefined): Promise<void> {
+  await setGradesIDB(grades);
+  setSessionGrades(grades);
 }
 
 // CSV file name (for display only)
@@ -141,4 +158,5 @@ export function clearSessionState() {
   setSessionCsvFileName(undefined);
   // Also clear IndexedDB (fire-and-forget)
   setJobResultsIDB(undefined).catch(() => {});
+  setGradesIDB(undefined).catch(() => {});
 }
