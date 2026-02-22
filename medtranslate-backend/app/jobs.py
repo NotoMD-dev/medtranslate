@@ -132,12 +132,16 @@ async def execute_job(job_id: str) -> None:
 
     # Tunable concurrency controls
     MAX_CONCURRENT_TRANSLATIONS = int(
-        os.getenv("MAX_CONCURRENT_TRANSLATIONS", "10")
+        os.getenv("MAX_CONCURRENT_TRANSLATIONS", "50")
     )
     CHUNK_SIZE = int(
-        os.getenv("TRANSLATION_CHUNK_SIZE", "200")
+        os.getenv("TRANSLATION_CHUNK_SIZE", "500")
     )
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TRANSLATIONS)
+    logger.info(
+        "Job %s: concurrency=%d, chunk_size=%d",
+        job_id, MAX_CONCURRENT_TRANSLATIONS, CHUNK_SIZE,
+    )
 
     async def _translate_one(index: int, row: InputRow):
         async with semaphore:
@@ -171,8 +175,14 @@ async def execute_job(job_id: str) -> None:
     # Phase 1: Concurrent translation (chunked)
     # Sentence metrics are updated incrementally as translations complete.
     # ------------------------------------------------------------------
+    chunk_num = 0
     for start in range(0, total, CHUNK_SIZE):
         end = min(start + CHUNK_SIZE, total)
+        chunk_num += 1
+        logger.info(
+            "Job %s: translating rows %d-%d of %d (chunk %d)",
+            job_id, start + 1, end, total, chunk_num,
+        )
         tasks = [
             asyncio.create_task(_translate_one(i, job.rows[i]))
             for i in range(start, end)
