@@ -17,7 +17,7 @@ CORS_ORIGINS: list[str] = [
 ]
 
 # Default translation settings
-DEFAULT_MODEL: str = os.environ.get("DEFAULT_MODEL", "gpt-5.2")
+DEFAULT_MODEL: str = os.environ.get("DEFAULT_MODEL", "gpt-4o")
 DEFAULT_SYSTEM_PROMPT: str = (
     "You are a medical interpreter. Translate the following Spanish clinical "
     "text into English, preserving all medical terminology and clinical meaning."
