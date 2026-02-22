@@ -11,7 +11,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import CORS_ORIGINS, DEFAULT_SYSTEM_PROMPT
-from app.jobs import InputRow, create_job, execute_job, get_job_results, get_job_status
+from app.jobs import InputRow, cancel_job, create_job, execute_job, get_job_results, get_job_status
 from app.schemas import JobCreated, JobResults, JobStatusResponse, ModelConfig
 
 logging.basicConfig(
@@ -83,6 +83,13 @@ async def submit_job(
     asyncio.create_task(execute_job(job_id))
 
     return JobCreated(job_id=job_id)
+
+
+@app.post("/v1/jobs/{job_id}/cancel")
+async def cancel_job_endpoint(job_id: str):
+    if not cancel_job(job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, "status": "cancelled"}
 
 
 @app.get("/v1/jobs/{job_id}", response_model=JobStatusResponse)

@@ -62,6 +62,7 @@ class Job:
     corpus_metrics: Optional[DatasetCorpusMetrics] = None
     library_versions: Optional[LibraryVersions] = None
     error: Optional[str] = None
+    cancelled: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +77,18 @@ def create_job(rows: list[InputRow], config: ModelConfig) -> str:
     job = Job(job_id=job_id, rows=rows, model_config=config)
     _jobs[job_id] = job
     return job_id
+
+
+def cancel_job(job_id: str) -> bool:
+    """Cancel a running job. Returns True if the job was found and cancelled."""
+    job = _jobs.get(job_id)
+    if job is None:
+        return False
+    job.cancelled = True
+    if job.status in (JobStatus.queued, JobStatus.running):
+        job.status = JobStatus.cancelled
+        logger.info("Job %s: cancelled by user", job_id)
+    return True
 
 
 def get_job(job_id: str) -> Optional[Job]:
@@ -172,6 +185,11 @@ async def execute_job(job_id: str) -> None:
     # Sentence metrics are updated incrementally as translations complete.
     # ------------------------------------------------------------------
     for start in range(0, total, CHUNK_SIZE):
+        # Check for cancellation before starting each chunk
+        if job.cancelled:
+            logger.info("Job %s: cancelled during translation phase", job_id)
+            break
+
         end = min(start + CHUNK_SIZE, total)
         tasks = [
             asyncio.create_task(_translate_one(i, job.rows[i]))
@@ -211,6 +229,12 @@ async def execute_job(job_id: str) -> None:
                 )
 
         await asyncio.sleep(0)
+
+    # If cancelled, finalize status and return early with partial results
+    if job.cancelled:
+        job.status = JobStatus.cancelled
+        logger.info("Job %s: stopped after %d translations", job_id, job.translated)
+        return
 
     # ------------------------------------------------------------------
     # Phase 2: METEOR (moved entirely off event loop)

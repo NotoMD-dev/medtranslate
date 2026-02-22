@@ -2,7 +2,7 @@
 // Backend job types (mirror the FastAPI schemas)
 // ---------------------------------------------------------------------------
 
-export type JobStatus = "queued" | "running" | "complete" | "failed";
+export type JobStatus = "queued" | "running" | "complete" | "failed" | "cancelled";
 
 export interface JobCreated {
   job_id: string;
