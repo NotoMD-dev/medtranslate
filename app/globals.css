@@ -2,61 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --surface-900: #0a0f1a;
-  --surface-800: #111827;
-  --surface-700: #1e293b;
-  --surface-600: #334155;
-  --accent-blue: #0ea5e9;
-  --accent-indigo: #6366f1;
+@import "../src/design-system/tokens.css";
+@import "../src/design-system/theme.css";
+@import "../src/design-system/primitives/primitives.css";
+
+html,
+body {
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--surface-700);
-}
-
-::-webkit-scrollbar-thumb {
-  background: #475569;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
-}
-
-/* Smooth transitions for interactive elements */
-button,
-a {
-  transition: all 0.15s ease;
-}
-
-/* Progress bar animation */
-@keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
-.progress-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--accent-blue) 0%,
-    var(--accent-indigo) 50%,
-    var(--accent-blue) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 2s linear infinite;
-}
+* { box-sizing: border-box; }
