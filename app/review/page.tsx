@@ -2,25 +2,29 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import Header from "@/components/Header";
-import { CLINICAL_GRADES } from "@/lib/types";
+import { CLINICAL_GRADES, REFERENCE_FLAG_REASONS } from "@/lib/types";
 import { exportResultsCSV, downloadFile } from "@/lib/csv";
 import {
   getSessionJobResultsAsync,
   getSessionGradesAsync,
   setSessionGradesAsync,
+  getSessionRefFlagsAsync,
+  setSessionRefFlagsAsync,
 } from "@/lib/session";
-import type { JobResults, SentenceMetrics, ClinicalGrade } from "@/lib/types";
+import type { JobResults, SentenceMetrics, ClinicalGrade, ReferenceFlag, ReferenceFlagReason } from "@/lib/types";
 
 type ReviewView = "queue" | "table";
 
 export default function ReviewPage() {
   const [jobResults, setJobResults] = useState<JobResults | null>(null);
   const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
+  const [refFlags, setRefFlags] = useState<Record<string, ReferenceFlag>>({});
   const [threshold, setThreshold] = useState(0.4);
   const [thresholdInput, setThresholdInput] = useState("0.4");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [view, setView] = useState<ReviewView>("queue");
   const [jumpInput, setJumpInput] = useState("");
+  const [refFlagOpen, setRefFlagOpen] = useState(false);
 
   useEffect(() => {
     getSessionJobResultsAsync().then((persisted) => {
@@ -28,6 +32,9 @@ export default function ReviewPage() {
     });
     getSessionGradesAsync().then((persistedGrades) => {
       if (persistedGrades) setGrades(persistedGrades);
+    });
+    getSessionRefFlagsAsync().then((persistedFlags) => {
+      if (persistedFlags) setRefFlags(persistedFlags);
     });
   }, []);
 
@@ -65,6 +72,49 @@ export default function ReviewPage() {
     []
   );
 
+  const handleRefFlagToggle = useCallback(
+    (pairId: string, reason: ReferenceFlagReason) => {
+      setRefFlags((prev) => {
+        const existing = prev[pairId] ?? { reasons: [], notes: "" };
+        const hasReason = existing.reasons.includes(reason);
+        const nextReasons = hasReason
+          ? existing.reasons.filter((r) => r !== reason)
+          : [...existing.reasons, reason];
+        const next = nextReasons.length === 0 && !existing.notes
+          ? (() => { const { [pairId]: _, ...rest } = prev; return rest; })()
+          : { ...prev, [pairId]: { ...existing, reasons: nextReasons } };
+        setSessionRefFlagsAsync(next);
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleRefFlagNotes = useCallback(
+    (pairId: string, notes: string) => {
+      setRefFlags((prev) => {
+        const existing = prev[pairId] ?? { reasons: [], notes: "" };
+        const next = !notes && existing.reasons.length === 0
+          ? (() => { const { [pairId]: _, ...rest } = prev; return rest; })()
+          : { ...prev, [pairId]: { ...existing, notes } };
+        setSessionRefFlagsAsync(next);
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleClearRefFlag = useCallback(
+    (pairId: string) => {
+      setRefFlags((prev) => {
+        const { [pairId]: _, ...rest } = prev;
+        setSessionRefFlagsAsync(rest);
+        return rest;
+      });
+    },
+    []
+  );
+
   const handleThresholdApply = useCallback(() => {
     const val = parseFloat(thresholdInput);
     if (!isNaN(val) && val >= 0 && val <= 1) {
@@ -83,9 +133,9 @@ export default function ReviewPage() {
 
   const handleExport = useCallback(() => {
     if (!jobResults) return;
-    const csv = exportResultsCSV(jobResults.sentence_metrics, grades);
+    const csv = exportResultsCSV(jobResults.sentence_metrics, grades, refFlags);
     downloadFile(csv, "medtranslate_results.csv");
-  }, [jobResults, grades]);
+  }, [jobResults, grades, refFlags]);
 
   // Navigate to next ungraded pair
   const handleSkip = useCallback(() => {
@@ -104,6 +154,9 @@ export default function ReviewPage() {
       }
     }
   }, [flagged, grades, currentIndex]);
+
+  // Close the ref flag panel when navigating to a different pair
+  useEffect(() => { setRefFlagOpen(false); }, [currentIndex]);
 
   const currentPair: SentenceMetrics | null = flagged[currentIndex] ?? null;
 
@@ -260,6 +313,11 @@ export default function ReviewPage() {
                     Grade {grades[currentPair.pair_id]}
                   </span>
                 )}
+                {refFlags[currentPair.pair_id] && (
+                  <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--warning-light)", color: "var(--warning)", border: "1px solid var(--warning-border)" }}>
+                    Ref. Flagged
+                  </span>
+                )}
               </div>
 
               {/* Three columns */}
@@ -320,6 +378,88 @@ export default function ReviewPage() {
                   Next Pair &rarr;
                 </button>
               </div>
+
+              {/* Reference quality flag */}
+              <div style={{ borderTop: "1px solid var(--border-subtle)", marginTop: 20, paddingTop: 16 }}>
+                <button
+                  onClick={() => setRefFlagOpen(!refFlagOpen)}
+                  style={{
+                    fontFamily: "var(--font)", display: "flex", alignItems: "center", gap: 10,
+                    cursor: "pointer", userSelect: "none", width: "100%",
+                    padding: "12px 16px", borderRadius: "var(--radius-xs)",
+                    background: refFlags[currentPair.pair_id] ? "var(--warning-light)" : "var(--bg-inset)",
+                    border: refFlags[currentPair.pair_id] ? "1px solid var(--warning-border)" : "1px solid var(--border)",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>{refFlags[currentPair.pair_id] ? "\u26A0" : "\u2691"}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: refFlags[currentPair.pair_id] ? "var(--warning)" : "var(--text-secondary)" }}>
+                    Flag Reference Translation Issue
+                  </span>
+                  {refFlags[currentPair.pair_id] && (
+                    <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600, background: "var(--warning)", color: "#fff" }}>
+                      {refFlags[currentPair.pair_id].reasons.length} issue{refFlags[currentPair.pair_id].reasons.length !== 1 ? "s" : ""} flagged
+                    </span>
+                  )}
+                  <span style={{ flex: 1 }} />
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{refFlagOpen ? "\u25B2" : "\u25BC"}</span>
+                </button>
+                {refFlagOpen && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
+                      Select issues with the reference (gold standard) translation:
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+                      {REFERENCE_FLAG_REASONS.map((r) => {
+                        const isActive = refFlags[currentPair.pair_id]?.reasons.includes(r.reason) ?? false;
+                        return (
+                          <button
+                            key={r.reason}
+                            onClick={() => handleRefFlagToggle(currentPair.pair_id, r.reason)}
+                            title={r.description}
+                            style={{
+                              fontFamily: "var(--font)", fontSize: 11, fontWeight: 500,
+                              padding: "6px 12px", borderRadius: "var(--radius-xs)",
+                              border: isActive ? "1px solid var(--warning)" : "1px solid var(--border)",
+                              background: isActive ? "var(--warning-light)" : "transparent",
+                              color: isActive ? "var(--warning)" : "var(--text-secondary)",
+                              cursor: "pointer", transition: "all 0.15s",
+                            }}
+                          >
+                            {r.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <textarea
+                      placeholder="Optional notes for the interpreter (e.g. what seems wrong, which part is inaccurate)..."
+                      value={refFlags[currentPair.pair_id]?.notes ?? ""}
+                      onChange={(e) => handleRefFlagNotes(currentPair.pair_id, e.target.value)}
+                      style={{
+                        fontFamily: "var(--font)", fontSize: 12, width: "100%",
+                        padding: "8px 12px", borderRadius: "var(--radius-xs)",
+                        border: "1px solid var(--border)", background: "var(--bg-inset)",
+                        color: "var(--text-primary)", resize: "vertical", minHeight: 56,
+                        lineHeight: 1.5,
+                      }}
+                    />
+                    {refFlags[currentPair.pair_id] && (
+                      <button
+                        onClick={() => handleClearRefFlag(currentPair.pair_id)}
+                        style={{
+                          fontFamily: "var(--font)", fontSize: 11, fontWeight: 500,
+                          padding: "4px 10px", borderRadius: "var(--radius-xs)",
+                          background: "transparent", color: "var(--text-muted)",
+                          border: "1px solid var(--border)", cursor: "pointer",
+                          marginTop: 8,
+                        }}
+                      >
+                        Clear flag
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -369,6 +509,7 @@ export default function ReviewPage() {
                   <th>LLM English (output)</th>
                   <th>METEOR</th>
                   <th>Grade</th>
+                  <th>Ref. Flag</th>
                 </tr>
               </thead>
               <tbody>
@@ -399,6 +540,15 @@ export default function ReviewPage() {
                       {grades[r.pair_id] != null ? (
                         <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: CLINICAL_GRADES[grades[r.pair_id]].bg, color: CLINICAL_GRADES[grades[r.pair_id]].color }}>
                           {grades[r.pair_id]}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>--</span>
+                      )}
+                    </td>
+                    <td>
+                      {refFlags[r.pair_id] ? (
+                        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 10, fontWeight: 600, background: "var(--warning-light)", color: "var(--warning)" }}>
+                          {refFlags[r.pair_id].reasons.length} issue{refFlags[r.pair_id].reasons.length !== 1 ? "s" : ""}
                         </span>
                       ) : (
                         <span style={{ color: "var(--text-muted)", fontSize: 11 }}>--</span>

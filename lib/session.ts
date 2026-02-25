@@ -1,5 +1,5 @@
-import type { TranslationPair, JobResults, ClinicalGrade } from "@/lib/types";
-import { getJobResultsIDB, setJobResultsIDB, getGradesIDB, setGradesIDB } from "@/lib/idb";
+import type { TranslationPair, JobResults, ClinicalGrade, ReferenceFlag } from "@/lib/types";
+import { getJobResultsIDB, setJobResultsIDB, getGradesIDB, setGradesIDB, getRefFlagsIDB, setRefFlagsIDB } from "@/lib/idb";
 
 const STORAGE_KEYS = {
   data: "medtranslate:data",
@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   jobId: "medtranslate:jobId",
   jobResults: "medtranslate:jobResults",
   grades: "medtranslate:grades",
+  referenceFlags: "medtranslate:referenceFlags",
   csvFile: "medtranslate:csvFile",
   model: "medtranslate:model",
   sourceLanguage: "medtranslate:sourceLanguage",
@@ -140,6 +141,30 @@ export async function setSessionGradesAsync(grades: Record<string, ClinicalGrade
   setSessionGrades(grades);
 }
 
+// Reference quality flags (reviewer flags gold-standard issues)
+export function getSessionRefFlags() {
+  return readJSON<Record<string, ReferenceFlag>>(STORAGE_KEYS.referenceFlags);
+}
+
+export function setSessionRefFlags(flags: Record<string, ReferenceFlag> | undefined) {
+  try {
+    writeJSON(STORAGE_KEYS.referenceFlags, flags);
+  } catch {
+    // Quota exceeded — IndexedDB write handled by async variant.
+  }
+}
+
+export async function getSessionRefFlagsAsync(): Promise<Record<string, ReferenceFlag> | undefined> {
+  const fromIDB = await getRefFlagsIDB();
+  if (fromIDB) return fromIDB;
+  return getSessionRefFlags();
+}
+
+export async function setSessionRefFlagsAsync(flags: Record<string, ReferenceFlag> | undefined): Promise<void> {
+  await setRefFlagsIDB(flags);
+  setSessionRefFlags(flags);
+}
+
 // CSV file name (for display only)
 export function getSessionCsvFileName() {
   if (!canUseStorage()) return undefined;
@@ -201,6 +226,7 @@ export function clearSessionState() {
   setSessionJobId(undefined);
   setSessionJobResults(undefined);
   setSessionGrades(undefined);
+  setSessionRefFlags(undefined);
   setSessionCsvFileName(undefined);
   setSessionModel(undefined);
   setSessionSourceLanguage(undefined);
@@ -208,4 +234,5 @@ export function clearSessionState() {
   // Also clear IndexedDB (fire-and-forget)
   setJobResultsIDB(undefined).catch(() => {});
   setGradesIDB(undefined).catch(() => {});
+  setRefFlagsIDB(undefined).catch(() => {});
 }
