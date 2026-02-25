@@ -1,6 +1,6 @@
 # Data Schema
 
-This document describes all data structures used in MedTranslate, including TypeScript interfaces, backend Pydantic models, CSV column schemas, and localStorage keys.
+This document describes all data structures used in MedTranslate, including TypeScript interfaces, backend Pydantic models, CSV column schemas, and client-side storage schemas.
 
 ---
 
@@ -77,6 +77,19 @@ interface LibraryVersions {
 }
 ```
 
+### `ModelConfig`
+
+Translation configuration used for a job.
+
+```typescript
+interface ModelConfig {
+  model: string;
+  system_prompt: string;
+  temperature: number;
+  max_tokens: number;
+}
+```
+
 ### `JobResults`
 
 Complete results from a backend job.
@@ -88,8 +101,14 @@ interface JobResults {
   corpus_metrics: DatasetCorpusMetrics | null;
   sentence_metrics: SentenceMetrics[];
   library_versions: LibraryVersions | null;
-  model_config: ModelConfig | null;
+  translation_config: ModelConfig | null;
 }
+```
+
+### `JobStatus`
+
+```typescript
+type JobStatus = "queued" | "running" | "complete" | "failed" | "cancelled";
 ```
 
 ### `JobStatusResponse`
@@ -99,7 +118,7 @@ Status polling response.
 ```typescript
 interface JobStatusResponse {
   job_id: string;
-  status: "queued" | "running" | "complete" | "failed";
+  status: JobStatus;
   total: number;
   translated: number;
   scored: number;
@@ -112,6 +131,19 @@ interface JobStatusResponse {
 
 ```typescript
 type ClinicalGrade = 0 | 1 | 2 | 3;
+```
+
+### `CLINICAL_GRADES`
+
+Array defining grade metadata (label, color, description). Used by `GradeSelector`, `GradeRow`, and the Review/Metrics pages.
+
+```typescript
+const CLINICAL_GRADES = [
+  { grade: 0, label: "No error",               color: "#10b981", description: "..." },
+  { grade: 1, label: "Minor linguistic error",  color: "#f59e0b", description: "..." },
+  { grade: 2, label: "Moderate error",          color: "#f97316", description: "..." },
+  { grade: 3, label: "Clinically significant",  color: "#ef4444", description: "..." },
+];
 ```
 
 ---
@@ -150,6 +182,10 @@ Produced by `scripts/build_dataset.py` or manually prepared.
 | `english_reference` | No | string | Human reference translation (required for metrics) |
 | `llm_english_translation` | No | string | Pre-existing translation (for re-scoring) |
 
+### Input XLSX
+
+Same column schema as CSV. XLSX files are uploaded to the backend, which parses them server-side using `openpyxl` and converts to the internal row format. The frontend does not parse XLSX files.
+
 ### Output / Export CSV
 
 Exported from the frontend after a job completes.
@@ -169,7 +205,9 @@ Exported from the frontend after a job completes.
 
 ---
 
-## localStorage Schema
+## Client-Side Storage
+
+### localStorage Schema
 
 Session state is persisted in the browser's `localStorage` via `lib/session.ts`.
 
@@ -179,6 +217,32 @@ Session state is persisted in the browser's `localStorage` via `lib/session.ts`.
 | `medtranslate:prompt` | `string` | The active system prompt |
 | `medtranslate:rowLimit` | `number` | The user-selected row limit |
 | `medtranslate:jobId` | `string` | The current backend job ID |
-| `medtranslate:jobResults` | `JobResults` | Full backend results (corpus + sentence metrics) |
-| `medtranslate:grades` | `Record<string, ClinicalGrade>` | Physician-assigned clinical grades by pair_id |
 | `medtranslate:csvFile` | `string` | Original uploaded file name (display only) |
+| `medtranslate:grades` | `Record<string, ClinicalGrade>` | Physician-assigned clinical grades by pair_id |
+
+### IndexedDB Schema
+
+Large data is stored in IndexedDB via `lib/idb.ts` to avoid localStorage's ~5 MB quota limit.
+
+| Database | Version | Object Store | Description |
+|---|---|---|---|
+| `medtranslate` | 1 | `session` | Key-value store for large objects |
+
+| Key (within `session` store) | Type | Description |
+|---|---|---|
+| `jobResults` | `JobResults` | Full backend results (corpus + sentence metrics) |
+| `grades` | `Record<string, ClinicalGrade>` | Redundant copy of grades for safety |
+
+**Functions** (exported from `lib/idb.ts`):
+- `getJobResultsIDB()` → `Promise<JobResults | null>`
+- `setJobResultsIDB(results: JobResults | null)` → `Promise<void>`
+- `getGradesIDB()` → `Promise<Record<string, ClinicalGrade> | null>`
+- `setGradesIDB(grades: Record<string, ClinicalGrade> | null)` → `Promise<void>`
+
+### Theme Storage
+
+| Key | Value | Location |
+|---|---|---|
+| `medtranslate-theme` | `"light"` \| `"dark"` | localStorage |
+
+Managed by `ThemeProvider` in `src/design-system/primitives/ThemeProvider.tsx`.

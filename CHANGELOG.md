@@ -4,6 +4,63 @@ All notable changes to the MedTranslate project are documented in this file. The
 
 ---
 
+## [1.3.0] - 2026-02-25
+
+### Added — Systems Design Documentation
+
+- **SYSTEMS_DESIGN.md**: Full UI/UX design specification covering design tokens, typography, color system, spacing, elevation, component library (primitives and app components), page specifications, interaction patterns, theming, animations, iconography, accessibility, and guidelines for adding or modifying elements
+
+### Changed — Documentation Refresh
+
+- **README.md**: Added Features section, Tech Stack table, Documentation index; updated directory structure to include design system and IndexedDB; added cancel endpoint to API table; added links to all documentation files
+- **ARCHITECTURE.md**: Added design system section, IndexedDB storage documentation, XLSX backend parsing note, BERTScore model switch note; updated directory structure with `src/design-system/` and `lib/idb.ts`; added client-side storage table
+- **API_SPEC.md**: Added `POST /v1/jobs/{job_id}/cancel` endpoint; added `compute_bertscore` form field; added XLSX file support; updated status enum to include `cancelled`; documented `roberta-base` model; updated `model_config` to `translation_config`
+- **DATA_SCHEMA.md**: Added IndexedDB schema (database, object store, keys, functions); added theme storage; added `ModelConfig`, `JobStatus`, and `CLINICAL_GRADES` type definitions; added XLSX input section; updated localStorage schema
+- **SECURITY.md**: Added File Upload Security section documenting XLSX vulnerability fix; added client-side storage security table; updated input validation for XLSX; added `xlsx` removal to deployment checklist
+- **METRICS_VALIDATION.md**: Added BERTScore lazy loading documentation; added `roberta-base` model note; added Metrics Display section documenting dashboard and per-row display; added configurable METEOR threshold documentation
+- **CHANGELOG.md**: This entry
+- **medtranslate-backend/README.md**: Added cancel endpoint; added XLSX support note; added environment variable table; added project structure section
+
+---
+
+## [1.2.0] - 2026-02-24
+
+### Changed — UI Redesign
+
+- Redesigned the entire frontend with a calm academic theme
+- Added token-based design system (`src/design-system/`) with CSS custom properties
+- Added light/dark mode toggle via `ThemeProvider`
+- Added UI primitives: Card, Button, Badge, MetricValue, ProgressBar, GradeRow, SectionLabel, PageHeader
+- Replaced hard-coded styles with CSS variable references
+- Added fadeUp entry animations with staggered delays
+- Added custom scrollbar styling
+- Updated navigation bar with theme toggle button
+
+### Fixed
+
+- Fixed XLSX upload handling
+- Fixed CORS configuration for production deployment
+- Fixed corpus BLEU crash on empty datasets
+
+---
+
+## [1.1.0] - 2026-02-23
+
+### Fixed — Security & Stability
+
+- **XLSX vulnerability**: Removed `xlsx` (SheetJS) npm package from frontend; moved Excel parsing to backend using `openpyxl`
+- **IndexedDB storage**: Added `lib/idb.ts` for storing large job results that exceed localStorage's ~5MB quota
+- **Translation abort**: Added job cancellation via `POST /v1/jobs/{id}/cancel`
+- **Clinical grading queue**: Added queue-based review workflow with configurable METEOR threshold
+- **Render OOM**: Switched BERTScore model to `roberta-base` for memory stability on Render
+- **Render port binding**: Fixed dynamic port binding for Render deployment
+- **Pydantic v2**: Fixed reserved field name conflict (renamed `model_config` to `translation_config` in schemas)
+- **SacreBLEU display**: Fixed BLEU signature display formatting
+- **BLEU signature error**: Fixed error when computing BLEU on datasets with missing references
+- **METEOR scores**: Fixed missing METEOR scores for rows with empty reference translations
+
+---
+
 ## [1.0.0] - 2026-02-21
 
 ### Changed — Backend-Driven Architecture Migration

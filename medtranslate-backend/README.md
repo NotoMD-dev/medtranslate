@@ -32,13 +32,63 @@ docker build -t medtranslate-backend .
 docker run -p 8000:8000 -e OPENAI_API_KEY=sk-... medtranslate-backend
 ```
 
+## Project Structure
+
+```
+medtranslate-backend/
+├── app/
+│   ├── main.py           # FastAPI app, CORS, all endpoints
+│   ├── jobs.py           # In-memory job store, async background execution
+│   ├── metrics.py        # SacreBLEU corpus BLEU, NLTK METEOR, BERTScore
+│   ├── translate.py      # OpenAI translation with retry and rate-limit handling
+│   ├── schemas.py        # Pydantic request/response models
+│   ├── config.py         # Environment variable configuration
+│   └── __init__.py
+├── worker.py             # Standalone worker entry point
+├── requirements.txt      # Python dependencies
+├── Dockerfile            # Docker build for Render deployment
+├── .env.example          # Environment variable template
+└── README.md             # This file
+```
+
 ## API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/v1/jobs` | Submit CSV + config, returns `job_id` |
+| POST | `/v1/jobs` | Submit CSV/XLSX + config, returns `job_id` |
 | GET | `/v1/jobs/{job_id}` | Poll job status and progress |
 | GET | `/v1/jobs/{job_id}/results` | Get full results with metrics |
+| POST | `/v1/jobs/{job_id}/cancel` | Cancel a running job |
+
+### File Upload
+
+The `POST /v1/jobs` endpoint accepts both CSV and XLSX files via multipart form upload. XLSX files are parsed server-side using `openpyxl`. The required column is `spanish_source`.
+
+### Job Lifecycle
+
+```
+queued → running → complete
+                 → failed
+                 → cancelled (via POST /cancel)
+```
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `OPENAI_API_KEY` | Yes | — | OpenAI API key for translations |
+| `CORS_ORIGINS` | No | `http://localhost:3000` | Comma-separated allowed origins |
+| `DEFAULT_MODEL` | No | `gpt-4o` | Default OpenAI model |
+
+## Metrics
+
+| Metric | Library | Notes |
+|---|---|---|
+| Corpus BLEU | sacrebleu | 13a tokenization, signature reported |
+| METEOR | NLTK | WordNet + Porter stemming + alignment penalty |
+| BERTScore F1 | bert-score | `roberta-base`, `rescale_with_baseline=True`, lazy-loaded |
+
+Library versions are recorded with every job result for reproducibility.
 
 ## Deployment (Render)
 

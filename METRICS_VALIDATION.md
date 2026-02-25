@@ -28,7 +28,7 @@ All metrics are computed in the FastAPI backend (`medtranslate-backend/app/metri
 
 ### What Is Returned
 
-- `bleu_score`: The corpus-level BLEU score
+- `bleu_score`: The corpus-level BLEU score (0.0–100.0)
 - `bleu_signature`: Full signature string including n-gram precisions, brevity penalty, and lengths
 
 ### Computation Scope
@@ -82,11 +82,12 @@ Approximate or simplified JavaScript versions of METEOR are NOT acceptable for p
 
 ### Configuration
 
-| Parameter | Value |
-|---|---|
-| `lang` | `"en"` |
-| `rescale_with_baseline` | `True` (required for publication) |
-| `batch_size` | 64 |
+| Parameter | Value | Notes |
+|---|---|---|
+| `lang` | `"en"` | English language |
+| `model_type` | `roberta-base` | Switched from default for Render memory stability |
+| `rescale_with_baseline` | `True` | Required for publication |
+| `batch_size` | 64 | Configurable for memory management |
 
 ### What Is Recorded
 
@@ -94,6 +95,10 @@ Approximate or simplified JavaScript versions of METEOR are NOT acceptable for p
 - `bert-score` library version
 - `torch` library version
 - Model used (recorded via library defaults)
+
+### Lazy Loading
+
+BERTScore computation requires ~400MB of PyTorch model weights. It is only loaded and computed when `compute_bertscore=true` is passed in the job configuration. This prevents unnecessary memory usage on resource-constrained servers.
 
 ---
 
@@ -131,10 +136,35 @@ Automated metrics cannot reliably detect clinically dangerous translation errors
 
 ### Review Workflow
 
-1. The **Review page** filters completed translation pairs to those with **METEOR < 0.4**, which serves as a triage threshold for potentially problematic translations.
-2. A physician reviews each flagged pair by comparing the Spanish source, human reference, and LLM translation.
-3. The physician assigns a clinical significance grade (0–3).
-4. Grade assignments are stored client-side and can be exported with the results CSV.
+1. The **Review page** filters completed translation pairs to those with **METEOR < threshold** (default 0.4, configurable), which serves as a triage threshold for potentially problematic translations.
+2. A physician reviews each flagged pair by comparing the Spanish source, human reference, and LLM translation in a three-column detail panel.
+3. The physician assigns a clinical significance grade (0–3) using the `GradeSelector` component.
+4. Grade assignments are stored client-side (localStorage + IndexedDB) and can be exported with the results CSV.
+5. Grade distribution is visualized in real-time on both the Review and Metrics pages.
+
+---
+
+## Metrics Display
+
+### Metrics Dashboard (`/metrics`)
+
+The Metrics page displays:
+
+- **Corpus BLEU**: Overall + per-dataset (ClinSpEn, UMass) with signature strings
+- **METEOR statistics**: Mean, standard deviation, min, max across all sentences
+- **BERTScore F1 statistics**: Mean, standard deviation, min, max (if computed)
+- **Clinical grade distribution**: Bar chart showing count per grade level
+- **Flagged pair count**: Number of pairs below the METEOR threshold
+- **Library versions**: Exact versions of sacrebleu, NLTK, bert-score, and torch
+
+### Per-Row Display (`/translate`, `/review`)
+
+Each row in the results table shows:
+- METEOR score (4 decimal places)
+- BERTScore F1 (4 decimal places, if computed)
+- Status badge (pending, translating, scoring, complete, error)
+
+The PairDetail modal shows the full three-column text comparison alongside per-sentence metrics and the grade selector.
 
 ---
 
