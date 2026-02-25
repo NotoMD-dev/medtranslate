@@ -1,6 +1,6 @@
 # API Specification
 
-This document describes the HTTP API exposed by the MedTranslate backend (FastAPI). The backend handles all translation and metric computation. The frontend submits jobs, polls status, and fetches results.
+This document describes the HTTP API exposed by the MedTranslate backend (FastAPI). The backend handles all translation, XLSX parsing, and metric computation. The frontend submits jobs, polls status, and fetches results.
 
 ## Base URLs
 
@@ -13,7 +13,7 @@ https://your-app.onrender.com  (production — Render)
 
 ## `POST /v1/jobs`
 
-Submit a CSV file and model configuration to start a translation + metrics job.
+Submit a CSV or XLSX file and model configuration to start a translation + metrics job.
 
 **Source file**: `medtranslate-backend/app/main.py`
 
@@ -23,15 +23,18 @@ Submit a CSV file and model configuration to start a translation + metrics job.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `file` | file (CSV) | Yes | — | CSV file with at least a `spanish_source` column |
+| `file` | file (CSV/XLSX) | Yes | — | CSV or XLSX file with at least a `spanish_source` column |
 | `model` | string | No | `"gpt-4o"` | OpenAI model identifier |
 | `system_prompt` | string | No | *(medical interpreter prompt)* | System prompt for the LLM |
 | `temperature` | float | No | `0.0` | Sampling temperature |
 | `max_tokens` | int | No | `1024` | Maximum tokens in the LLM response |
+| `compute_bertscore` | boolean | No | `false` | Whether to compute BERTScore (requires ~400MB torch) |
 
-**Required CSV columns**: `spanish_source`
+**Supported file types**: `.csv`, `.xlsx`
 
-**Optional CSV columns**: `pair_id`, `source`, `content_type`, `english_reference`, `llm_english_translation`
+**Required columns**: `spanish_source`
+
+**Optional columns**: `pair_id`, `source`, `content_type`, `english_reference`, `llm_english_translation`
 
 ### Response — Success
 
@@ -78,7 +81,7 @@ Poll the status and progress of a running job.
 | Field | Type | Description |
 |---|---|---|
 | `job_id` | string | The job identifier |
-| `status` | string | One of: `queued`, `running`, `complete`, `failed` |
+| `status` | string | One of: `queued`, `running`, `complete`, `failed`, `cancelled` |
 | `total` | int | Total rows in the dataset |
 | `translated` | int | Rows translated so far |
 | `scored` | int | Rows with metrics computed so far |
@@ -142,7 +145,7 @@ Retrieve complete results after a job finishes.
     "bert_score": "0.3.13",
     "torch": "2.5.1"
   },
-  "model_config": {
+  "translation_config": {
     "model": "gpt-4o",
     "system_prompt": "You are a medical interpreter...",
     "temperature": 0.0,
@@ -161,6 +164,33 @@ Retrieve complete results after a job finishes.
 | `sentence_metrics[].meteor` | Per-sentence METEOR (NLTK, with WordNet + stemming) |
 | `sentence_metrics[].bertscore_f1` | Per-sentence BERTScore F1 (rescaled with baseline) |
 | `library_versions` | Exact library versions for reproducibility reporting |
+| `translation_config` | Model and prompt configuration used for the job |
+
+---
+
+## `POST /v1/jobs/{job_id}/cancel`
+
+Cancel a running translation job. Rows already translated and scored are preserved; remaining rows are skipped.
+
+### Response — Success
+
+**Status**: `200 OK`
+
+```json
+{
+  "status": "cancelled"
+}
+```
+
+### Response — Not Found
+
+**Status**: `404 Not Found`
+
+```json
+{
+  "detail": "Job not found"
+}
+```
 
 ---
 
@@ -201,8 +231,11 @@ Retrieve complete results after a job finishes.
 ### BERTScore
 
 - Library: `bert-score`
+- Model: `roberta-base` (switched from default for memory stability on Render)
 - `rescale_with_baseline=True`
 - Returns F1 score per sentence
+- Batch size: 64
+- Lazy-loaded: only computed if `compute_bertscore=true` in job config
 - Library versions recorded for reproducibility
 
 ---
