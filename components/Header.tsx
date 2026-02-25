@@ -35,7 +35,7 @@ export default function Header() {
                 background: "none",
                 border: "none",
                 fontFamily: "var(--font)",
-                fontSize: 14,
+                fontSize: 15,
                 fontWeight: 500,
                 color: isActive ? "var(--accent-text)" : "var(--text-muted)",
                 cursor: "pointer",

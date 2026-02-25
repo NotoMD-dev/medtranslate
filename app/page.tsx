@@ -149,7 +149,7 @@ export default function UploadPage() {
         >
           Upload Dataset
         </h1>
-        <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
+        <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
           Import a CSV/XLSX with clinical translation pairs. Required column:{" "}
           <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
             spanish_source
@@ -187,13 +187,13 @@ export default function UploadPage() {
               background: isDragging ? "var(--accent-soft)" : "transparent",
             }}
           >
-            <div style={{ fontSize: 32, marginBottom: 12, color: "var(--text-muted)" }}>
+            <div style={{ fontSize: 36, marginBottom: 12, color: "var(--text-muted)" }}>
               &#8593;
             </div>
-            <div style={{ fontSize: 14, color: "var(--text-secondary)" }}>
-              Drag and drop CSV file here or click to browse
+            <div style={{ fontSize: 15, color: "var(--text-secondary)" }}>
+              Drag and drop CSV/Excel (.xlsx) files here or click to browse
             </div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+            <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>
               Supports .csv and .xlsx up to 50MB
             </div>
           </div>
@@ -219,10 +219,10 @@ export default function UploadPage() {
                   : "CSV"}
               </div>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>
                   {fileName}
                 </div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
                   {rows.length.toLocaleString()} rows loaded
                 </div>
               </div>
@@ -290,18 +290,18 @@ export default function UploadPage() {
             <span style={{ color: "var(--accent-text)", fontWeight: 700, fontSize: 24 }}>
               {effectiveRowCount.toLocaleString()}
             </span>{" "}
-            <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
+            <span style={{ color: "var(--text-muted)", fontSize: 14 }}>
               {rowMode === "custom" && customRowCount
                 ? `of ${rows.length.toLocaleString()} pairs selected`
                 : "pairs loaded"}
             </span>
           </div>
           <div style={{ width: 1, height: 32, background: "var(--border)" }} />
-          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+          <div style={{ fontSize: 14, color: "var(--text-muted)" }}>
             Sources: {sources.join(", ") || "N/A"}
           </div>
           <div style={{ width: 1, height: 32, background: "var(--border)" }} />
-          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+          <div style={{ fontSize: 14, color: "var(--text-muted)" }}>
             Reference translations: {hasRef ? "Yes" : "No"}
           </div>
         </div>
@@ -312,7 +312,7 @@ export default function UploadPage() {
         <div className="anim d3" style={{ marginTop: 24 }}>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: 600,
               letterSpacing: "0.08em",
               textTransform: "uppercase",
@@ -331,9 +331,9 @@ export default function UploadPage() {
               onClick={() => setRowMode("all")}
               style={{
                 flex: 1,
-                padding: "12px 16px",
+                padding: "14px 16px",
                 borderRadius: "var(--radius-sm)",
-                fontSize: 14,
+                fontSize: 15,
                 fontWeight: 500,
                 cursor: "pointer",
                 fontFamily: "var(--font)",
@@ -349,9 +349,9 @@ export default function UploadPage() {
               onClick={() => setRowMode("custom")}
               style={{
                 flex: 1,
-                padding: "12px 16px",
+                padding: "14px 16px",
                 borderRadius: "var(--radius-sm)",
-                fontSize: 14,
+                fontSize: 15,
                 fontWeight: 500,
                 cursor: "pointer",
                 fontFamily: "var(--font)",
@@ -378,9 +378,9 @@ export default function UploadPage() {
                   background: "var(--bg-inset)",
                   border: "1px solid var(--border)",
                   borderRadius: "var(--radius-xs)",
-                  padding: "12px 16px",
+                  padding: "14px 16px",
                   color: "var(--text-primary)",
-                  fontSize: 14,
+                  fontSize: 15,
                   fontFamily: "var(--font)",
                   outline: "none",
                 }}
@@ -391,44 +391,84 @@ export default function UploadPage() {
       )}
 
       {/* System prompt */}
-      <div className="anim d4" style={{ marginTop: 32 }}>
+      <div
+        className="anim d4"
+        style={{
+          marginTop: 32,
+          background: "var(--bg-surface)",
+          borderRadius: "var(--radius)",
+          padding: 32,
+          boxShadow: "var(--shadow)",
+        }}
+      >
         <div
           style={{
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: "var(--text-muted)",
-            marginBottom: 12,
             display: "flex",
             alignItems: "center",
-            gap: 12,
+            justifyContent: "space-between",
+            marginBottom: 16,
           }}
         >
-          System Prompt
-          <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          <div>
+            <h2
+              style={{
+                fontSize: 18,
+                fontWeight: 700,
+                color: "var(--text-primary)",
+                margin: 0,
+                lineHeight: 1.3,
+              }}
+            >
+              System Prompt
+            </h2>
+            <p
+              style={{
+                fontSize: 13,
+                color: "var(--text-muted)",
+                margin: "4px 0 0 0",
+              }}
+            >
+              The instruction sent to the LLM for each translation.
+            </p>
+          </div>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "5px 14px",
+              borderRadius: 100,
+              fontSize: 12,
+              fontWeight: 600,
+              background: "var(--bg-inset)",
+              color: "var(--text-muted)",
+              border: "1px solid var(--border)",
+              userSelect: "none",
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Read-only
+          </span>
         </div>
-        <textarea
-          value={systemPrompt}
-          onChange={(e) => {
-            setSystemPrompt(e.target.value);
-            setSessionPrompt(e.target.value);
-          }}
+        <div
           style={{
             width: "100%",
-            height: 112,
+            minHeight: 120,
             background: "var(--bg-inset)",
             border: "1px solid var(--border)",
             borderRadius: "var(--radius-sm)",
-            padding: 16,
-            color: "var(--text-primary)",
-            fontSize: 13,
+            padding: 20,
+            color: "var(--text-secondary)",
+            fontSize: 15,
             fontFamily: "var(--font)",
-            lineHeight: 1.7,
-            resize: "vertical",
-            outline: "none",
+            lineHeight: 1.75,
+            whiteSpace: "pre-wrap",
+            overflowY: "auto",
+            maxHeight: 200,
           }}
-        />
+        >
+          {systemPrompt}
+        </div>
       </div>
 
       {/* Continue button */}
@@ -437,11 +477,11 @@ export default function UploadPage() {
           <button
             onClick={handleContinue}
             style={{
-              padding: "12px 40px",
+              padding: "14px 44px",
               borderRadius: "var(--radius-sm)",
               background: "var(--accent)",
               color: "#fff",
-              fontSize: 15,
+              fontSize: 16,
               fontWeight: 600,
               border: "none",
               cursor: "pointer",
