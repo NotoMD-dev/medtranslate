@@ -34,7 +34,11 @@ function writeJSON<T>(key: string, value: T | undefined) {
     localStorage.removeItem(key);
     return;
   }
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Quota exceeded — data lives in component state; IndexedDB handles large payloads.
+  }
 }
 
 // Data

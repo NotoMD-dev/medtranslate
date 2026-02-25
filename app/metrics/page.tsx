@@ -84,7 +84,7 @@ export default function MetricsPage() {
   const maxGradeCount = Math.max(...gradeCounts, 1);
 
   return (
-    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "48px 40px 96px" }}>
+    <div className="page-container">
       <Header />
 
       {/* Page Header */}
@@ -108,7 +108,7 @@ export default function MetricsPage() {
             Corpus-Level Scores
             <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+          <div className="metrics-grid-2">
             <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
               <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>SacreBLEU</div>
               <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--accent-text)", lineHeight: 1, marginBottom: 16 }}>
@@ -142,7 +142,7 @@ export default function MetricsPage() {
       {/* BERTScore card if available */}
       {hasBertscore && (
         <div className="anim d2" style={{ marginBottom: 48 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+          <div className="metrics-grid-2">
             <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
               <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>BERTScore F1</div>
               <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--accent-text)", lineHeight: 1, marginBottom: 16 }}>
