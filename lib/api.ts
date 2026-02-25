@@ -10,13 +10,36 @@ import type {
   JobCreated,
   JobResults,
   JobStatusResponse,
+  TranslationPair,
 } from "./types";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 // ---------------------------------------------------------------------------
-// POST /v1/jobs — submit CSV + config
+// POST /v1/parse — parse CSV or XLSX on the backend, return normalized rows
+// ---------------------------------------------------------------------------
+
+export async function parseFile(file: File): Promise<TranslationPair[]> {
+  const form = new FormData();
+  form.append("file", file);
+
+  const resp = await fetch(`${BACKEND_URL}/v1/parse`, {
+    method: "POST",
+    body: form,
+  });
+
+  if (!resp.ok) {
+    const detail = await resp.json().catch(() => ({ detail: resp.statusText }));
+    throw new Error(detail.detail || `Backend error: ${resp.status}`);
+  }
+
+  const data: { rows: TranslationPair[] } = await resp.json();
+  return data.rows;
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/jobs — submit CSV or XLSX + config
 // ---------------------------------------------------------------------------
 
 export async function submitJob(
