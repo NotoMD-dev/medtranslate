@@ -3,7 +3,8 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
-import { parseCSV, parseXLSX } from "@/lib/csv";
+import { parseCSV } from "@/lib/csv";
+import { parseFile } from "@/lib/api";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/types";
 import {
   clearSessionState,
@@ -41,20 +42,17 @@ export default function UploadPage() {
       setFileName(file.name);
 
       if (isXlsx) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          try {
-            const buffer = ev.target?.result as ArrayBuffer;
-            const parsed = parseXLSX(buffer);
+        // Send XLSX to backend for safe parsing with openpyxl
+        parseFile(file)
+          .then((parsed) => {
             setRows(parsed);
             setSessionData(parsed);
             setSessionPrompt(systemPrompt);
             setSessionCsvFileName(file.name);
-          } catch (err) {
+          })
+          .catch((err) => {
             setError((err as Error).message);
-          }
-        };
-        reader.readAsArrayBuffer(file);
+          });
       } else {
         const reader = new FileReader();
         reader.onload = (ev) => {
