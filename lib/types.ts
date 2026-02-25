@@ -112,6 +112,36 @@ export const CLINICAL_GRADES: ClinicalGradeInfo[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Reference quality flags (reviewer flags gold-standard issues)
+// ---------------------------------------------------------------------------
+
+export type ReferenceFlagReason =
+  | "inaccurate"
+  | "extra_info"
+  | "missing_info"
+  | "wrong_meaning"
+  | "llm_better";
+
+export interface ReferenceFlagReasonInfo {
+  reason: ReferenceFlagReason;
+  label: string;
+  description: string;
+}
+
+export const REFERENCE_FLAG_REASONS: ReferenceFlagReasonInfo[] = [
+  { reason: "inaccurate", label: "Inaccurate", description: "Reference translation is not an accurate translation of the source" },
+  { reason: "extra_info", label: "Extra info", description: "Reference contains information not present in the source text" },
+  { reason: "missing_info", label: "Missing info", description: "Reference omits information present in the source text" },
+  { reason: "wrong_meaning", label: "Wrong meaning", description: "Reference conveys a different clinical meaning than the source" },
+  { reason: "llm_better", label: "LLM is better", description: "LLM translation appears more accurate than the reference" },
+];
+
+export interface ReferenceFlag {
+  reasons: ReferenceFlagReason[];
+  notes: string;
+}
+
+// ---------------------------------------------------------------------------
 // Upload / dataset types
 // ---------------------------------------------------------------------------
 

@@ -1,4 +1,4 @@
-import type { TranslationPair, SentenceMetrics, ClinicalGrade } from "./types";
+import type { TranslationPair, SentenceMetrics, ClinicalGrade, ReferenceFlag } from "./types";
 import { SOURCE_LANGUAGES } from "./types";
 
 /**
@@ -184,6 +184,7 @@ export function sentenceMetricsToCSVFile(
 export function exportResultsCSV(
   sentences: SentenceMetrics[],
   grades?: Record<string, ClinicalGrade>,
+  refFlags?: Record<string, ReferenceFlag>,
 ): string {
   const headers = [
     "pair_id",
@@ -195,6 +196,8 @@ export function exportResultsCSV(
     "meteor_score",
     "bertscore_f1",
     "clinical_significance_grade",
+    "reference_flag_issues",
+    "reference_flag_notes",
     "error",
   ];
 
@@ -206,8 +209,9 @@ export function exportResultsCSV(
     return s;
   };
 
-  const rows = sentences.map((r) =>
-    [
+  const rows = sentences.map((r) => {
+    const flag = refFlags?.[r.pair_id];
+    return [
       r.pair_id,
       r.source,
       r.content_type,
@@ -217,11 +221,13 @@ export function exportResultsCSV(
       r.meteor != null ? r.meteor.toFixed(4) : "",
       r.bertscore_f1 != null ? r.bertscore_f1.toFixed(4) : "",
       grades?.[r.pair_id] != null ? grades[r.pair_id] : "",
+      flag ? flag.reasons.join("; ") : "",
+      flag?.notes ?? "",
       r.error ?? "",
     ]
       .map(escape)
-      .join(",")
-  );
+      .join(",");
+  });
 
   return [headers.join(","), ...rows].join("\n");
 }
