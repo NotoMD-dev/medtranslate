@@ -11,11 +11,12 @@ export function parseCSV(text: string): TranslationPair[] {
   const headers = parseCSVLine(lines[0]);
 
   // Validate required columns
-  const required = ["spanish_source"];
-  for (const col of required) {
-    if (!headers.includes(col)) {
-      throw new Error(`Missing required column: "${col}". Found: ${headers.join(", ")}`);
-    }
+  const required = ["spanish_source", "english_reference"];
+  const missing = required.filter((col) => !headers.includes(col));
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required column${missing.length > 1 ? "s" : ""}: ${missing.map((c) => `"${c}"`).join(", ")}. Found: ${headers.join(", ")}`
+    );
   }
 
   const rows: TranslationPair[] = [];

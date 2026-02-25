@@ -127,26 +127,17 @@ table tbody tr:hover td {
 /* Header nav */
 .site-nav {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 48px;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.site-nav-links {
-  display: flex;
   gap: 32px;
   flex-wrap: wrap;
 }
 
 @media (max-width: 480px) {
   .site-nav {
-    margin-bottom: 28px;
+    gap: 16px;
   }
 
-  .site-nav-links {
-    gap: 16px;
+  .brand-tagline {
+    display: none;
   }
 
   .theme-toggle-label {

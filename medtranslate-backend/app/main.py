@@ -43,10 +43,13 @@ def _parse_csv_content(content: bytes) -> list[dict[str, str]]:
     text = content.decode("utf-8")
     reader = csv.DictReader(io.StringIO(text))
 
-    if reader.fieldnames is None or "spanish_source" not in reader.fieldnames:
+    required_cols = {"spanish_source", "english_reference"}
+    found = set(reader.fieldnames) if reader.fieldnames else set()
+    missing = required_cols - found
+    if missing:
         raise HTTPException(
             status_code=400,
-            detail='File must contain a "spanish_source" column',
+            detail=f'Missing required column(s): {", ".join(sorted(missing))}. Found: {", ".join(sorted(found))}',
         )
 
     return list(reader)
@@ -69,10 +72,12 @@ def _parse_xlsx_content(content: bytes) -> list[dict[str, str]]:
 
     headers = [str(h).strip() if h is not None else "" for h in header_row]
 
-    if "spanish_source" not in headers:
+    required_cols = {"spanish_source", "english_reference"}
+    missing = required_cols - set(headers)
+    if missing:
         raise HTTPException(
             status_code=400,
-            detail=f'Missing required column: "spanish_source". Found: {", ".join(headers)}',
+            detail=f'Missing required column(s): {", ".join(sorted(missing))}. Found: {", ".join(headers)}',
         )
 
     raw_rows: list[dict[str, str]] = []

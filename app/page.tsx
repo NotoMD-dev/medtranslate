@@ -150,9 +150,13 @@ export default function UploadPage() {
           Upload Dataset
         </h1>
         <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
-          Import a CSV/XLSX with clinical translation pairs. Required column:{" "}
+          Import a CSV/XLSX with clinical translation pairs. Required columns:{" "}
           <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
             spanish_source
+          </strong>
+          {" "}and{" "}
+          <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
+            english_reference
           </strong>
           .
         </p>
