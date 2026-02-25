@@ -27,47 +27,57 @@ export default function Header() {
           marginBottom: 24,
         }}
       >
-        <Link href="/" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Pulse icon */}
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--accent)"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ flexShrink: 0 }}
-          >
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg>
-          <div>
-            <div
+        <Link href="/" style={{ textDecoration: "none", display: "inline-flex", flexDirection: "column" }}>
+          {/* V1 serif wordmark — Nav size (22px, 4×4 dot, 3.5px baseline offset) */}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 0 }}>
+            <span
               style={{
-                fontSize: 20,
+                fontFamily: "Georgia, 'Times New Roman', serif",
                 fontWeight: 700,
-                letterSpacing: "-0.02em",
+                fontSize: 22,
                 color: "var(--text-primary)",
-                lineHeight: 1.1,
-                fontFamily: "var(--font)",
+                letterSpacing: "-0.02em",
               }}
             >
-              Med<span style={{ color: "var(--accent)" }}>Translate</span>
-            </div>
-            <div
-              className="brand-tagline"
+              Med
+            </span>
+            <span
               style={{
-                fontSize: 11.5,
-                color: "var(--text-muted)",
-                letterSpacing: "0.01em",
-                lineHeight: 1.3,
-                marginTop: 1,
+                width: 4,
+                height: 4,
+                borderRadius: "50%",
+                background: "var(--accent)",
+                display: "inline-block",
+                margin: "0 1.5px 3.5px 1.5px",
+                flexShrink: 0,
+              }}
+            />
+            <span
+              style={{
+                fontFamily: "Georgia, 'Times New Roman', serif",
+                fontWeight: 400,
+                fontStyle: "italic",
+                fontSize: 22,
+                color: "var(--text-primary)",
+                letterSpacing: "-0.02em",
               }}
             >
-              Clinical Translation Research
-            </div>
+              Translate
+            </span>
           </div>
+          <span
+            className="brand-tagline"
+            style={{
+              fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
+              fontSize: 10,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase" as const,
+              color: "var(--text-muted)",
+              marginTop: 3,
+            }}
+          >
+            Clinical Translation Platform
+          </span>
         </Link>
 
         {/* Theme toggle */}
