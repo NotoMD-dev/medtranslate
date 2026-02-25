@@ -14,8 +14,9 @@ export function Card({ children, hover = true, padding = "default", className = 
         background: "var(--bg-surface)",
         borderRadius: "var(--radius)",
         padding: padding === "none" ? 0 : 32,
+        border: "1px solid var(--border)",
         boxShadow: "var(--shadow)",
-        transition: "background 0.35s, box-shadow 0.25s",
+        transition: "background 0.35s, box-shadow 0.25s, border-color 0.3s",
         ...(hover ? {} : {}),
         ...style,
       }}
