@@ -17,6 +17,24 @@ const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 // ---------------------------------------------------------------------------
+// Fetch wrapper — provides actionable error messages for network failures
+// ---------------------------------------------------------------------------
+
+async function safeFetch(input: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new Error(
+        `Cannot reach the backend at ${BACKEND_URL}. ` +
+        "Ensure the backend is running and CORS_ORIGINS is configured to allow your frontend URL."
+      );
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // POST /v1/parse — parse CSV or XLSX on the backend, return normalized rows
 // ---------------------------------------------------------------------------
 
@@ -24,7 +42,7 @@ export async function parseFile(file: File): Promise<TranslationPair[]> {
   const form = new FormData();
   form.append("file", file);
 
-  const resp = await fetch(`${BACKEND_URL}/v1/parse`, {
+  const resp = await safeFetch(`${BACKEND_URL}/v1/parse`, {
     method: "POST",
     body: form,
   });
@@ -60,7 +78,7 @@ export async function submitJob(
   form.append("max_tokens", String(config.maxTokens));
   form.append("compute_bertscore", String(config.computeBertscore ?? false));
 
-  const resp = await fetch(`${BACKEND_URL}/v1/jobs`, {
+  const resp = await safeFetch(`${BACKEND_URL}/v1/jobs`, {
     method: "POST",
     body: form,
   });
@@ -78,7 +96,7 @@ export async function submitJob(
 // ---------------------------------------------------------------------------
 
 export async function pollJobStatus(jobId: string): Promise<JobStatusResponse> {
-  const resp = await fetch(`${BACKEND_URL}/v1/jobs/${jobId}`);
+  const resp = await safeFetch(`${BACKEND_URL}/v1/jobs/${jobId}`);
   if (!resp.ok) {
     throw new Error(`Failed to fetch job status: ${resp.status}`);
   }
@@ -90,7 +108,7 @@ export async function pollJobStatus(jobId: string): Promise<JobStatusResponse> {
 // ---------------------------------------------------------------------------
 
 export async function fetchJobResults(jobId: string): Promise<JobResults> {
-  const resp = await fetch(`${BACKEND_URL}/v1/jobs/${jobId}/results`);
+  const resp = await safeFetch(`${BACKEND_URL}/v1/jobs/${jobId}/results`);
   if (!resp.ok) {
     throw new Error(`Failed to fetch results: ${resp.status}`);
   }
@@ -102,7 +120,7 @@ export async function fetchJobResults(jobId: string): Promise<JobResults> {
 // ---------------------------------------------------------------------------
 
 export async function cancelJob(jobId: string): Promise<void> {
-  const resp = await fetch(`${BACKEND_URL}/v1/jobs/${jobId}/cancel`, {
+  const resp = await safeFetch(`${BACKEND_URL}/v1/jobs/${jobId}/cancel`, {
     method: "POST",
   });
   if (!resp.ok) {

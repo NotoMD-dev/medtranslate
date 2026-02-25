@@ -6,15 +6,14 @@ import os
 OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
 
 # CORS origins allowed to call the backend (comma-separated).
-# Default allows common local dev ports and any Vercel preview URL.
-CORS_ORIGINS: list[str] = [
-    origin.strip()
-    for origin in os.environ.get(
-        "CORS_ORIGINS",
-        "http://localhost:3000,http://127.0.0.1:3000",
-    ).split(",")
-    if origin.strip()
-]
+# Defaults to "*" so the app works out-of-the-box on any deployment.
+# Set CORS_ORIGINS env var to restrict (e.g. "https://myapp.onrender.com").
+_cors_env = os.environ.get("CORS_ORIGINS", "")
+CORS_ORIGINS: list[str] = (
+    [o.strip() for o in _cors_env.split(",") if o.strip()]
+    if _cors_env
+    else ["*"]
+)
 
 # Default translation settings
 DEFAULT_MODEL: str = os.environ.get("DEFAULT_MODEL", "gpt-4o")
