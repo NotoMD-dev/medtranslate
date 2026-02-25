@@ -1,0 +1,8 @@
+.ds-fade-up { animation: fadeUp 400ms ease both; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px);} to { opacity: 1; transform: translateY(0);} }
+
+.ds-nav-link { padding: 0 0 4px; font-size: 14px; color: var(--text-secondary); text-decoration: none; border-bottom: 2px solid transparent; }
+.ds-nav-link:hover { color: var(--text-primary); }
+.ds-nav-link-active { color: var(--accent-text); border-bottom-color: var(--accent); }
+
+.ds-table-row:hover { background: color-mix(in srgb, var(--accent-soft) 30%, transparent); }
