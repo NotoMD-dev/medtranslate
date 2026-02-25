@@ -13,7 +13,8 @@ body {
   font-family: var(--font);
   background: var(--bg-base);
   color: var(--text-primary);
-  line-height: 1.55;
+  line-height: 1.6;
+  font-size: 15px;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -63,7 +64,7 @@ table {
 }
 
 table thead th {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -74,7 +75,7 @@ table thead th {
 }
 
 table tbody td {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-secondary);
   padding: 16px;
   border-bottom: 1px solid var(--border-subtle);

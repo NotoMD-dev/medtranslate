@@ -3,43 +3,43 @@
    Light mode defaults
 ═══════════════════════════════════════════ */
 :root {
-  /* Backgrounds */
-  --bg-base: #F0F1F0;
-  --bg-surface: #FFFFFF;
-  --bg-surface-hover: #FAFBFA;
-  --bg-inset: #F6F7F6;
+  /* Backgrounds — crisp white base, cool-gray surfaces for depth */
+  --bg-base: #FFFFFF;
+  --bg-surface: #F4F5F7;
+  --bg-surface-hover: #ECEDF0;
+  --bg-inset: #E8EAF0;
 
-  /* Text */
-  --text-primary: #1A1D1A;
-  --text-secondary: #52584F;
-  --text-muted: #8A8F87;
+  /* Text — high contrast, legible at smaller sizes */
+  --text-primary: #111311;
+  --text-secondary: #3D4240;
+  --text-muted: #6B726A;
 
-  /* Accent */
-  --accent: #1B7340;
-  --accent-soft: #E8F5ED;
-  --accent-hover: #145A32;
-  --accent-text: #1B7340;
-  --accent-bright: #22C55E;
+  /* Accent — rich, saturated green */
+  --accent: #0E7A3F;
+  --accent-soft: #DBF2E5;
+  --accent-hover: #0A5C2F;
+  --accent-text: #0B6834;
+  --accent-bright: #16A34A;
 
-  /* Borders */
-  --border: #DFE2DC;
-  --border-subtle: #EBEEE9;
+  /* Borders — defined enough to create structure */
+  --border: #CDD1C9;
+  --border-subtle: #DFE2DB;
 
-  /* Semantic */
-  --success: #16A34A;
-  --success-light: #E8F5ED;
-  --success-border: #BBF7D0;
-  --warning: #CA8A04;
-  --warning-light: #FEFCE8;
-  --warning-border: #FDE68A;
-  --danger: #DC2626;
-  --danger-light: #FEF2F2;
-  --danger-border: #FECACA;
+  /* Semantic — vivid, unmistakable */
+  --success: #0F8C3E;
+  --success-light: #DEF5E7;
+  --success-border: #A3E4BC;
+  --warning: #B47D04;
+  --warning-light: #FFF9E0;
+  --warning-border: #F5D76E;
+  --danger: #CC1E1E;
+  --danger-light: #FDE9E9;
+  --danger-border: #F5AAAA;
 
-  /* Shadows */
-  --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 20px rgba(0,0,0,0.06);
-  --shadow-hover: 0 2px 8px rgba(0,0,0,0.06), 0 8px 32px rgba(0,0,0,0.08);
-  --shadow-lg: 0 4px 12px rgba(0,0,0,0.05), 0 12px 40px rgba(0,0,0,0.08);
+  /* Shadows — stronger, gives cards real lift */
+  --shadow: 0 1px 4px rgba(0,0,0,0.06), 0 6px 24px rgba(0,0,0,0.08);
+  --shadow-hover: 0 2px 10px rgba(0,0,0,0.09), 0 10px 36px rgba(0,0,0,0.11);
+  --shadow-lg: 0 4px 14px rgba(0,0,0,0.08), 0 14px 44px rgba(0,0,0,0.11);
 
   /* Radii */
   --radius: 20px;
