@@ -61,6 +61,12 @@ def _is_anthropic_model(model: str) -> bool:
     return model.startswith("claude")
 
 
+def _uses_max_completion_tokens(model: str) -> bool:
+    """Newer OpenAI models (GPT 5.x, o-series) require max_completion_tokens instead of max_tokens."""
+    m = model.lower()
+    return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
+
+
 # ---------------------------------------------------------------------------
 # Translation entry point
 # ---------------------------------------------------------------------------
@@ -112,12 +118,19 @@ async def _translate_openai(
     client = _get_openai_client()
     last_error: Exception | None = None
 
+    # Newer OpenAI models require max_completion_tokens instead of max_tokens
+    token_kwargs: dict = {}
+    if _uses_max_completion_tokens(model):
+        token_kwargs["max_completion_tokens"] = max_tokens
+    else:
+        token_kwargs["max_tokens"] = max_tokens
+
     for attempt in range(1, TRANSLATE_MAX_RETRIES + 1):
         try:
             response = await client.chat.completions.create(
                 model=model,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                **token_kwargs,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text},
