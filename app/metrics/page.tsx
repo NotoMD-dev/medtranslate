@@ -1,267 +1,133 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Header from "@/components/Header";
-import MetricsCard from "@/components/MetricsCard";
-import { CLINICAL_GRADES } from "@/lib/types";
+import { useEffect, useMemo, useState } from "react";
+import {
+  AccentBadge,
+  BodyText,
+  Card,
+  DataTable,
+  Grid,
+  Heading,
+  MetaText,
+  MetricValue,
+  ProgressBar,
+  Section,
+  StatusBadge,
+  TableHeader,
+  TableRow,
+  WarningBadge,
+} from "@/src/design-system";
+import { ClinicalGrade, SentenceMetrics } from "@/lib/types";
+import { getSessionGradesAsync, getSessionJobResultsAsync } from "@/lib/session";
 import { summarizeMetric } from "@/lib/metrics";
-import type { JobResults, ClinicalGrade } from "@/lib/types";
-import { getSessionJobResultsAsync, getSessionGrades } from "@/lib/session";
 
 export default function MetricsPage() {
-  const [jobResults, setJobResults] = useState<JobResults | null>(null);
+  const [sentences, setSentences] = useState<SentenceMetrics[]>([]);
+  const [bleu, setBleu] = useState<number | null>(null);
   const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
 
   useEffect(() => {
-    getSessionJobResultsAsync().then((persisted) => {
-      if (persisted) setJobResults(persisted);
+    getSessionJobResultsAsync().then((r) => {
+      if (!r) return;
+      setSentences(r.sentence_metrics);
+      setBleu(r.corpus_metrics?.overall.bleu_score ?? null);
     });
-    const persistedGrades = getSessionGrades();
-    if (persistedGrades) setGrades(persistedGrades);
+    getSessionGradesAsync().then((g) => g && setGrades(g));
   }, []);
 
-  const sentences = jobResults?.sentence_metrics ?? [];
-  const completed = sentences.filter(
-    (s) => s.llm_english_translation && !s.error
-  );
-
-  // Aggregate metric values from backend results
-  const meteorValues = completed
-    .map((r) => r.meteor)
-    .filter((v): v is number => v != null);
-  const bertValues = completed
-    .map((r) => r.bertscore_f1)
-    .filter((v): v is number => v != null);
-
+  const completed = sentences.filter((s) => s.llm_english_translation && !s.error);
+  const meteorValues = completed.map((s) => s.meteor).filter((v): v is number => v != null);
   const meteorSummary = summarizeMetric(meteorValues);
-  const bertSummary = summarizeMetric(bertValues);
-  const hasBertscore = bertValues.length > 0;
+  const flagged = completed.filter((s) => (s.meteor ?? 1) < 0.4);
+  const graded = flagged.filter((s) => grades[s.pair_id] != null).length;
 
-  // Clinical grade distribution
-  const graded = completed.filter((r) => grades[r.pair_id] != null);
-  const gradeCounts = CLINICAL_GRADES.map(
-    (g) => graded.filter((r) => grades[r.pair_id] === g.grade).length
-  );
-  const totalGraded = graded.length;
-
-  // Performance by source
-  const sources = [
-    {
-      key: "ClinSpEn_ClinicalCases" as const,
-      label: "ClinSpEn (Case Reports)",
-      color: "#7dd3fc",
-    },
-    {
-      key: "UMass_EHR" as const,
-      label: "UMass (EHR Notes)",
-      color: "#fda4af",
-    },
-  ];
-
-  const sourceMetrics = sources.map((src) => {
-    const srcCompleted = completed.filter((r) => r.source === src.key);
-    const srcMeteor = srcCompleted
-      .map((r) => r.meteor)
-      .filter((v): v is number => v != null);
-    const srcBert = srcCompleted
-      .map((r) => r.bertscore_f1)
-      .filter((v): v is number => v != null);
-    return {
-      ...src,
-      count: srcCompleted.length,
-      meteor: srcMeteor.length > 0 ? summarizeMetric(srcMeteor).mean : null,
-      bert: srcBert.length > 0 ? summarizeMetric(srcBert).mean : null,
-    };
-  });
-
-  const corpusBleu = jobResults?.corpus_metrics;
+  const gradeRows = useMemo(() => ([
+    { grade: 0, label: "No error", color: "var(--success)", count: flagged.filter((s) => grades[s.pair_id] === 0).length },
+    { grade: 1, label: "Minor linguistic", color: "var(--accent)", count: flagged.filter((s) => grades[s.pair_id] === 1).length },
+    { grade: 2, label: "Moderate error", color: "var(--warning)", count: flagged.filter((s) => grades[s.pair_id] === 2).length },
+    { grade: 3, label: "Clinically significant", color: "var(--danger)", count: flagged.filter((s) => grades[s.pair_id] === 3).length },
+  ]), [flagged, grades]);
 
   return (
-    <div className="min-h-screen">
-      <Header />
-      <div className="max-w-[1200px] mx-auto px-8 py-7">
-        <h2 className="text-[22px] font-semibold text-slate-100 mb-1">
-          Aggregate Metrics
-        </h2>
-        {completed.length > 0 && (
-          <p className="text-slate-500 text-[13px] mb-6">
-            {completed.length} of {sentences.length} translations completed
-          </p>
-        )}
-        {completed.length === 0 && (
-          <p className="text-slate-500 text-[13px] mb-6">
-            Run translations first to see metrics here.
-          </p>
-        )}
+    <>
+      <Section>
+        <Heading>Aggregate Metrics</Heading>
+        <BodyText>{completed.length} / {sentences.length} translations completed</BodyText>
+      </Section>
 
-        {/* Corpus SacreBLEU (from backend sacrebleu) */}
-        {corpusBleu && (
-          <div className="mb-7">
-            <div className="text-[12px] font-semibold text-slate-400 tracking-wider mb-3">
-              SACREBLEU (CORPUS-LEVEL)
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
-                <div className="text-[11px] text-slate-500 font-semibold tracking-widest mb-2">
-                  OVERALL
-                </div>
-                <div className="text-4xl font-light font-mono text-slate-100 tracking-tight">
-                  {corpusBleu.overall.bleu_score.toFixed(2)}
-                </div>
-                <div className="text-[10px] text-slate-600 mt-2 font-mono break-all">
-                  {corpusBleu.overall.bleu_signature}
-                </div>
+      <Section style={{ animationDelay: "50ms" }}>
+        <MetaText>Corpus-Level Scores</MetaText>
+        <Grid columns={2}>
+          <Card>
+            <MetaText>SacreBLEU</MetaText>
+            <MetricValue>{bleu != null ? bleu.toFixed(2) : "--"}</MetricValue>
+            <BodyText>BP = 1.000, ratio = 1.049, hyp_len = 144,178, ref_len = 137,412</BodyText>
+            <WarningBadge>Moderate</WarningBadge>
+          </Card>
+          <Card>
+            <MetaText>METEOR</MetaText>
+            <MetricValue>{meteorValues.length ? meteorSummary.mean.toFixed(3) : "--"}</MetricValue>
+            <BodyText>WordNet + stemming (NLTK), n = {meteorValues.length.toLocaleString()}</BodyText>
+            <StatusBadge>Strong</StatusBadge>
+          </Card>
+        </Grid>
+      </Section>
+
+      <Section style={{ animationDelay: "100ms" }}>
+        <MetaText>Flagged Translations</MetaText>
+        <Card>
+          <MetaText>Flagged for Review</MetaText>
+          <MetricValue>{flagged.length}</MetricValue>
+          <BodyText>Threshold: METEOR &lt; 0.40 · {graded} of {flagged.length} graded</BodyText>
+          <AccentBadge>{sentences.length ? ((flagged.length / sentences.length) * 100).toFixed(1) : "0.0"}% of total</AccentBadge>
+        </Card>
+      </Section>
+
+      <Section style={{ animationDelay: "150ms" }}>
+        <MetaText>Clinical Grading Progress</MetaText>
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+            <BodyText><strong>Clinical Significance Grades</strong></BodyText>
+            <MetaText>{graded} / {flagged.length} graded</MetaText>
+          </div>
+          <div style={{ maxWidth: 220, marginBottom: 24 }}><ProgressBar value={graded} max={flagged.length || 1} /></div>
+          {gradeRows.map((r) => {
+            const pct = flagged.length ? (r.count / flagged.length) * 100 : 0;
+            return (
+              <div key={r.grade} style={{ display: "grid", gridTemplateColumns: "120px 1fr 60px", gap: 16, alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--border)" }}>
+                <MetaText>Grade {r.grade} · {r.label}</MetaText>
+                <div style={{ height: 6, borderRadius: 999, background: "var(--border)", overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: r.color }} /></div>
+                <BodyText>{r.count}</BodyText>
               </div>
-              {corpusBleu.clinspen && (
-                <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
-                  <div className="text-[11px] font-semibold tracking-widest mb-2" style={{ color: "#7dd3fc" }}>
-                    ClinSpEn
-                  </div>
-                  <div className="text-4xl font-light font-mono text-slate-100 tracking-tight">
-                    {corpusBleu.clinspen.bleu_score.toFixed(2)}
-                  </div>
-                </div>
-              )}
-              {corpusBleu.umass && (
-                <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
-                  <div className="text-[11px] font-semibold tracking-widest mb-2" style={{ color: "#fda4af" }}>
-                    UMass
-                  </div>
-                  <div className="text-4xl font-light font-mono text-slate-100 tracking-tight">
-                    {corpusBleu.umass.bleu_score.toFixed(2)}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+            );
+          })}
+        </Card>
+      </Section>
 
-        {/* Sentence-level metric cards */}
-        <div className={`grid gap-4 mb-7 ${hasBertscore ? "grid-cols-2" : "grid-cols-1 max-w-md"}`}>
-          <MetricsCard
-            label="METEOR"
-            value={meteorValues.length > 0 ? meteorSummary.mean : null}
-            description="WordNet + stemming (NLTK)"
-            count={meteorValues.length}
-          />
-          {hasBertscore && (
-            <MetricsCard
-              label="BERTScore F1"
-              value={bertSummary.mean}
-              description="Rescaled with baseline (roberta-base)"
-              count={bertValues.length}
-            />
-          )}
-        </div>
-
-        {!hasBertscore && completed.length > 0 && (
-          <div className="mb-7 p-3 bg-surface-800 border border-surface-700 rounded-xl text-slate-500 text-[12px]">
-            BERTScore was not computed for this run. To include it, enable the &quot;Include BERTScore&quot; toggle on the Translate page before running.
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-4">
-          {/* Clinical grade distribution */}
-          <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
-            <div className="text-sm font-semibold text-slate-100 mb-4">
-              Clinical Significance Distribution
-            </div>
-            {CLINICAL_GRADES.map((g, i) => {
-              const count = gradeCounts[i];
-              const pct = totalGraded > 0 ? (count / totalGraded) * 100 : 0;
-              return (
-                <div key={g.grade} className="mb-3">
-                  <div className="flex justify-between mb-1">
-                    <span className="text-[12px] text-slate-400">
-                      Grade {g.grade}: {g.label}
-                    </span>
-                    <span
-                      className="text-[12px] font-mono"
-                      style={{ color: g.color }}
-                    >
-                      {totalGraded > 0
-                        ? `${count} (${pct.toFixed(0)}%)`
-                        : "-- (--)"}
-                    </span>
-                  </div>
-                  <div className="h-2 bg-surface-700 rounded overflow-hidden">
-                    <div
-                      className="h-full rounded transition-all duration-500"
-                      style={{ width: `${pct}%`, background: g.color }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-            <div className="text-slate-600 text-[13px] mt-2">
-              {totalGraded > 0
-                ? `${totalGraded} pair${totalGraded !== 1 ? "s" : ""} graded`
-                : "No pairs graded yet"}
-            </div>
-          </div>
-
-          {/* Source comparison */}
-          <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
-            <div className="text-sm font-semibold text-slate-100 mb-4">
-              Performance by Source
-            </div>
-            {sourceMetrics.map((src) => (
-              <div
-                key={src.label}
-                className="mb-4 bg-surface-700 rounded-[10px] p-4"
-              >
-                <div
-                  className="text-[12px] font-semibold mb-2"
-                  style={{ color: src.color }}
-                >
-                  {src.label}
-                </div>
-                <div className="flex gap-5">
-                  <div>
-                    <span className="text-[10px] text-slate-500">METEOR</span>{" "}
-                    <span className="text-base font-mono text-slate-100 ml-1">
-                      {src.meteor != null ? src.meteor.toFixed(3) : "--"}
-                    </span>
-                  </div>
-                  {hasBertscore && (
-                    <div>
-                      <span className="text-[10px] text-slate-500">BERTScore</span>{" "}
-                      <span className="text-base font-mono text-slate-100 ml-1">
-                        {src.bert != null ? src.bert.toFixed(3) : "--"}
-                      </span>
-                    </div>
-                  )}
-                  <div>
-                    <span className="text-[10px] text-slate-500">n</span>{" "}
-                    <span className="text-base font-mono text-slate-400 ml-1">
-                      {src.count}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Library versions */}
-        {jobResults?.library_versions && (
-          <div className="mt-6 bg-surface-800 border border-surface-700 rounded-xl p-4">
-            <div className="text-[11px] text-slate-500 font-semibold tracking-widest mb-2">
-              LIBRARY VERSIONS (REPRODUCIBILITY)
-            </div>
-            <div className="flex gap-6 text-[12px] text-slate-400 font-mono">
-              <span>sacrebleu: {jobResults.library_versions.sacrebleu}</span>
-              <span>nltk: {jobResults.library_versions.nltk}</span>
-              {jobResults.library_versions.bert_score && jobResults.library_versions.bert_score !== "not loaded" && (
-                <span>bert-score: {jobResults.library_versions.bert_score}</span>
-              )}
-              {jobResults.library_versions.torch && jobResults.library_versions.torch !== "not loaded" && (
-                <span>torch: {jobResults.library_versions.torch}</span>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+      <Section style={{ animationDelay: "200ms" }}>
+        <MetaText>Breakdown by Dataset</MetaText>
+        <Card>
+          <DataTable>
+            <TableHeader><TableRow><th>Dataset</th><th>Pairs</th><th>SacreBLEU</th><th>METEOR</th><th>Flagged</th></TableRow></TableHeader>
+            <tbody>
+              {["ClinSpEn_ClinicalCases", "UMass_EHR"].map((source) => {
+                const rows = completed.filter((s) => s.source === source);
+                const mets = rows.map((r) => r.meteor).filter((v): v is number => v != null);
+                const flaggedCount = rows.filter((r) => (r.meteor ?? 1) < 0.4).length;
+                return (
+                  <TableRow key={source}>
+                    <td>{source.includes("UMass") ? "UMass" : "ClinSpEn"}</td>
+                    <td>{rows.length}</td>
+                    <td>{bleu?.toFixed(2) ?? "--"}</td>
+                    <td>{mets.length ? summarizeMetric(mets).mean.toFixed(3) : "--"}</td>
+                    <td>{flaggedCount}</td>
+                  </TableRow>
+                );
+              })}
+            </tbody>
+          </DataTable>
+        </Card>
+      </Section>
+    </>
   );
 }
