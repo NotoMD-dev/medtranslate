@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cancelJob, fetchJobResults, pollUntilDone, submitJob } from "@/lib/api";
 import { downloadFile, exportResultsCSV, pairsToCSVFile } from "@/lib/csv";
+import { getUploadedFile } from "@/lib/upload-cache";
 import { DEFAULT_SYSTEM_PROMPT, JobResults, JobStatusResponse } from "@/lib/types";
 import {
   getSessionData,
@@ -69,11 +70,23 @@ export default function TranslatePage() {
 
   const run = useCallback(async () => {
     const data = getSessionData();
-    if (!data?.length) return setError("No dataset loaded. Upload a dataset first.");
+    const uploadedFile = getUploadedFile();
+    if (!data?.length && !uploadedFile) {
+      return setError("No dataset loaded. Upload a dataset first.");
+    }
+
+    const fileToSubmit = data?.length
+      ? pairsToCSVFile(data)
+      : uploadedFile;
+
+    if (!fileToSubmit) {
+      return setError("No upload file available. Please upload again.");
+    }
+
     try {
       setError("");
       setPageState("running");
-      const job = await submitJob(pairsToCSVFile(data), {
+      const job = await submitJob(fileToSubmit, {
         model: "gpt-4o",
         systemPrompt: getSessionPrompt() || DEFAULT_SYSTEM_PROMPT,
         temperature: 0,
