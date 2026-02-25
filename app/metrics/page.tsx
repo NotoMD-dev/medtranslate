@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
-import MetricsCard from "@/components/MetricsCard";
 import { CLINICAL_GRADES } from "@/lib/types";
 import { summarizeMetric } from "@/lib/metrics";
 import type { JobResults, ClinicalGrade } from "@/lib/types";
@@ -76,192 +75,207 @@ export default function MetricsPage() {
 
   const corpusBleu = jobResults?.corpus_metrics;
 
-  return (
-    <div className="min-h-screen">
-      <Header />
-      <div className="max-w-[1200px] mx-auto px-8 py-7">
-        <h2 className="text-[22px] font-semibold text-slate-100 mb-1">
-          Aggregate Metrics
-        </h2>
-        {completed.length > 0 && (
-          <p className="text-slate-500 text-[13px] mb-6">
-            {completed.length} of {sentences.length} translations completed
-          </p>
-        )}
-        {completed.length === 0 && (
-          <p className="text-slate-500 text-[13px] mb-6">
-            Run translations first to see metrics here.
-          </p>
-        )}
+  // Flagged count
+  const flaggedCount = completed.filter((r) => r.meteor != null && r.meteor < 0.4).length;
+  const flaggedPct = completed.length > 0 ? ((flaggedCount / completed.length) * 100).toFixed(1) : "0";
 
-        {/* Corpus SacreBLEU (from backend sacrebleu) */}
-        {corpusBleu && (
-          <div className="mb-7">
-            <div className="text-[12px] font-semibold text-slate-400 tracking-wider mb-3">
-              SACREBLEU (CORPUS-LEVEL)
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
-                <div className="text-[11px] text-slate-500 font-semibold tracking-widest mb-2">
-                  OVERALL
-                </div>
-                <div className="text-4xl font-light font-mono text-slate-100 tracking-tight">
-                  {corpusBleu.overall.bleu_score.toFixed(2)}
-                </div>
-                <div className="text-[10px] text-slate-600 mt-2 font-mono break-all">
-                  {corpusBleu.overall.bleu_signature}
-                </div>
+  // Grade distribution colors mapped to design system
+  const gradeColors = ["var(--success)", "var(--accent)", "var(--warning)", "var(--danger)"];
+  const maxGradeCount = Math.max(...gradeCounts, 1);
+
+  return (
+    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "48px 40px 96px" }}>
+      <Header />
+
+      {/* Page Header */}
+      <div className="anim" style={{ marginBottom: 40 }}>
+        <h1 style={{ fontSize: 32, fontWeight: 700, letterSpacing: "-0.025em", color: "var(--text-primary)", marginBottom: 6, lineHeight: 1.2 }}>
+          Aggregate Metrics
+        </h1>
+        <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
+          {completed.length > 0 ? (
+            <><strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{completed.length}</strong> of {sentences.length} translations completed</>
+          ) : (
+            "Run translations first to see metrics here."
+          )}
+        </p>
+      </div>
+
+      {/* Corpus-Level Scores */}
+      {corpusBleu && (
+        <div className="anim d1" style={{ marginBottom: 48 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+            Corpus-Level Scores
+            <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+            <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>SacreBLEU</div>
+              <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--accent-text)", lineHeight: 1, marginBottom: 16 }}>
+                {corpusBleu.overall.bleu_score.toFixed(2)}
               </div>
-              {corpusBleu.clinspen && (
-                <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
-                  <div className="text-[11px] font-semibold tracking-widest mb-2" style={{ color: "#7dd3fc" }}>
-                    ClinSpEn
-                  </div>
-                  <div className="text-4xl font-light font-mono text-slate-100 tracking-tight">
-                    {corpusBleu.clinspen.bleu_score.toFixed(2)}
-                  </div>
-                </div>
-              )}
-              {corpusBleu.umass && (
-                <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
-                  <div className="text-[11px] font-semibold tracking-widest mb-2" style={{ color: "#fda4af" }}>
-                    UMass
-                  </div>
-                  <div className="text-4xl font-light font-mono text-slate-100 tracking-tight">
-                    {corpusBleu.umass.bleu_score.toFixed(2)}
-                  </div>
-                </div>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6, marginBottom: 12 }}>
+                {corpusBleu.overall.bleu_signature}
+              </div>
+              <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--warning-light)", color: "var(--warning)", border: "1px solid var(--warning-border)" }}>
+                Moderate
+              </span>
+            </div>
+            <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>METEOR</div>
+              <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--accent-text)", lineHeight: 1, marginBottom: 16 }}>
+                {meteorValues.length > 0 ? meteorSummary.mean.toFixed(3) : "--"}
+              </div>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6, marginBottom: 12 }}>
+                WordNet + stemming (NLTK)<br />n = {meteorValues.length}
+              </div>
+              {meteorValues.length > 0 && (
+                <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--success-light)", color: "var(--success)", border: "1px solid var(--success-border)" }}>
+                  Strong
+                </span>
               )}
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Sentence-level metric cards */}
-        <div className={`grid gap-4 mb-7 ${hasBertscore ? "grid-cols-2" : "grid-cols-1 max-w-md"}`}>
-          <MetricsCard
-            label="METEOR"
-            value={meteorValues.length > 0 ? meteorSummary.mean : null}
-            description="WordNet + stemming (NLTK)"
-            count={meteorValues.length}
-          />
-          {hasBertscore && (
-            <MetricsCard
-              label="BERTScore F1"
-              value={bertSummary.mean}
-              description="Rescaled with baseline (roberta-base)"
-              count={bertValues.length}
-            />
+      {/* BERTScore card if available */}
+      {hasBertscore && (
+        <div className="anim d2" style={{ marginBottom: 48 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+            <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>BERTScore F1</div>
+              <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--accent-text)", lineHeight: 1, marginBottom: 16 }}>
+                {bertSummary.mean.toFixed(3)}
+              </div>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
+                Rescaled with baseline (roberta-base)<br />n = {bertValues.length}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!hasBertscore && completed.length > 0 && (
+        <div style={{ marginBottom: 28, padding: 12, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)", fontSize: 12, color: "var(--text-muted)", boxShadow: "var(--shadow)" }}>
+          BERTScore was not computed for this run. To include it, enable the &quot;Include BERTScore&quot; toggle on the Translate page before running.
+        </div>
+      )}
+
+      {/* Flagged Translations */}
+      <div className="anim d2" style={{ marginBottom: 48 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+          Flagged Translations
+          <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        </div>
+        <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)", maxWidth: 480 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>Flagged for Review</div>
+          <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--accent-text)", lineHeight: 1, marginBottom: 16 }}>
+            {flaggedCount}
+          </div>
+          <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6, marginBottom: 12 }}>
+            Threshold: METEOR &lt; 0.40 &middot; {totalGraded} of {flaggedCount} graded
+          </div>
+          <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--accent-soft)", color: "var(--accent-text)" }}>
+            {flaggedPct}% of total
+          </span>
+        </div>
+      </div>
+
+      {/* Clinical Grading Progress */}
+      <div className="anim d3" style={{ marginBottom: 48 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+          Clinical Grading Progress
+          <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        </div>
+        <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>Clinical Significance Grades</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 120, height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
+                <div style={{ height: "100%", background: "var(--accent)", borderRadius: 100, width: `${flaggedCount > 0 ? (totalGraded / flaggedCount) * 100 : 0}%` }} />
+              </div>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>{totalGraded} / {flaggedCount} graded</span>
+            </div>
+          </div>
+          {CLINICAL_GRADES.map((g, i) => (
+            <div key={g.grade} style={{ display: "grid", gridTemplateColumns: "180px 1fr 48px", alignItems: "center", gap: 16, padding: "16px 0", borderBottom: i < CLINICAL_GRADES.length - 1 ? "1px solid var(--border-subtle)" : "none" }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: gradeColors[i] }} />
+                Grade {g.grade} &middot; {g.label}
+              </div>
+              <div style={{ height: 8, background: "var(--bg-inset)", borderRadius: 100, overflow: "hidden" }}>
+                <div style={{ height: "100%", borderRadius: 100, transition: "width 0.5s ease", width: `${maxGradeCount > 0 ? (gradeCounts[i] / maxGradeCount) * 100 : 0}%`, background: gradeColors[i] }} />
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", textAlign: "right" }}>{gradeCounts[i]}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Breakdown by Dataset */}
+      <div className="anim d4" style={{ marginBottom: 48 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+          Breakdown by Dataset
+          <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        </div>
+        <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)", overflow: "hidden" }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Dataset</th>
+                <th>Pairs</th>
+                {corpusBleu && <th>SacreBLEU</th>}
+                <th>METEOR</th>
+                {hasBertscore && <th>BERTScore</th>}
+                <th>Flagged</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sourceMetrics.map((src) => {
+                const srcFlagged = completed.filter((r) => r.source === src.key && r.meteor != null && r.meteor < 0.4).length;
+                const corpusVal = corpusBleu ? (src.key === "ClinSpEn_ClinicalCases" ? corpusBleu.clinspen : corpusBleu.umass) : null;
+                return (
+                  <tr key={src.key}>
+                    <td>
+                      <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, color: "var(--text-primary)" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: src.key === "ClinSpEn_ClinicalCases" ? "var(--accent)" : "#7C3AED" }} />
+                        {src.key === "ClinSpEn_ClinicalCases" ? "ClinSpEn" : "UMass"}
+                      </span>
+                    </td>
+                    <td>{src.count.toLocaleString()}</td>
+                    {corpusBleu && <td>{corpusVal ? corpusVal.bleu_score.toFixed(2) : "--"}</td>}
+                    <td>{src.meteor != null ? src.meteor.toFixed(3) : "--"}</td>
+                    {hasBertscore && <td>{src.bert != null ? src.bert.toFixed(3) : "--"}</td>}
+                    <td>{srcFlagged}</td>
+                  </tr>
+                );
+              })}
+              <tr>
+                <td style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-muted)" }}>Combined</td>
+                <td style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-primary)" }}>{completed.length.toLocaleString()}</td>
+                {corpusBleu && <td style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-primary)" }}>{corpusBleu.overall.bleu_score.toFixed(2)}</td>}
+                <td style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-primary)" }}>{meteorValues.length > 0 ? meteorSummary.mean.toFixed(3) : "--"}</td>
+                {hasBertscore && <td style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-primary)" }}>{bertSummary.mean.toFixed(3)}</td>}
+                <td style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-primary)" }}>{flaggedCount}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Library versions */}
+      {jobResults?.library_versions && (
+        <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)", paddingTop: 8 }}>
+          MedTranslate &middot; sacrebleu {jobResults.library_versions.sacrebleu} &middot; nltk {jobResults.library_versions.nltk}
+          {jobResults.library_versions.bert_score && jobResults.library_versions.bert_score !== "not loaded" && (
+            <> &middot; bert-score {jobResults.library_versions.bert_score}</>
+          )}
+          {jobResults.library_versions.torch && jobResults.library_versions.torch !== "not loaded" && (
+            <> &middot; torch {jobResults.library_versions.torch}</>
           )}
         </div>
-
-        {!hasBertscore && completed.length > 0 && (
-          <div className="mb-7 p-3 bg-surface-800 border border-surface-700 rounded-xl text-slate-500 text-[12px]">
-            BERTScore was not computed for this run. To include it, enable the &quot;Include BERTScore&quot; toggle on the Translate page before running.
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-4">
-          {/* Clinical grade distribution */}
-          <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
-            <div className="text-sm font-semibold text-slate-100 mb-4">
-              Clinical Significance Distribution
-            </div>
-            {CLINICAL_GRADES.map((g, i) => {
-              const count = gradeCounts[i];
-              const pct = totalGraded > 0 ? (count / totalGraded) * 100 : 0;
-              return (
-                <div key={g.grade} className="mb-3">
-                  <div className="flex justify-between mb-1">
-                    <span className="text-[12px] text-slate-400">
-                      Grade {g.grade}: {g.label}
-                    </span>
-                    <span
-                      className="text-[12px] font-mono"
-                      style={{ color: g.color }}
-                    >
-                      {totalGraded > 0
-                        ? `${count} (${pct.toFixed(0)}%)`
-                        : "-- (--)"}
-                    </span>
-                  </div>
-                  <div className="h-2 bg-surface-700 rounded overflow-hidden">
-                    <div
-                      className="h-full rounded transition-all duration-500"
-                      style={{ width: `${pct}%`, background: g.color }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-            <div className="text-slate-600 text-[13px] mt-2">
-              {totalGraded > 0
-                ? `${totalGraded} pair${totalGraded !== 1 ? "s" : ""} graded`
-                : "No pairs graded yet"}
-            </div>
-          </div>
-
-          {/* Source comparison */}
-          <div className="bg-surface-800 border border-surface-700 rounded-[14px] p-6">
-            <div className="text-sm font-semibold text-slate-100 mb-4">
-              Performance by Source
-            </div>
-            {sourceMetrics.map((src) => (
-              <div
-                key={src.label}
-                className="mb-4 bg-surface-700 rounded-[10px] p-4"
-              >
-                <div
-                  className="text-[12px] font-semibold mb-2"
-                  style={{ color: src.color }}
-                >
-                  {src.label}
-                </div>
-                <div className="flex gap-5">
-                  <div>
-                    <span className="text-[10px] text-slate-500">METEOR</span>{" "}
-                    <span className="text-base font-mono text-slate-100 ml-1">
-                      {src.meteor != null ? src.meteor.toFixed(3) : "--"}
-                    </span>
-                  </div>
-                  {hasBertscore && (
-                    <div>
-                      <span className="text-[10px] text-slate-500">BERTScore</span>{" "}
-                      <span className="text-base font-mono text-slate-100 ml-1">
-                        {src.bert != null ? src.bert.toFixed(3) : "--"}
-                      </span>
-                    </div>
-                  )}
-                  <div>
-                    <span className="text-[10px] text-slate-500">n</span>{" "}
-                    <span className="text-base font-mono text-slate-400 ml-1">
-                      {src.count}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Library versions */}
-        {jobResults?.library_versions && (
-          <div className="mt-6 bg-surface-800 border border-surface-700 rounded-xl p-4">
-            <div className="text-[11px] text-slate-500 font-semibold tracking-widest mb-2">
-              LIBRARY VERSIONS (REPRODUCIBILITY)
-            </div>
-            <div className="flex gap-6 text-[12px] text-slate-400 font-mono">
-              <span>sacrebleu: {jobResults.library_versions.sacrebleu}</span>
-              <span>nltk: {jobResults.library_versions.nltk}</span>
-              {jobResults.library_versions.bert_score && jobResults.library_versions.bert_score !== "not loaded" && (
-                <span>bert-score: {jobResults.library_versions.bert_score}</span>
-              )}
-              {jobResults.library_versions.torch && jobResults.library_versions.torch !== "not loaded" && (
-                <span>torch: {jobResults.library_versions.torch}</span>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

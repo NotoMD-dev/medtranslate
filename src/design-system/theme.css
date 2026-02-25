@@ -1,0 +1,67 @@
+/* ═══════════════════════════════════════════
+   DARK MODE OVERRIDES
+═══════════════════════════════════════════ */
+[data-theme="dark"] {
+  --bg-base: #0F1210;
+  --bg-surface: #181C19;
+  --bg-surface-hover: #1E2320;
+  --bg-inset: #141815;
+
+  --text-primary: #E8EAE6;
+  --text-secondary: #9CA39A;
+  --text-muted: #626862;
+
+  --accent: #4ADE80;
+  --accent-soft: rgba(74,222,128,0.10);
+  --accent-hover: #22C55E;
+  --accent-text: #4ADE80;
+  --accent-bright: #4ADE80;
+
+  --border: #262C28;
+  --border-subtle: #1E2420;
+
+  --success: #34D399;
+  --success-light: rgba(52,211,153,0.10);
+  --success-border: rgba(52,211,153,0.25);
+  --warning: #FBBF24;
+  --warning-light: rgba(251,191,36,0.10);
+  --warning-border: rgba(251,191,36,0.25);
+  --danger: #F87171;
+  --danger-light: rgba(248,113,113,0.10);
+  --danger-border: rgba(248,113,113,0.25);
+
+  --shadow: 0 1px 3px rgba(0,0,0,0.2), 0 4px 20px rgba(0,0,0,0.25);
+  --shadow-hover: 0 2px 8px rgba(0,0,0,0.3), 0 8px 32px rgba(0,0,0,0.35);
+  --shadow-lg: 0 4px 12px rgba(0,0,0,0.3), 0 12px 40px rgba(0,0,0,0.4);
+}
+
+/* ═══════════════════════════════════════════
+   SMOOTH TRANSITIONS
+═══════════════════════════════════════════ */
+body,
+.card,
+.btn,
+input,
+textarea,
+select,
+table,
+th,
+td {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* ═══════════════════════════════════════════
+   ANIMATIONS
+═══════════════════════════════════════════ */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.anim { animation: fadeUp 0.45s ease forwards; opacity: 0; }
+.d1 { animation-delay: 0.04s; }
+.d2 { animation-delay: 0.08s; }
+.d3 { animation-delay: 0.12s; }
+.d4 { animation-delay: 0.16s; }
+.d5 { animation-delay: 0.20s; }
+.d6 { animation-delay: 0.24s; }

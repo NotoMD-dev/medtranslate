@@ -2,17 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --surface-900: #0a0f1a;
-  --surface-800: #111827;
-  --surface-700: #1e293b;
-  --surface-600: #334155;
-  --accent-blue: #0ea5e9;
-  --accent-indigo: #6366f1;
+@import "../src/design-system/tokens.css";
+@import "../src/design-system/theme.css";
+
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
 body {
-  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-family: var(--font);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Custom scrollbar */
@@ -22,16 +24,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--surface-700);
+  background: var(--bg-inset);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: var(--border);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: var(--text-muted);
 }
 
 /* Smooth transitions for interactive elements */
@@ -51,12 +53,49 @@ a {
 }
 
 .progress-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--accent-blue) 0%,
-    var(--accent-indigo) 50%,
-    var(--accent-blue) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 2s linear infinite;
+  background: var(--accent);
+}
+
+/* Table global styles */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+table tbody td {
+  font-size: 14px;
+  color: var(--text-secondary);
+  padding: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.15s;
+}
+
+table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+table tbody tr:hover td {
+  background: var(--accent-soft);
+}
+
+/* Dataset badge overrides */
+.badge-dataset-umass {
+  background: #F3E8FF !important;
+  color: #7C3AED !important;
+}
+
+[data-theme="dark"] .badge-dataset-umass {
+  background: rgba(124,58,237,0.12) !important;
+  color: #A78BFA !important;
 }

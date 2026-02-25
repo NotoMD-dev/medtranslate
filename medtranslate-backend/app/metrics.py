@@ -33,6 +33,8 @@ def compute_corpus_bleu(
     hypotheses: list[str],
     references: list[str],
 ) -> tuple[float, str]:
+    if not hypotheses or not references:
+        return 0.0, "N/A (no reference translations available)"
     bleu = sacrebleu.corpus_bleu(hypotheses, [references])
     return bleu.score, bleu.format()
 

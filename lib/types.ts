@@ -61,7 +61,7 @@ export interface JobResults {
   corpus_metrics: DatasetCorpusMetrics | null;
   sentence_metrics: SentenceMetrics[];
   library_versions: LibraryVersions | null;
-  model_config: ModelConfig | null;
+  translation_config: ModelConfig | null;
 }
 
 // ---------------------------------------------------------------------------
