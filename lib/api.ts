@@ -16,6 +16,62 @@ import type {
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
+function baseCandidates(): string[] {
+  const base = BACKEND_URL.replace(/\/$/, "");
+  const set = new Set<string>();
+
+  set.add(base);
+
+  // If caller already supplied /v1 in NEXT_PUBLIC_BACKEND_URL, also try without it.
+  if (base.endsWith("/v1")) {
+    set.add(base.replace(/\/v1$/, ""));
+  } else {
+    // If caller supplied host root, also try /v1 as a base fallback.
+    set.add(`${base}/v1`);
+  }
+
+  return Array.from(set);
+}
+
+function pathCandidates(path: string): string[] {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const withoutV1 = normalized.replace(/^\/v1/, "") || "/";
+  const withV1 = normalized.startsWith("/v1") ? normalized : `/v1${normalized}`;
+
+  const candidates = new Set<string>();
+  for (const base of baseCandidates()) {
+    candidates.add(`${base}${normalized}`);
+    candidates.add(`${base}${withoutV1}`);
+    candidates.add(`${base}${withV1}`);
+  }
+
+  return Array.from(candidates);
+}
+
+async function fetchWithFallback(
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const candidates = pathCandidates(path);
+  let lastResponse: Response | null = null;
+  let lastError: unknown;
+
+  for (const url of candidates) {
+    try {
+      const resp = await fetch(url, init);
+      if (resp.status !== 404) {
+        return resp;
+      }
+      lastResponse = resp;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (lastResponse) return lastResponse;
+  throw lastError instanceof Error ? lastError : new Error("Failed to reach backend");
+}
+
 // ---------------------------------------------------------------------------
 // POST /v1/parse — parse CSV or XLSX on the backend, return normalized rows
 // ---------------------------------------------------------------------------
@@ -24,7 +80,7 @@ export async function parseFile(file: File): Promise<TranslationPair[]> {
   const form = new FormData();
   form.append("file", file);
 
-  const resp = await fetch(`${BACKEND_URL}/v1/parse`, {
+  const resp = await fetchWithFallback("/v1/parse", {
     method: "POST",
     body: form,
   });
@@ -60,7 +116,7 @@ export async function submitJob(
   form.append("max_tokens", String(config.maxTokens));
   form.append("compute_bertscore", String(config.computeBertscore ?? false));
 
-  const resp = await fetch(`${BACKEND_URL}/v1/jobs`, {
+  const resp = await fetchWithFallback("/v1/jobs", {
     method: "POST",
     body: form,
   });
@@ -78,7 +134,7 @@ export async function submitJob(
 // ---------------------------------------------------------------------------
 
 export async function pollJobStatus(jobId: string): Promise<JobStatusResponse> {
-  const resp = await fetch(`${BACKEND_URL}/v1/jobs/${jobId}`);
+  const resp = await fetchWithFallback(`/v1/jobs/${jobId}`);
   if (!resp.ok) {
     throw new Error(`Failed to fetch job status: ${resp.status}`);
   }
@@ -90,7 +146,7 @@ export async function pollJobStatus(jobId: string): Promise<JobStatusResponse> {
 // ---------------------------------------------------------------------------
 
 export async function fetchJobResults(jobId: string): Promise<JobResults> {
-  const resp = await fetch(`${BACKEND_URL}/v1/jobs/${jobId}/results`);
+  const resp = await fetchWithFallback(`/v1/jobs/${jobId}/results`);
   if (!resp.ok) {
     throw new Error(`Failed to fetch results: ${resp.status}`);
   }
@@ -102,7 +158,7 @@ export async function fetchJobResults(jobId: string): Promise<JobResults> {
 // ---------------------------------------------------------------------------
 
 export async function cancelJob(jobId: string): Promise<void> {
-  const resp = await fetch(`${BACKEND_URL}/v1/jobs/${jobId}/cancel`, {
+  const resp = await fetchWithFallback(`/v1/jobs/${jobId}/cancel`, {
     method: "POST",
   });
   if (!resp.ok) {
