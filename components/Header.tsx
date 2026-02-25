@@ -27,58 +27,45 @@ export default function Header() {
           marginBottom: 24,
         }}
       >
-        <Link href="/" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 12 }}>
-          {/* Medical cross icon */}
-          <div
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              background: "var(--accent)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
+        <Link href="/" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 10 }}>
+          {/* Pulse icon */}
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0 }}
           >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#fff"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M8 2h8v6h6v8h-6v6H8v-6H2V8h6z" />
-            </svg>
-          </div>
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
           <div>
             <div
               style={{
-                fontSize: 22,
-                fontWeight: 800,
-                letterSpacing: "-0.03em",
+                fontSize: 20,
+                fontWeight: 700,
+                letterSpacing: "-0.02em",
                 color: "var(--text-primary)",
                 lineHeight: 1.1,
                 fontFamily: "var(--font)",
               }}
             >
-              Med
-              <span style={{ color: "var(--accent)" }}>Translate</span>
+              Med<span style={{ color: "var(--accent)" }}>Translate</span>
             </div>
             <div
               className="brand-tagline"
               style={{
-                fontSize: 12,
+                fontSize: 11.5,
                 color: "var(--text-muted)",
-                letterSpacing: "0.02em",
+                letterSpacing: "0.01em",
                 lineHeight: 1.3,
                 marginTop: 1,
               }}
             >
-              Clinical Translation Research Platform
+              Clinical Translation Research
             </div>
           </div>
         </Link>
