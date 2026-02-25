@@ -9,6 +9,9 @@ const STORAGE_KEYS = {
   jobResults: "medtranslate:jobResults",
   grades: "medtranslate:grades",
   csvFile: "medtranslate:csvFile",
+  model: "medtranslate:model",
+  sourceLanguage: "medtranslate:sourceLanguage",
+  comparisonResults: "medtranslate:comparisonResults",
 } as const;
 
 function canUseStorage() {
@@ -152,6 +155,45 @@ export function setSessionCsvFileName(name: string | undefined) {
   }
 }
 
+// Model
+export function getSessionModel() {
+  if (!canUseStorage()) return undefined;
+  return localStorage.getItem(STORAGE_KEYS.model) || undefined;
+}
+
+export function setSessionModel(model: string | undefined) {
+  if (!canUseStorage()) return;
+  if (model == null) {
+    localStorage.removeItem(STORAGE_KEYS.model);
+  } else {
+    localStorage.setItem(STORAGE_KEYS.model, model);
+  }
+}
+
+// Source language
+export function getSessionSourceLanguage() {
+  if (!canUseStorage()) return undefined;
+  return localStorage.getItem(STORAGE_KEYS.sourceLanguage) || undefined;
+}
+
+export function setSessionSourceLanguage(lang: string | undefined) {
+  if (!canUseStorage()) return;
+  if (lang == null) {
+    localStorage.removeItem(STORAGE_KEYS.sourceLanguage);
+  } else {
+    localStorage.setItem(STORAGE_KEYS.sourceLanguage, lang);
+  }
+}
+
+// Comparison results (stores results keyed by model id for head-to-head)
+export function getSessionComparisonResults() {
+  return readJSON<Record<string, import("@/lib/types").JobResults>>(STORAGE_KEYS.comparisonResults);
+}
+
+export function setSessionComparisonResults(results: Record<string, import("@/lib/types").JobResults> | undefined) {
+  writeJSON(STORAGE_KEYS.comparisonResults, results);
+}
+
 export function clearSessionState() {
   setSessionData(undefined);
   setSessionPrompt(undefined);
@@ -160,6 +202,9 @@ export function clearSessionState() {
   setSessionJobResults(undefined);
   setSessionGrades(undefined);
   setSessionCsvFileName(undefined);
+  setSessionModel(undefined);
+  setSessionSourceLanguage(undefined);
+  setSessionComparisonResults(undefined);
   // Also clear IndexedDB (fire-and-forget)
   setJobResultsIDB(undefined).catch(() => {});
   setGradesIDB(undefined).catch(() => {});

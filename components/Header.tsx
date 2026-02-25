@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: "/translate", label: "Translate" },
   { href: "/review", label: "Review" },
   { href: "/metrics", label: "Metrics" },
+  { href: "/compare", label: "Compare" },
 ];
 
 export default function Header() {

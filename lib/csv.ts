@@ -1,17 +1,36 @@
 import type { TranslationPair, SentenceMetrics, ClinicalGrade } from "./types";
+import { SOURCE_LANGUAGES } from "./types";
+
+/**
+ * Detect which source language column exists in the headers.
+ * Returns the matching column name, or null if none found.
+ */
+export function detectSourceColumn(headers: string[]): string | null {
+  const lowerHeaders = headers.map((h) => h.toLowerCase().trim());
+  for (const lang of SOURCE_LANGUAGES) {
+    if (lowerHeaders.includes(lang.columnName)) return lang.columnName;
+  }
+  // Fallback: check for generic "source_text"
+  if (lowerHeaders.includes("source_text")) return "source_text";
+  return null;
+}
 
 /**
  * Parse a CSV string into TranslationPair objects.
  * Handles quoted fields with commas and newlines.
+ * Supports dynamic source language columns (e.g. french_source, korean_source).
  */
-export function parseCSV(text: string): TranslationPair[] {
+export function parseCSV(text: string, sourceColumn?: string): TranslationPair[] {
   const lines = text.split("\n").filter((l) => l.trim());
   if (lines.length < 2) return [];
 
   const headers = parseCSVLine(lines[0]);
 
+  // Determine source text column
+  const srcCol = sourceColumn || detectSourceColumn(headers) || "spanish_source";
+
   // Validate required columns
-  const required = ["spanish_source", "english_reference"];
+  const required = [srcCol, "english_reference"];
   const missing = required.filter((col) => !headers.includes(col));
   if (missing.length > 0) {
     throw new Error(
@@ -30,12 +49,14 @@ export function parseCSV(text: string): TranslationPair[] {
       obj[h] = values[idx] || "";
     });
 
+    const sourceText = obj[srcCol] || "";
     rows.push({
       pair_id: obj.pair_id || `row_${i}`,
-      source: (obj.source as TranslationPair["source"]) || "ClinSpEn_ClinicalCases",
-      content_type: (obj.content_type as TranslationPair["content_type"]) || "clinical_case_report",
+      source: obj.source || "ClinSpEn_ClinicalCases",
+      content_type: obj.content_type || "clinical_case_report",
       english_reference: obj.english_reference || "",
-      spanish_source: obj.spanish_source || "",
+      source_text: sourceText,
+      spanish_source: sourceText, // backward compat
       llm_english_translation: obj.llm_english_translation || "",
     });
   }
@@ -70,6 +91,7 @@ function parseCSVLine(line: string): string[] {
 
 /**
  * Convert TranslationPair[] to a CSV File suitable for backend upload.
+ * Uses source_text column (the backend understands this generic column).
  */
 export function pairsToCSVFile(
   pairs: TranslationPair[],
@@ -80,7 +102,7 @@ export function pairsToCSVFile(
     "source",
     "content_type",
     "english_reference",
-    "spanish_source",
+    "source_text",
     "llm_english_translation",
   ];
 
@@ -97,7 +119,7 @@ export function pairsToCSVFile(
       r.source,
       r.content_type,
       r.english_reference,
-      r.spanish_source,
+      r.source_text || r.spanish_source,
       r.llm_english_translation,
     ]
       .map(escape)
@@ -120,7 +142,7 @@ export function exportResultsCSV(
     "source",
     "content_type",
     "english_reference",
-    "spanish_source",
+    "source_text",
     "llm_english_translation",
     "meteor_score",
     "bertscore_f1",
@@ -142,7 +164,7 @@ export function exportResultsCSV(
       r.source,
       r.content_type,
       r.english_reference,
-      r.spanish_source,
+      r.source_text || r.spanish_source,
       r.llm_english_translation,
       r.meteor != null ? r.meteor.toFixed(4) : "",
       r.bertscore_f1 != null ? r.bertscore_f1.toFixed(4) : "",

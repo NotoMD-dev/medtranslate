@@ -38,8 +38,9 @@ class InputRow:
     pair_id: str
     source: str
     content_type: str
-    spanish_source: str
+    source_text: str
     english_reference: str
+    spanish_source: str = ""  # backward compat
     llm_english_translation: str = ""
 
 
@@ -124,6 +125,22 @@ def get_job_results(job_id: str) -> Optional[JobResults]:
     )
 
 
+def _make_sentence_metrics(row: InputRow, **overrides) -> SentenceMetrics:
+    """Helper to build a SentenceMetrics from an InputRow with optional overrides."""
+    return SentenceMetrics(
+        pair_id=row.pair_id,
+        source=row.source,
+        content_type=row.content_type,
+        source_text=row.source_text,
+        spanish_source=row.spanish_source or row.source_text,
+        english_reference=row.english_reference,
+        llm_english_translation=overrides.get("llm_english_translation", row.llm_english_translation),
+        meteor=overrides.get("meteor", None),
+        bertscore_f1=overrides.get("bertscore_f1", None),
+        error=overrides.get("error", None),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Job execution
 # ---------------------------------------------------------------------------
@@ -142,6 +159,7 @@ async def execute_job(job_id: str) -> None:
     temperature = job.model_config.temperature
     max_tokens = job.model_config.max_tokens
     compute_bertscore = getattr(job.model_config, "compute_bertscore", False)
+    metrics_only = getattr(job.model_config, "metrics_only", False)
 
     # Tunable concurrency controls
     MAX_CONCURRENT_TRANSLATIONS = int(
@@ -155,8 +173,10 @@ async def execute_job(job_id: str) -> None:
     async def _translate_one(index: int, row: InputRow):
         async with semaphore:
             try:
+                # Use source_text (the generalized column) for translation
+                text_to_translate = row.source_text or row.spanish_source
                 translation = await translate_text(
-                    row.spanish_source,
+                    text_to_translate,
                     model=model,
                     system_prompt=system_prompt,
                     temperature=temperature,
@@ -169,66 +189,51 @@ async def execute_job(job_id: str) -> None:
     # Pre-populate sentence_metrics with all rows (pending state)
     # so the frontend can display the table immediately during polling.
     job.sentence_metrics = [
-        SentenceMetrics(
-            pair_id=row.pair_id,
-            source=row.source,
-            content_type=row.content_type,
-            spanish_source=row.spanish_source,
-            english_reference=row.english_reference,
-            llm_english_translation="",
-        )
+        _make_sentence_metrics(row, llm_english_translation=row.llm_english_translation if metrics_only else "")
         for row in job.rows
     ]
 
     # ------------------------------------------------------------------
-    # Phase 1: Concurrent translation (chunked)
-    # Sentence metrics are updated incrementally as translations complete.
+    # Phase 1: Concurrent translation (chunked) — SKIP if metrics_only
     # ------------------------------------------------------------------
-    for start in range(0, total, CHUNK_SIZE):
-        # Check for cancellation before starting each chunk
-        if job.cancelled:
-            logger.info("Job %s: cancelled during translation phase", job_id)
-            break
+    if metrics_only:
+        # In metrics-only mode, use existing translations from the CSV
+        logger.info("Job %s: metrics-only mode, skipping translation", job_id)
+        job.translated = sum(1 for r in job.rows if r.llm_english_translation)
+    else:
+        for start in range(0, total, CHUNK_SIZE):
+            # Check for cancellation before starting each chunk
+            if job.cancelled:
+                logger.info("Job %s: cancelled during translation phase", job_id)
+                break
 
-        end = min(start + CHUNK_SIZE, total)
-        tasks = [
-            asyncio.create_task(_translate_one(i, job.rows[i]))
-            for i in range(start, end)
-        ]
+            end = min(start + CHUNK_SIZE, total)
+            tasks = [
+                asyncio.create_task(_translate_one(i, job.rows[i]))
+                for i in range(start, end)
+            ]
 
-        results = await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks)
 
-        # Apply results deterministically
-        for index, translation, error in sorted(results, key=lambda x: x[0]):
-            row = job.rows[index]
+            # Apply results deterministically
+            for index, translation, error in sorted(results, key=lambda x: x[0]):
+                row = job.rows[index]
 
-            if error is None:
-                row.llm_english_translation = translation
-                job.translated += 1
-                # Update sentence_metrics in-place for real-time display
-                job.sentence_metrics[index] = SentenceMetrics(
-                    pair_id=row.pair_id,
-                    source=row.source,
-                    content_type=row.content_type,
-                    spanish_source=row.spanish_source,
-                    english_reference=row.english_reference,
-                    llm_english_translation=translation,
-                )
-            else:
-                logger.error("Job %s row %d translation failed: %s", job_id, index, error)
-                row.llm_english_translation = ""
-                job.failed_rows += 1
-                job.sentence_metrics[index] = SentenceMetrics(
-                    pair_id=row.pair_id,
-                    source=row.source,
-                    content_type=row.content_type,
-                    spanish_source=row.spanish_source,
-                    english_reference=row.english_reference,
-                    llm_english_translation="",
-                    error=error,
-                )
+                if error is None:
+                    row.llm_english_translation = translation
+                    job.translated += 1
+                    job.sentence_metrics[index] = _make_sentence_metrics(
+                        row, llm_english_translation=translation,
+                    )
+                else:
+                    logger.error("Job %s row %d translation failed: %s", job_id, index, error)
+                    row.llm_english_translation = ""
+                    job.failed_rows += 1
+                    job.sentence_metrics[index] = _make_sentence_metrics(
+                        row, llm_english_translation="", error=error,
+                    )
 
-        await asyncio.sleep(0)
+            await asyncio.sleep(0)
 
     # If cancelled, finalize status and return early with partial results
     if job.cancelled:
@@ -262,14 +267,8 @@ async def execute_job(job_id: str) -> None:
     # Update sentence_metrics with METEOR scores
     for idx, (i, row) in enumerate(successfully_translated):
         meteor_val = meteor_scores[idx] if idx < len(meteor_scores) else None
-        job.sentence_metrics[i] = SentenceMetrics(
-            pair_id=row.pair_id,
-            source=row.source,
-            content_type=row.content_type,
-            spanish_source=row.spanish_source,
-            english_reference=row.english_reference,
-            llm_english_translation=row.llm_english_translation,
-            meteor=meteor_val,
+        job.sentence_metrics[i] = _make_sentence_metrics(
+            row, llm_english_translation=row.llm_english_translation, meteor=meteor_val,
         )
 
     # ------------------------------------------------------------------
@@ -365,6 +364,7 @@ async def execute_job(job_id: str) -> None:
                 pair_id=existing.pair_id,
                 source=existing.source,
                 content_type=existing.content_type,
+                source_text=existing.source_text,
                 spanish_source=existing.spanish_source,
                 english_reference=existing.english_reference,
                 llm_english_translation=existing.llm_english_translation,

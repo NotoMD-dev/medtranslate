@@ -3,9 +3,15 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
-import { parseCSV } from "@/lib/csv";
+import { parseCSV, detectSourceColumn } from "@/lib/csv";
 import { parseFile } from "@/lib/api";
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/types";
+import {
+  DEFAULT_SYSTEM_PROMPT,
+  SOURCE_LANGUAGES,
+  DEFAULT_SOURCE_LANGUAGE,
+  MODEL_OPTIONS,
+  buildSystemPrompt,
+} from "@/lib/types";
 import {
   clearSessionState,
   setSessionData,
@@ -14,6 +20,8 @@ import {
   setSessionJobResultsAsync,
   setSessionJobId,
   setSessionCsvFileName,
+  setSessionModel,
+  setSessionSourceLanguage,
 } from "@/lib/session";
 import type { TranslationPair } from "@/lib/types";
 
@@ -22,11 +30,16 @@ export default function UploadPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<TranslationPair[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [sourceLanguage, setSourceLanguage] = useState(DEFAULT_SOURCE_LANGUAGE.code);
+  const [selectedModel, setSelectedModel] = useState(MODEL_OPTIONS[0].id);
+  const currentLang = SOURCE_LANGUAGES.find((l) => l.code === sourceLanguage) || DEFAULT_SOURCE_LANGUAGE;
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [rowMode, setRowMode] = useState<"all" | "custom">("all");
+  const [rowMode, setRowMode] = useState<"all" | "custom" | "range">("all");
   const [customRowCount, setCustomRowCount] = useState<string>("");
+  const [rangeStart, setRangeStart] = useState<string>("");
+  const [rangeEnd, setRangeEnd] = useState<string>("");
 
   const processFile = useCallback(
     (file: File) => {
@@ -43,7 +56,7 @@ export default function UploadPage() {
 
       if (isXlsx) {
         // Send XLSX to backend for safe parsing with openpyxl
-        parseFile(file)
+        parseFile(file, currentLang.columnName)
           .then((parsed) => {
             setRows(parsed);
             setSessionData(parsed);
@@ -57,7 +70,7 @@ export default function UploadPage() {
         const reader = new FileReader();
         reader.onload = (ev) => {
           try {
-            const parsed = parseCSV(ev.target?.result as string);
+            const parsed = parseCSV(ev.target?.result as string, currentLang.columnName);
             setRows(parsed);
             setSessionData(parsed);
             setSessionPrompt(systemPrompt);
@@ -69,7 +82,7 @@ export default function UploadPage() {
         reader.readAsText(file);
       }
     },
-    [systemPrompt]
+    [systemPrompt, currentLang.columnName]
   );
 
   const handleUpload = useCallback(
@@ -96,6 +109,11 @@ export default function UploadPage() {
     setError(null);
     setRowMode("all");
     setCustomRowCount("");
+    setRangeStart("");
+    setRangeEnd("");
+    setSourceLanguage(DEFAULT_SOURCE_LANGUAGE.code);
+    setSelectedModel(MODEL_OPTIONS[0].id);
+    setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
     clearSessionState();
     if (fileRef.current) {
       fileRef.current.value = "";
@@ -103,33 +121,53 @@ export default function UploadPage() {
   }, []);
 
   const handleContinue = useCallback(() => {
-    let limit: number | undefined;
+    let dataToUse: TranslationPair[];
+
     if (rowMode === "custom") {
       const parsed = parseInt(customRowCount, 10);
       if (!parsed || parsed < 1) {
         setError("Please enter a valid number of rows (1 or more).");
         return;
       }
-      limit = parsed;
+      dataToUse = rows.slice(0, parsed);
+    } else if (rowMode === "range") {
+      const start = parseInt(rangeStart, 10);
+      const end = parseInt(rangeEnd, 10);
+      if (!start || !end || start < 1 || end < start || start > rows.length) {
+        setError(`Please enter a valid range (1 - ${rows.length}).`);
+        return;
+      }
+      dataToUse = rows.slice(start - 1, Math.min(end, rows.length));
+    } else {
+      dataToUse = rows;
     }
 
-    // Apply row limit to global data
-    const dataToUse = limit ? rows.slice(0, limit) : rows;
     setSessionData(dataToUse);
     setSessionPrompt(systemPrompt);
-    setSessionRowLimit(limit);
+    setSessionRowLimit(dataToUse.length !== rows.length ? dataToUse.length : undefined);
+    setSessionModel(selectedModel);
+    setSessionSourceLanguage(sourceLanguage);
     setSessionJobResultsAsync(undefined);
     setSessionJobId(undefined);
     router.push("/translate");
-  }, [rowMode, customRowCount, rows, systemPrompt, router]);
+  }, [rowMode, customRowCount, rangeStart, rangeEnd, rows, systemPrompt, selectedModel, sourceLanguage, router]);
 
   const sources = [...new Set(rows.map((r) => r.source))].filter(Boolean);
   const hasRef = rows.some((r) => r.english_reference);
 
-  const effectiveRowCount =
-    rowMode === "custom" && customRowCount
-      ? Math.min(parseInt(customRowCount, 10) || rows.length, rows.length)
-      : rows.length;
+  const effectiveRowCount = (() => {
+    if (rowMode === "custom" && customRowCount) {
+      return Math.min(parseInt(customRowCount, 10) || rows.length, rows.length);
+    }
+    if (rowMode === "range" && rangeStart && rangeEnd) {
+      const start = parseInt(rangeStart, 10);
+      const end = parseInt(rangeEnd, 10);
+      if (start && end && start >= 1 && end >= start) {
+        return Math.min(end, rows.length) - Math.max(start, 1) + 1;
+      }
+    }
+    return rows.length;
+  })();
 
   return (
     <div className="page-container">
@@ -152,7 +190,7 @@ export default function UploadPage() {
         <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
           Import a CSV/XLSX with clinical translation pairs. Required columns:{" "}
           <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
-            spanish_source
+            {currentLang.columnName}
           </strong>
           {" "}and{" "}
           <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
@@ -292,7 +330,9 @@ export default function UploadPage() {
               {effectiveRowCount.toLocaleString()}
             </span>{" "}
             <span style={{ color: "var(--text-muted)", fontSize: 14 }}>
-              {rowMode === "custom" && customRowCount
+              {rowMode === "range" && rangeStart && rangeEnd
+                ? `of ${rows.length.toLocaleString()} pairs (rows ${rangeStart}\u2013${Math.min(parseInt(rangeEnd, 10) || rows.length, rows.length)})`
+                : rowMode === "custom" && customRowCount
                 ? `of ${rows.length.toLocaleString()} pairs selected`
                 : "pairs loaded"}
             </span>
@@ -362,7 +402,25 @@ export default function UploadPage() {
                 color: rowMode === "custom" ? "var(--accent-text)" : "var(--text-secondary)",
               }}
             >
-              Custom number of rows
+              First N rows
+            </button>
+            <button
+              onClick={() => setRowMode("range")}
+              style={{
+                flex: 1,
+                padding: "14px 16px",
+                borderRadius: "var(--radius-sm)",
+                fontSize: 15,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "var(--font)",
+                transition: "all 0.2s",
+                background: rowMode === "range" ? "var(--accent-soft)" : "transparent",
+                border: `1.5px solid ${rowMode === "range" ? "var(--accent)" : "var(--border)"}`,
+                color: rowMode === "range" ? "var(--accent-text)" : "var(--text-secondary)",
+              }}
+            >
+              Row range
             </button>
           </div>
           {rowMode === "custom" && (
@@ -388,6 +446,149 @@ export default function UploadPage() {
               />
             </div>
           )}
+          {rowMode === "range" && (
+            <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center" }}>
+              <input
+                type="number"
+                min="1"
+                max={rows.length}
+                value={rangeStart}
+                onChange={(e) => setRangeStart(e.target.value)}
+                placeholder="Start row"
+                style={{
+                  flex: 1,
+                  background: "var(--bg-inset)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-xs)",
+                  padding: "14px 16px",
+                  color: "var(--text-primary)",
+                  fontSize: 15,
+                  fontFamily: "var(--font)",
+                  outline: "none",
+                }}
+              />
+              <span style={{ color: "var(--text-muted)", fontSize: 14, fontWeight: 500 }}>to</span>
+              <input
+                type="number"
+                min="1"
+                max={rows.length}
+                value={rangeEnd}
+                onChange={(e) => setRangeEnd(e.target.value)}
+                placeholder="End row"
+                style={{
+                  flex: 1,
+                  background: "var(--bg-inset)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-xs)",
+                  padding: "14px 16px",
+                  color: "var(--text-primary)",
+                  fontSize: 15,
+                  fontFamily: "var(--font)",
+                  outline: "none",
+                }}
+              />
+              <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                of {rows.length.toLocaleString()}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Source Language selector */}
+      {rows.length > 0 && (
+        <div className="anim d3" style={{ marginTop: 24 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "var(--text-muted)",
+              marginBottom: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            Source Language
+            <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {SOURCE_LANGUAGES.map((lang) => (
+              <button
+                key={lang.code}
+                onClick={() => {
+                  setSourceLanguage(lang.code);
+                  setSystemPrompt(buildSystemPrompt(lang.label));
+                }}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: "var(--radius-sm)",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "var(--font)",
+                  transition: "all 0.2s",
+                  background: sourceLanguage === lang.code ? "var(--accent-soft)" : "transparent",
+                  border: `1.5px solid ${sourceLanguage === lang.code ? "var(--accent)" : "var(--border)"}`,
+                  color: sourceLanguage === lang.code ? "var(--accent-text)" : "var(--text-secondary)",
+                }}
+              >
+                {lang.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>
+            Your file must contain a <strong style={{ color: "var(--text-secondary)" }}>{currentLang.columnName}</strong> column and an <strong style={{ color: "var(--text-secondary)" }}>english_reference</strong> column.
+          </div>
+        </div>
+      )}
+
+      {/* Model selector */}
+      {rows.length > 0 && (
+        <div className="anim d3" style={{ marginTop: 24 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "var(--text-muted)",
+              marginBottom: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            LLM Model
+            <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {MODEL_OPTIONS.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setSelectedModel(m.id)}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: "var(--radius-sm)",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "var(--font)",
+                  transition: "all 0.2s",
+                  background: selectedModel === m.id ? "var(--accent-soft)" : "transparent",
+                  border: `1.5px solid ${selectedModel === m.id ? "var(--accent)" : "var(--border)"}`,
+                  color: selectedModel === m.id ? "var(--accent-text)" : "var(--text-secondary)",
+                }}
+              >
+                {m.label}
+                <span style={{ display: "block", fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
+                  {m.provider === "openai" ? "OpenAI" : "Anthropic"}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

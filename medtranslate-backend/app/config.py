@@ -4,6 +4,7 @@ import os
 
 
 OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # CORS origins allowed to call the backend (comma-separated).
 # Defaults to "*" so the app works out-of-the-box on any deployment.
@@ -27,3 +28,17 @@ DEFAULT_MAX_TOKENS: int = 1024
 # Translation retry settings
 TRANSLATE_MAX_RETRIES: int = 3
 TRANSLATE_RETRY_DELAY: float = 2.0
+
+# Known source language column names
+SOURCE_LANGUAGE_COLUMNS: list[str] = [
+    "spanish_source",
+    "french_source",
+    "korean_source",
+    "chinese_source",
+    "portuguese_source",
+    "german_source",
+    "arabic_source",
+    "japanese_source",
+    "russian_source",
+    "source_text",
+]

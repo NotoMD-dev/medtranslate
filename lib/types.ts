@@ -22,6 +22,8 @@ export interface SentenceMetrics {
   pair_id: string;
   source: string;
   content_type: string;
+  source_text: string;
+  /** @deprecated Backend still returns spanish_source for backward compat */
   spanish_source: string;
   english_reference: string;
   llm_english_translation: string;
@@ -115,25 +117,73 @@ export const CLINICAL_GRADES: ClinicalGradeInfo[] = [
 
 export interface TranslationPair {
   pair_id: string;
-  source: "ClinSpEn_ClinicalCases" | "UMass_EHR";
-  content_type: "clinical_case_report" | "ehr_clinical_note";
+  source: string;
+  content_type: string;
   english_reference: string;
+  source_text: string;
+  /** @deprecated Kept for backward-compatible CSV export; mirrors source_text */
   spanish_source: string;
   llm_english_translation: string;
 }
 
 // ---------------------------------------------------------------------------
+// Supported source languages
+// ---------------------------------------------------------------------------
+
+export interface SourceLanguageOption {
+  code: string;
+  label: string;
+  /** Column name expected in the CSV/XLSX (e.g. "spanish_source") */
+  columnName: string;
+}
+
+export const SOURCE_LANGUAGES: SourceLanguageOption[] = [
+  { code: "es", label: "Spanish", columnName: "spanish_source" },
+  { code: "fr", label: "French", columnName: "french_source" },
+  { code: "ko", label: "Korean", columnName: "korean_source" },
+  { code: "zh", label: "Chinese", columnName: "chinese_source" },
+  { code: "pt", label: "Portuguese", columnName: "portuguese_source" },
+  { code: "de", label: "German", columnName: "german_source" },
+  { code: "ar", label: "Arabic", columnName: "arabic_source" },
+  { code: "ja", label: "Japanese", columnName: "japanese_source" },
+  { code: "ru", label: "Russian", columnName: "russian_source" },
+];
+
+export const DEFAULT_SOURCE_LANGUAGE = SOURCE_LANGUAGES[0]; // Spanish
+
+// ---------------------------------------------------------------------------
+// Supported LLM models
+// ---------------------------------------------------------------------------
+
+export interface ModelOption {
+  id: string;
+  label: string;
+  provider: "openai" | "anthropic";
+}
+
+export const MODEL_OPTIONS: ModelOption[] = [
+  { id: "gpt-4o", label: "GPT-4o", provider: "openai" },
+  { id: "gpt-5.1", label: "GPT 5.1", provider: "openai" },
+  { id: "gpt-5.2", label: "GPT 5.2", provider: "openai" },
+  { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4", provider: "anthropic" },
+];
+
+// ---------------------------------------------------------------------------
 // Translation configuration defaults
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_SYSTEM_PROMPT =
-  "You are a medical interpreter. Translate the following Spanish clinical text into English, preserving all medical terminology and clinical meaning.";
+export function buildSystemPrompt(languageLabel: string): string {
+  return `You are a medical interpreter. Translate the following ${languageLabel} clinical text into English, preserving all medical terminology and clinical meaning.`;
+}
+
+export const DEFAULT_SYSTEM_PROMPT = buildSystemPrompt("Spanish");
 
 export interface TranslationConfig {
   model: string;
   systemPrompt: string;
   temperature: number;
   maxTokens: number;
+  sourceLanguage?: string;
 }
 
 export const DEFAULT_CONFIG: TranslationConfig = {
@@ -141,4 +191,5 @@ export const DEFAULT_CONFIG: TranslationConfig = {
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   temperature: 0,
   maxTokens: 1024,
+  sourceLanguage: "es",
 };
