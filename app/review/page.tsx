@@ -381,19 +381,29 @@ export default function ReviewPage() {
 
               {/* Reference quality flag */}
               <div style={{ borderTop: "1px solid var(--border-subtle)", marginTop: 20, paddingTop: 16 }}>
-                <div
+                <button
                   onClick={() => setRefFlagOpen(!refFlagOpen)}
-                  style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}
+                  style={{
+                    fontFamily: "var(--font)", display: "flex", alignItems: "center", gap: 10,
+                    cursor: "pointer", userSelect: "none", width: "100%",
+                    padding: "12px 16px", borderRadius: "var(--radius-xs)",
+                    background: refFlags[currentPair.pair_id] ? "var(--warning-light)" : "var(--bg-inset)",
+                    border: refFlags[currentPair.pair_id] ? "1px solid var(--warning-border)" : "1px solid var(--border)",
+                    transition: "all 0.15s",
+                  }}
                 >
-                  <span style={{ fontSize: 12, color: refFlags[currentPair.pair_id] ? "var(--warning)" : "var(--text-muted)", fontWeight: 600, transition: "color 0.15s" }}>
-                    {refFlagOpen ? "\u25BE" : "\u25B8"} Flag Reference Translation Issue
+                  <span style={{ fontSize: 16 }}>{refFlags[currentPair.pair_id] ? "\u26A0" : "\u2691"}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: refFlags[currentPair.pair_id] ? "var(--warning)" : "var(--text-secondary)" }}>
+                    Flag Reference Translation Issue
                   </span>
                   {refFlags[currentPair.pair_id] && (
-                    <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600, background: "var(--warning-light)", color: "var(--warning)", border: "1px solid var(--warning-border)" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600, background: "var(--warning)", color: "#fff" }}>
                       {refFlags[currentPair.pair_id].reasons.length} issue{refFlags[currentPair.pair_id].reasons.length !== 1 ? "s" : ""} flagged
                     </span>
                   )}
-                </div>
+                  <span style={{ flex: 1 }} />
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{refFlagOpen ? "\u25B2" : "\u25BC"}</span>
+                </button>
                 {refFlagOpen && (
                   <div style={{ marginTop: 12 }}>
                     <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
