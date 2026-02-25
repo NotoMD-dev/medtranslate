@@ -265,8 +265,8 @@ export default function ReviewPage() {
               {/* Three columns */}
               <div className="review-grid">
                 <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>Spanish Source</div>
-                  <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", maxHeight: 256, overflow: "auto" }}>{currentPair.spanish_source}</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>Source Text</div>
+                  <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", maxHeight: 256, overflow: "auto" }}>{currentPair.source_text || currentPair.spanish_source}</div>
                 </div>
                 <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>LLM English Translation</div>
@@ -365,7 +365,7 @@ export default function ReviewPage() {
                   <th>#</th>
                   <th>Pair ID</th>
                   <th>Source</th>
-                  <th>Spanish (input)</th>
+                  <th>Source Text (input)</th>
                   <th>LLM English (output)</th>
                   <th>METEOR</th>
                   <th>Grade</th>
@@ -392,7 +392,7 @@ export default function ReviewPage() {
                         {r.source === "ClinSpEn_ClinicalCases" ? "ClinSpEn" : "UMass"}
                       </span>
                     </td>
-                    <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.spanish_source}</td>
+                    <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.source_text || r.spanish_source}</td>
                     <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.llm_english_translation}</td>
                     <td style={{ color: "var(--accent-text)", fontWeight: 600 }}>{r.meteor?.toFixed(3) ?? "--"}</td>
                     <td>

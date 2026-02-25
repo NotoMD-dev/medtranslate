@@ -30,6 +30,7 @@ class ModelConfig(BaseModel):
     temperature: float = 0.0
     max_tokens: int = 1024
     compute_bertscore: bool = False  # opt-in: avoids ~400MB torch load
+    metrics_only: bool = False  # skip translation, only compute metrics (e.g. BERTScore)
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +55,8 @@ class SentenceMetrics(BaseModel):
     pair_id: str
     source: str
     content_type: str
-    spanish_source: str
+    source_text: str = ""
+    spanish_source: str = ""  # backward compat
     english_reference: str
     llm_english_translation: str
     meteor: Optional[float] = None

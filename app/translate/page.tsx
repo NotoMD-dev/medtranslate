@@ -3,9 +3,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import Header from "@/components/Header";
 import PairDetail from "@/components/PairDetail";
-import { pairsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
+import { pairsToCSVFile, sentenceMetricsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
 import { submitJob, pollUntilDone, fetchJobResults, pollJobStatus, cancelJob } from "@/lib/api";
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/types";
+import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS } from "@/lib/types";
 import type { JobStatusResponse, JobResults, SentenceMetrics, ClinicalGrade } from "@/lib/types";
 import {
   getSessionData,
@@ -13,9 +13,12 @@ import {
   getSessionJobId,
   getSessionJobResultsAsync,
   getSessionGradesAsync,
+  getSessionModel,
   setSessionJobId,
   setSessionJobResultsAsync,
   setSessionGradesAsync,
+  setSessionComparisonResults,
+  getSessionComparisonResults,
 } from "@/lib/session";
 
 type PageState = "idle" | "submitting" | "running" | "complete" | "failed";
@@ -31,6 +34,10 @@ export default function TranslatePage() {
   const [computeBertscore, setComputeBertscore] = useState(false);
   const abortRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Model from session (set on Upload page)
+  const sessionModel = getSessionModel() || MODEL_OPTIONS[0].id;
+  const modelLabel = MODEL_OPTIONS.find((m) => m.id === sessionModel)?.label || sessionModel;
 
   // Restore persisted job results on mount
   useEffect(() => {
@@ -98,6 +105,9 @@ export default function TranslatePage() {
     }
   }, []);
 
+  // Reference to existing results before a BERTScore-only run, so we can merge
+  const preRunResultsRef = useRef<JobResults | null>(null);
+
   const handleRun = useCallback(async () => {
     const data = getSessionData();
     if (!data || data.length === 0) {
@@ -109,16 +119,18 @@ export default function TranslatePage() {
     setError(null);
     setJobResults(null);
     setJobStatus(null);
+    preRunResultsRef.current = null;
     abortRef.current = false;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
       const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
+      const model = getSessionModel() || MODEL_OPTIONS[0].id;
       const csvFile = pairsToCSVFile(data);
 
       const { job_id } = await submitJob(csvFile, {
-        model: "gpt-4o",
+        model,
         systemPrompt,
         temperature: 0,
         maxTokens: 1024,
@@ -146,6 +158,12 @@ export default function TranslatePage() {
 
       setJobResults(results);
       await setSessionJobResultsAsync(results);
+
+      // Save to comparison results for head-to-head page
+      const existing = getSessionComparisonResults() || {};
+      existing[model] = results;
+      setSessionComparisonResults(existing);
+
       const isStopped = results.status === "cancelled" || abortRef.current;
       setPageState(isStopped ? "complete" : results.status === "complete" ? "complete" : "failed");
 
@@ -159,6 +177,101 @@ export default function TranslatePage() {
       }
     }
   }, [computeBertscore]);
+
+  const handleRunBertscoreOnly = useCallback(async () => {
+    // Use existing sentence_metrics (which have translations) rather than
+    // re-translating.  The backend metrics_only mode will skip translation
+    // and only compute metrics on the translations already in the CSV.
+    if (!jobResults || jobResults.sentence_metrics.length === 0) {
+      setError("No translations available. Run translations first.");
+      return;
+    }
+
+    // Save current results so we can merge BERTScore back in
+    preRunResultsRef.current = jobResults;
+
+    setPageState("submitting");
+    setError(null);
+    setJobStatus(null);
+    abortRef.current = false;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
+      const model = getSessionModel() || MODEL_OPTIONS[0].id;
+
+      // Build CSV from existing sentence metrics (includes translations)
+      const csvFile = sentenceMetricsToCSVFile(jobResults.sentence_metrics);
+
+      const { job_id } = await submitJob(csvFile, {
+        model,
+        systemPrompt,
+        temperature: 0,
+        maxTokens: 1024,
+        computeBertscore: true,
+        metricsOnly: true,
+      });
+
+      setSessionJobId(job_id);
+      setPageState("running");
+
+      const newResults = await pollUntilDone(job_id, async (status) => {
+        if (abortRef.current) return;
+        setJobStatus(status);
+      }, 2000, controller.signal);
+
+      // Merge: keep the previous METEOR/BLEU data and layer in BERTScore
+      const prev = preRunResultsRef.current;
+      if (prev && newResults.status === "complete") {
+        const mergedSentences = prev.sentence_metrics.map((existing) => {
+          const fresh = newResults.sentence_metrics.find(
+            (s) => s.pair_id === existing.pair_id,
+          );
+          return {
+            ...existing,
+            // Prefer existing METEOR/BLEU if available, but accept new if not
+            meteor: existing.meteor ?? fresh?.meteor ?? null,
+            bertscore_f1: fresh?.bertscore_f1 ?? existing.bertscore_f1 ?? null,
+          };
+        });
+
+        const mergedResults: JobResults = {
+          ...prev,
+          sentence_metrics: mergedSentences,
+          // Use the corpus metrics from whichever run has them
+          corpus_metrics: prev.corpus_metrics ?? newResults.corpus_metrics,
+          library_versions: newResults.library_versions ?? prev.library_versions,
+        };
+
+        setJobResults(mergedResults);
+        await setSessionJobResultsAsync(mergedResults);
+
+        // Update comparison results
+        const comp = getSessionComparisonResults() || {};
+        comp[model] = mergedResults;
+        setSessionComparisonResults(comp);
+      } else {
+        // Fallback: just use the new results directly
+        setJobResults(newResults);
+        await setSessionJobResultsAsync(newResults);
+      }
+
+      preRunResultsRef.current = null;
+      const isStopped = newResults.status === "cancelled" || abortRef.current;
+      setPageState(isStopped ? "complete" : newResults.status === "complete" ? "complete" : "failed");
+    } catch (err) {
+      if (!abortRef.current) {
+        // Restore previous results on error so nothing is lost
+        if (preRunResultsRef.current) {
+          setJobResults(preRunResultsRef.current);
+        }
+        preRunResultsRef.current = null;
+        setError((err as Error).message);
+        setPageState("complete"); // stay in complete so existing data is visible
+      }
+    }
+  }, [jobResults]);
 
   const handleAbort = useCallback(async () => {
     abortRef.current = true;
@@ -215,6 +328,10 @@ export default function TranslatePage() {
   // Determine which metric columns to show based on available data
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
 
+  // Can run BERTScore-only if we have completed translations
+  const canRunBertOnly = pageState !== "running" && pageState !== "submitting"
+    && completedCount > 0;
+
   return (
     <div className="page-container">
       <Header />
@@ -226,6 +343,7 @@ export default function TranslatePage() {
         </h1>
         <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
           <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{rowCount}</strong> pairs
+          {" "}&middot; Model: <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{modelLabel}</strong>
           {pageState === "complete" && <>{" "}&middot; {completedCount} completed &middot; {errorCount} errors</>}
           {pageState === "running" && jobStatus && <>{" "}&middot; {jobStatus.translated} translated</>}
         </p>
@@ -267,18 +385,33 @@ export default function TranslatePage() {
         )}
 
         {pageState === "idle" || pageState === "complete" || pageState === "failed" ? (
-          <button
-            onClick={handleRun}
-            disabled={rowCount === 0}
-            style={{
-              fontFamily: "var(--font)", fontSize: 13, fontWeight: 500, borderRadius: "var(--radius-sm)",
-              padding: "10px 24px", cursor: rowCount === 0 ? "not-allowed" : "pointer",
-              background: "var(--accent)", color: "#fff", border: "none",
-              opacity: rowCount === 0 ? 0.4 : 1, transition: "all 0.2s",
-            }}
-          >
-            {pageState === "complete" || pageState === "failed" ? "Re-run Translations" : "Run Translations"}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={handleRun}
+              disabled={rowCount === 0}
+              style={{
+                fontFamily: "var(--font)", fontSize: 13, fontWeight: 500, borderRadius: "var(--radius-sm)",
+                padding: "10px 24px", cursor: rowCount === 0 ? "not-allowed" : "pointer",
+                background: "var(--accent)", color: "#fff", border: "none",
+                opacity: rowCount === 0 ? 0.4 : 1, transition: "all 0.2s",
+              }}
+            >
+              {pageState === "complete" || pageState === "failed" ? "Re-run Translations" : "Run Translations"}
+            </button>
+            {canRunBertOnly && (
+              <button
+                onClick={handleRunBertscoreOnly}
+                style={{
+                  fontFamily: "var(--font)", fontSize: 13, fontWeight: 500, borderRadius: "var(--radius-sm)",
+                  padding: "10px 24px", cursor: "pointer",
+                  background: "transparent", color: "var(--accent-text)",
+                  border: "1px solid var(--accent)", transition: "all 0.2s",
+                }}
+              >
+                {hasBertscore ? "Re-run BERTScore" : "Run BERTScore Only"}
+              </button>
+            )}
+          </div>
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ padding: "10px 24px", borderRadius: "var(--radius-sm)", color: "var(--accent-text)", fontSize: 13, fontWeight: 500, border: "1px solid var(--accent)", background: "transparent" }}>
@@ -367,7 +500,7 @@ export default function TranslatePage() {
             <table>
               <thead>
                 <tr>
-                  {["#", "Source", "Spanish (input)", "LLM English (output)", "METEOR", ...(hasBertscore ? ["BERTScore"] : []), "Status"].map((h) => (
+                  {["#", "Source", "Source Text (input)", "LLM English (output)", "METEOR", ...(hasBertscore ? ["BERTScore"] : []), "Status"].map((h) => (
                     <th key={h}>{h}</th>
                   ))}
                 </tr>
@@ -393,10 +526,10 @@ export default function TranslatePage() {
                             color: r.source === "ClinSpEn_ClinicalCases" ? "var(--accent-text)" : undefined,
                           }}
                         >
-                          {r.source === "ClinSpEn_ClinicalCases" ? "ClinSpEn" : "UMass"}
+                          {r.source === "ClinSpEn_ClinicalCases" ? "ClinSpEn" : r.source === "UMass_EHR" ? "UMass" : r.source}
                         </span>
                       </td>
-                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.spanish_source}</td>
+                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.source_text || r.spanish_source}</td>
                       <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: hasTranslation ? "var(--text-primary)" : "var(--text-muted)" }}>
                         {r.llm_english_translation || (hasError ? "Failed" : "...")}
                       </td>

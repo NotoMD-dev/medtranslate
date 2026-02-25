@@ -38,9 +38,12 @@ async function safeFetch(input: string, init?: RequestInit): Promise<Response> {
 // POST /v1/parse — parse CSV or XLSX on the backend, return normalized rows
 // ---------------------------------------------------------------------------
 
-export async function parseFile(file: File): Promise<TranslationPair[]> {
+export async function parseFile(file: File, sourceColumn?: string): Promise<TranslationPair[]> {
   const form = new FormData();
   form.append("file", file);
+  if (sourceColumn) {
+    form.append("source_column", sourceColumn);
+  }
 
   const resp = await safeFetch(`${BACKEND_URL}/v1/parse`, {
     method: "POST",
@@ -68,6 +71,7 @@ export async function submitJob(
     temperature: number;
     maxTokens: number;
     computeBertscore?: boolean;
+    metricsOnly?: boolean;
   },
 ): Promise<JobCreated> {
   const form = new FormData();
@@ -77,6 +81,7 @@ export async function submitJob(
   form.append("temperature", String(config.temperature));
   form.append("max_tokens", String(config.maxTokens));
   form.append("compute_bertscore", String(config.computeBertscore ?? false));
+  form.append("metrics_only", String(config.metricsOnly ?? false));
 
   const resp = await safeFetch(`${BACKEND_URL}/v1/jobs`, {
     method: "POST",
