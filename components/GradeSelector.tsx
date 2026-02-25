@@ -8,9 +8,9 @@ interface Props {
 
 export default function GradeSelector({ value, onChange, compact = false }: Props) {
   return (
-    <div className="flex items-center gap-1.5">
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
       {!compact && (
-        <span className="text-[11px] text-slate-400 font-semibold mr-1.5">
+        <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, marginRight: 6 }}>
           Clinical Grade:
         </span>
       )}
@@ -21,17 +21,23 @@ export default function GradeSelector({ value, onChange, compact = false }: Prop
             key={g.grade}
             onClick={() => onChange(g.grade)}
             title={`Grade ${g.grade}: ${g.label} - ${g.description}`}
-            className="rounded-lg text-[11px] font-bold transition-all cursor-pointer"
             style={{
-              padding: compact ? "4px 10px" : "6px 14px",
-              border: isActive
-                ? `2px solid ${g.color}`
-                : "1px solid #334155",
-              background: isActive ? g.bg : "#1e293b",
-              color: isActive ? g.color : "#94a3b8",
+              fontFamily: "var(--font)",
+              fontSize: 12,
+              fontWeight: 500,
+              padding: compact ? "4px 10px" : "10px 20px",
+              borderRadius: "var(--radius-xs)",
+              border: isActive ? "1px solid var(--accent)" : "1px solid var(--border)",
+              background: isActive ? "var(--accent-soft)" : "transparent",
+              color: isActive ? "var(--accent-text)" : "var(--text-secondary)",
+              cursor: "pointer",
+              transition: "all 0.2s",
+              textAlign: "center",
+              minWidth: compact ? undefined : 72,
             }}
           >
-            {g.grade}
+            <span style={{ display: "block", fontSize: compact ? 11 : 20, fontWeight: 700, marginBottom: compact ? 0 : 2 }}>{g.grade}</span>
+            {!compact && <span style={{ display: "block", fontSize: 10, opacity: 0.7 }}>{g.label}</span>}
           </button>
         );
       })}

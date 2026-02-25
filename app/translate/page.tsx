@@ -216,340 +216,232 @@ export default function TranslatePage() {
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
 
   return (
-    <div className="min-h-screen">
+    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "48px 40px 96px" }}>
       <Header />
-      <div className="max-w-[1200px] mx-auto px-8 py-7">
 
-        {/* Controls */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-[22px] font-semibold text-slate-100">
-              Batch Translation
-            </h2>
-            <p className="text-slate-500 text-[13px] mt-1">
-              {rowCount} pairs
-              {pageState === "complete" && ` | ${completedCount} completed | ${errorCount} errors`}
-              {pageState === "running" && jobStatus && ` | ${jobStatus.translated} translated`}
-            </p>
-          </div>
+      {/* Page Header */}
+      <div className="anim" style={{ marginBottom: 40 }}>
+        <h1 style={{ fontSize: 32, fontWeight: 700, letterSpacing: "-0.025em", color: "var(--text-primary)", marginBottom: 6, lineHeight: 1.2 }}>
+          Batch Translation
+        </h1>
+        <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
+          <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{rowCount}</strong> pairs
+          {pageState === "complete" && <>{" "}&middot; {completedCount} completed &middot; {errorCount} errors</>}
+          {pageState === "running" && jobStatus && <>{" "}&middot; {jobStatus.translated} translated</>}
+        </p>
+      </div>
 
-          <div className="flex items-center gap-3">
-            {/* BERTScore toggle */}
-            {(pageState === "idle" || pageState === "complete" || pageState === "failed") && (
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={computeBertscore}
-                  onChange={(e) => setComputeBertscore(e.target.checked)}
-                  className="w-4 h-4 rounded border-surface-600 bg-surface-700 accent-indigo-500"
-                />
-                <span className="text-[12px] text-slate-400">
-                  Include BERTScore
-                </span>
-                <span className="text-[10px] text-slate-600" title="BERTScore requires ~400MB additional memory and uses a RoBERTa model for semantic similarity scoring.">
-                  (resource-intensive)
-                </span>
-              </label>
-            )}
-
-            {pageState === "idle" || pageState === "complete" || pageState === "failed" ? (
-              <button
-                onClick={handleRun}
-                disabled={rowCount === 0}
-                className="px-7 py-2.5 rounded-xl text-white text-sm font-bold border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
-                style={{
-                  background:
-                    rowCount > 0
-                      ? "linear-gradient(135deg, #0ea5e9, #6366f1)"
-                      : "#334155",
-                }}
-              >
-                {pageState === "complete" || pageState === "failed"
-                  ? "Re-run Translations"
-                  : "Run Translations"}
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <div className="px-5 py-2.5 rounded-xl text-accent-blue text-sm font-bold border border-accent-blue bg-transparent">
-                  {pageState === "submitting" ? "Submitting..." : "Running..."}
-                </div>
-                {pageState === "running" && (
-                  <button
-                    onClick={handleAbort}
-                    className="px-5 py-2.5 rounded-xl text-red-400 text-sm font-bold border border-red-500/50 bg-red-500/10 cursor-pointer hover:bg-red-500/20 transition-colors"
-                  >
-                    Abort
-                  </button>
-                )}
-              </div>
-            )}
-
-            <button
-              onClick={handleExport}
-              disabled={!jobResults || sentences.length === 0}
-              className="px-5 py-2.5 rounded-xl text-slate-200 text-[13px] font-semibold border border-surface-600 bg-surface-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 hover:bg-surface-600"
-            >
-              Export CSV
-            </button>
+      {/* Corpus BLEU hero metric */}
+      {jobResults?.corpus_metrics && (
+        <div className="anim d1" style={{ marginBottom: 48 }}>
+          <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)", maxWidth: 480 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>SacreBLEU (Overall)</div>
+            <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--accent-text)", lineHeight: 1, marginBottom: 16 }}>
+              {jobResults.corpus_metrics.overall.bleu_score.toFixed(2)}
+            </div>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--warning-light)", color: "var(--warning)", border: "1px solid var(--warning-border)" }}>
+              Moderate
+            </span>
           </div>
         </div>
+      )}
 
-        {/* Progress Bar */}
-        {(pageState === "running" || pageState === "submitting") && (
-          <div className="mb-5">
-            <div className="flex justify-between mb-1.5 text-[12px] text-slate-400">
-              <span>
-                {jobStatus
-                  ? `${jobStatus.translated} of ${jobStatus.total} translated`
-                  : "Submitting job..."}
-              </span>
-              <span>
-                {progress.pct.toFixed(1)}%
-              </span>
-            </div>
+      {/* Action buttons */}
+      <div className="anim d2" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginBottom: 16, alignItems: "center" }}>
+        {/* BERTScore toggle */}
+        {(pageState === "idle" || pageState === "complete" || pageState === "failed") && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginRight: 8 }}>
+            <input
+              type="checkbox"
+              checked={computeBertscore}
+              onChange={(e) => setComputeBertscore(e.target.checked)}
+              style={{ width: 16, height: 16, accentColor: "var(--accent)" }}
+            />
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              Include BERTScore
+            </span>
+            <span style={{ fontSize: 10, color: "var(--text-muted)" }} title="BERTScore requires ~400MB additional memory and uses a RoBERTa model for semantic similarity scoring.">
+              (resource-intensive)
+            </span>
+          </label>
+        )}
 
-            <div className="h-1.5 bg-surface-700 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-300 progress-shimmer"
+        {pageState === "idle" || pageState === "complete" || pageState === "failed" ? (
+          <button
+            onClick={handleRun}
+            disabled={rowCount === 0}
+            style={{
+              fontFamily: "var(--font)", fontSize: 13, fontWeight: 500, borderRadius: "var(--radius-sm)",
+              padding: "10px 24px", cursor: rowCount === 0 ? "not-allowed" : "pointer",
+              background: "var(--accent)", color: "#fff", border: "none",
+              opacity: rowCount === 0 ? 0.4 : 1, transition: "all 0.2s",
+            }}
+          >
+            {pageState === "complete" || pageState === "failed" ? "Re-run Translations" : "Run Translations"}
+          </button>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ padding: "10px 24px", borderRadius: "var(--radius-sm)", color: "var(--accent-text)", fontSize: 13, fontWeight: 500, border: "1px solid var(--accent)", background: "transparent" }}>
+              {pageState === "submitting" ? "Submitting..." : "Running..."}
+            </span>
+            {pageState === "running" && (
+              <button
+                onClick={handleAbort}
                 style={{
-                  width: `${progress.pct}%`,
+                  fontFamily: "var(--font)", fontSize: 13, fontWeight: 500,
+                  padding: "10px 24px", borderRadius: "var(--radius-sm)",
+                  color: "var(--danger)", border: "1px solid var(--danger-border)",
+                  background: "var(--danger-light)", cursor: "pointer",
                 }}
-              />
-            </div>
-
-            {jobStatus && jobStatus.scored > 0 && (
-              <div className="text-[11px] text-slate-500 mt-1">
-                {jobStatus.scored} metrics computed
-              </div>
+              >
+                Stop
+              </button>
             )}
           </div>
         )}
 
-        {/* Error banner */}
-        {error && (
-          <div className="mb-5 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">
-            {error}
+        <button
+          onClick={handleExport}
+          disabled={!jobResults || sentences.length === 0}
+          style={{
+            fontFamily: "var(--font)", fontSize: 13, fontWeight: 500,
+            padding: "10px 24px", borderRadius: "var(--radius-sm)",
+            background: "transparent", color: "var(--text-secondary)",
+            border: "1px solid var(--border)", cursor: !jobResults || sentences.length === 0 ? "not-allowed" : "pointer",
+            opacity: !jobResults || sentences.length === 0 ? 0.4 : 1,
+          }}
+        >
+          Export CSV
+        </button>
+      </div>
+
+      {/* Progress Bar */}
+      {(pageState === "running" || pageState === "submitting") && (
+        <div className="anim d2" style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
+            <span>{jobStatus ? `${jobStatus.translated} of ${jobStatus.total}` : "Submitting job..."}</span>
+            <span>{progress.pct.toFixed(1)}%</span>
           </div>
-        )}
-
-        {/* Empty State */}
-        {rowCount === 0 && pageState === "idle" && (
-          <div className="bg-surface-800 rounded-[14px] border border-surface-700 p-16 text-center">
-            <div className="text-slate-500 text-lg mb-2">No dataset loaded</div>
-            <p className="text-slate-600 text-sm">
-              Go to the Upload tab to load your CSV or XLSX first.
-            </p>
+          <div style={{ height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
+            <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${progress.pct}%` }} />
           </div>
-        )}
+          {jobStatus && jobStatus.scored > 0 && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{jobStatus.scored} metrics computed</div>
+          )}
+        </div>
+      )}
 
-        {/* Library versions badge */}
-        {jobResults?.library_versions && (
-          <div className="mb-5 bg-surface-800 border border-surface-700 rounded-xl p-3 flex gap-4 text-[11px] text-slate-500">
-            <span>sacrebleu {jobResults.library_versions.sacrebleu}</span>
-            <span>nltk {jobResults.library_versions.nltk}</span>
-            {jobResults.library_versions.bert_score && jobResults.library_versions.bert_score !== "not loaded" && (
-              <span>bert-score {jobResults.library_versions.bert_score}</span>
-            )}
-            {jobResults.library_versions.torch && jobResults.library_versions.torch !== "not loaded" && (
-              <span>torch {jobResults.library_versions.torch}</span>
-            )}
-          </div>
-        )}
+      {/* Error banner */}
+      {error && (
+        <div style={{ marginBottom: 20, padding: 16, background: "var(--danger-light)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-sm)", color: "var(--danger)", fontSize: 14 }}>
+          {error}
+        </div>
+      )}
 
-        {/* Corpus BLEU summary */}
-        {jobResults?.corpus_metrics && (
-          <div className="mb-5 grid grid-cols-3 gap-3">
-            <div className="bg-surface-800 border border-surface-700 rounded-xl p-4">
-              <div className="text-[10px] text-slate-500 font-semibold tracking-widest mb-1">
-                SACREBLEU (OVERALL)
-              </div>
-              <div className="text-2xl font-mono font-light text-slate-100">
-                {jobResults.corpus_metrics.overall.bleu_score.toFixed(2)}
-              </div>
-              <div className="text-[10px] text-slate-600 mt-1 font-mono break-all">
-                {jobResults.corpus_metrics.overall.bleu_signature}
-              </div>
-            </div>
-            {jobResults.corpus_metrics.clinspen && (
-              <div className="bg-surface-800 border border-surface-700 rounded-xl p-4">
-                <div className="text-[10px] font-semibold tracking-widest mb-1" style={{ color: "#7dd3fc" }}>
-                  SACREBLEU (ClinSpEn)
-                </div>
-                <div className="text-2xl font-mono font-light text-slate-100">
-                  {jobResults.corpus_metrics.clinspen.bleu_score.toFixed(2)}
-                </div>
-              </div>
-            )}
-            {jobResults.corpus_metrics.umass && (
-              <div className="bg-surface-800 border border-surface-700 rounded-xl p-4">
-                <div className="text-[10px] font-semibold tracking-widest mb-1" style={{ color: "#fda4af" }}>
-                  SACREBLEU (UMass)
-                </div>
-                <div className="text-2xl font-mono font-light text-slate-100">
-                  {jobResults.corpus_metrics.umass.bleu_score.toFixed(2)}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+      {/* Empty State */}
+      {rowCount === 0 && pageState === "idle" && (
+        <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 64, textAlign: "center", boxShadow: "var(--shadow)" }}>
+          <div style={{ color: "var(--text-muted)", fontSize: 18, marginBottom: 8 }}>No dataset loaded</div>
+          <p style={{ color: "var(--text-muted)", fontSize: 14 }}>Go to the Upload tab to load your CSV or XLSX first.</p>
+        </div>
+      )}
 
-        {/* Results Table */}
-        {sentences.length > 0 && (
-          <div className="bg-surface-800 rounded-[14px] border border-surface-700 overflow-hidden">
-            <div className="max-h-[520px] overflow-auto">
-              <table className="w-full text-[13px]" style={{ borderCollapse: "collapse" }}>
-                <thead>
-                  <tr className="bg-surface-700 sticky top-0 z-10">
-                    {[
-                      "#",
-                      "Source",
-                      "Spanish (input)",
-                      "LLM English (output)",
-                      "METEOR",
-                      ...(hasBertscore ? ["BERTScore"] : []),
-                      "Status",
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        className="px-3.5 py-2.5 text-left font-semibold text-slate-400 text-[11px] tracking-wider border-b border-surface-600"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
+      {/* Library versions badge */}
+      {jobResults?.library_versions && (
+        <div style={{ marginBottom: 20, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)", padding: 12, display: "flex", gap: 16, fontSize: 11, color: "var(--text-muted)", boxShadow: "var(--shadow)" }}>
+          <span>sacrebleu {jobResults.library_versions.sacrebleu}</span>
+          <span>nltk {jobResults.library_versions.nltk}</span>
+          {jobResults.library_versions.bert_score && jobResults.library_versions.bert_score !== "not loaded" && (
+            <span>bert-score {jobResults.library_versions.bert_score}</span>
+          )}
+          {jobResults.library_versions.torch && jobResults.library_versions.torch !== "not loaded" && (
+            <span>torch {jobResults.library_versions.torch}</span>
+          )}
+        </div>
+      )}
 
-                <tbody>
-                  {sentences.slice(0, 200).map((r, i) => {
-                    const hasError = !!r.error;
-                    const hasTranslation = !!r.llm_english_translation;
-                    return (
-                      <tr
-                        key={`${r.pair_id}-${i}`}
-                        onClick={() => setSelectedRow(i)}
-                        className={`cursor-pointer border-b border-surface-700 transition-colors ${
-                          selectedRow === i
-                            ? "bg-surface-700"
-                            : "hover:bg-surface-700/50"
-                        }`}
-                      >
-                        <td className="px-3.5 py-2.5 text-slate-500 font-mono text-[11px]">
-                          {i + 1}
-                        </td>
-
-                        <td className="px-3.5 py-2.5">
-                          <span
-                            className="text-[10px] px-2 py-0.5 rounded font-semibold"
-                            style={{
-                              background:
-                                r.source === "ClinSpEn_ClinicalCases"
-                                  ? "#1e3a5f"
-                                  : "#3b1f2b",
-                              color:
-                                r.source === "ClinSpEn_ClinicalCases"
-                                  ? "#7dd3fc"
-                                  : "#fda4af",
-                            }}
-                          >
-                            {r.source === "ClinSpEn_ClinicalCases"
-                              ? "ClinSpEn"
-                              : "UMass"}
-                          </span>
-                        </td>
-
-                        <td className="px-3.5 py-2.5 max-w-[240px] overflow-hidden text-ellipsis whitespace-nowrap text-slate-300">
-                          {r.spanish_source}
-                        </td>
-
-                        <td
-                          className={`px-3.5 py-2.5 max-w-[240px] overflow-hidden text-ellipsis whitespace-nowrap ${
-                            hasTranslation
-                              ? "text-slate-200"
-                              : "text-slate-600"
-                          }`}
-                        >
-                          {r.llm_english_translation || (hasError ? "Failed" : "...")}
-                        </td>
-
-                        <td
-                          className="px-3.5 py-2.5 font-mono text-[12px]"
+      {/* Results Table */}
+      {sentences.length > 0 && (
+        <div className="anim d3" style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)", overflow: "hidden" }}>
+          <div style={{ maxHeight: 520, overflowX: "auto", overflowY: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  {["#", "Source", "Spanish (input)", "LLM English (output)", "METEOR", ...(hasBertscore ? ["BERTScore"] : []), "Status"].map((h) => (
+                    <th key={h}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sentences.slice(0, 200).map((r, i) => {
+                  const hasError = !!r.error;
+                  const hasTranslation = !!r.llm_english_translation;
+                  return (
+                    <tr
+                      key={`${r.pair_id}-${i}`}
+                      onClick={() => setSelectedRow(i)}
+                      style={{ cursor: "pointer", background: selectedRow === i ? "var(--accent-soft)" : undefined }}
+                    >
+                      <td style={{ color: "var(--text-muted)", fontSize: 14 }}>{i + 1}</td>
+                      <td>
+                        <span
+                          className={r.source !== "ClinSpEn_ClinicalCases" ? "badge-dataset-umass" : ""}
                           style={{
-                            color:
-                              r.meteor != null
-                                ? r.meteor > 0.5
-                                  ? "#10b981"
-                                  : r.meteor > 0.2
-                                  ? "#f59e0b"
-                                  : "#ef4444"
-                                : "#475569",
+                            display: "inline-flex", alignItems: "center",
+                            padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600,
+                            background: r.source === "ClinSpEn_ClinicalCases" ? "var(--accent-soft)" : undefined,
+                            color: r.source === "ClinSpEn_ClinicalCases" ? "var(--accent-text)" : undefined,
                           }}
                         >
-                          {r.meteor != null ? r.meteor.toFixed(3) : "--"}
+                          {r.source === "ClinSpEn_ClinicalCases" ? "ClinSpEn" : "UMass"}
+                        </span>
+                      </td>
+                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.spanish_source}</td>
+                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: hasTranslation ? "var(--text-primary)" : "var(--text-muted)" }}>
+                        {r.llm_english_translation || (hasError ? "Failed" : "...")}
+                      </td>
+                      <td style={{ color: "var(--accent-text)", fontWeight: 600 }}>
+                        {r.meteor != null ? r.meteor.toFixed(3) : "--"}
+                      </td>
+                      {hasBertscore && (
+                        <td style={{ color: "var(--accent-text)", fontWeight: 600 }}>
+                          {r.bertscore_f1 != null ? r.bertscore_f1.toFixed(3) : "--"}
                         </td>
-
-                        {hasBertscore && (
-                          <td
-                            className="px-3.5 py-2.5 font-mono text-[12px]"
-                            style={{
-                              color:
-                                r.bertscore_f1 != null
-                                  ? r.bertscore_f1 > 0.5
-                                    ? "#10b981"
-                                    : r.bertscore_f1 > 0.2
-                                    ? "#f59e0b"
-                                    : "#ef4444"
-                                  : "#475569",
-                            }}
-                          >
-                            {r.bertscore_f1 != null ? r.bertscore_f1.toFixed(3) : "--"}
-                          </td>
-                        )}
-
-                        <td className="px-3.5 py-2.5">
-                          <span
-                            className="inline-block rounded-full text-[11px] font-semibold tracking-wide px-2.5 py-0.5"
-                            style={{
-                              background: hasError
-                                ? "#fee2e2"
-                                : hasTranslation
-                                ? "#dcfce7"
-                                : "#f1f5f9",
-                              color: hasError
-                                ? "#dc2626"
-                                : hasTranslation
-                                ? "#16a34a"
-                                : "#64748b",
-                            }}
-                          >
-                            {hasError ? "Error" : hasTranslation ? "Complete" : "Pending"}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              {sentences.length > 200 && (
-                <div className="p-3.5 text-center text-slate-500 text-[12px]">
-                  Showing first 200 of {sentences.length} rows
-                </div>
-              )}
-            </div>
+                      )}
+                      <td>
+                        <span style={{
+                          display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, border: "1px solid",
+                          background: hasError ? "var(--danger-light)" : hasTranslation ? "var(--success-light)" : "var(--bg-inset)",
+                          color: hasError ? "var(--danger)" : hasTranslation ? "var(--success)" : "var(--text-muted)",
+                          borderColor: hasError ? "var(--danger-border)" : hasTranslation ? "var(--success-border)" : "var(--border)",
+                        }}>
+                          {hasError ? "Error" : hasTranslation ? "Complete" : "Pending"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {sentences.length > 200 && (
+              <div style={{ padding: 14, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
+                Showing first 200 of {sentences.length} rows
+              </div>
+            )}
           </div>
-        )}
+        </div>
+      )}
 
-        {selectedRow != null && sentences[selectedRow] && (
-          <div className="mt-5">
-            <PairDetail
-              sentence={sentences[selectedRow]}
-              grade={grades[sentences[selectedRow].pair_id] ?? null}
-              onGrade={(grade) => handleGrade(sentences[selectedRow].pair_id, grade)}
-              onClose={() => setSelectedRow(null)}
-            />
-          </div>
-        )}
-      </div>
+      {selectedRow != null && sentences[selectedRow] && (
+        <div style={{ marginTop: 20 }}>
+          <PairDetail
+            sentence={sentences[selectedRow]}
+            grade={grades[sentences[selectedRow].pair_id] ?? null}
+            onGrade={(grade) => handleGrade(sentences[selectedRow].pair_id, grade)}
+            onClose={() => setSelectedRow(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }

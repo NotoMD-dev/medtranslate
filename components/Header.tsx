@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTheme } from "@/src/design-system";
 
 const NAV_ITEMS = [
   { href: "/", label: "Upload" },
@@ -12,46 +13,63 @@ const NAV_ITEMS = [
 
 export default function Header() {
   const pathname = usePathname();
+  const { theme, toggleTheme } = useTheme();
 
   return (
-    <header className="border-b border-surface-700 px-8 py-4 flex items-center justify-between">
-      <Link href="/" className="flex items-center gap-3.5 no-underline">
-        <div
-          className="w-9 h-9 rounded-[10px] flex items-center justify-center text-lg font-bold text-white"
-          style={{
-            background: "linear-gradient(135deg, #0ea5e9, #6366f1)",
-          }}
-        >
-          M
-        </div>
-        <div>
-          <div className="text-[17px] font-bold tracking-tight text-slate-100">
-            MedTranslate
-          </div>
-          <div className="text-[11px] text-slate-500 tracking-wider font-medium">
-            Clinical Translation Research Tool
-          </div>
-        </div>
-      </Link>
-
-      <nav className="flex gap-0.5 bg-surface-700 rounded-[10px] p-[3px]">
+    <nav
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 48,
+      }}
+    >
+      <div style={{ display: "flex", gap: 32 }}>
         {NAV_ITEMS.map(({ href, label }) => {
           const isActive = pathname === href;
           return (
             <Link
               key={href}
               href={href}
-              className={`px-5 py-[7px] rounded-lg text-[13px] font-semibold no-underline transition-all ${
-                isActive
-                  ? "bg-accent-blue text-white"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
+              style={{
+                background: "none",
+                border: "none",
+                fontFamily: "var(--font)",
+                fontSize: 14,
+                fontWeight: 500,
+                color: isActive ? "var(--accent-text)" : "var(--text-muted)",
+                cursor: "pointer",
+                padding: "4px 0",
+                borderBottom: isActive
+                  ? "2px solid var(--accent)"
+                  : "2px solid transparent",
+                textDecoration: "none",
+                transition: "color 0.2s, border-color 0.2s",
+              }}
             >
               {label}
             </Link>
           );
         })}
-      </nav>
-    </header>
+      </div>
+      <button
+        onClick={toggleTheme}
+        style={{
+          fontFamily: "var(--font)",
+          fontSize: 12,
+          fontWeight: 500,
+          color: "var(--text-secondary)",
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 100,
+          padding: "8px 20px",
+          cursor: "pointer",
+          transition: "all 0.2s",
+          boxShadow: "var(--shadow)",
+        }}
+      >
+        {theme === "light" ? "Dark Mode" : "Light Mode"}
+      </button>
+    </nav>
   );
 }

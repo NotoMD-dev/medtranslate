@@ -2,20 +2,30 @@ interface Props {
   status: "pending" | "translating" | "scoring" | "complete" | "error";
 }
 
-const STYLES: Record<string, { bg: string; color: string; label: string }> = {
-  pending: { bg: "#f1f5f9", color: "#64748b", label: "Pending" },
-  translating: { bg: "#dbeafe", color: "#2563eb", label: "Translating..." },
-  scoring: { bg: "#fef3c7", color: "#d97706", label: "Scoring..." },
-  complete: { bg: "#dcfce7", color: "#16a34a", label: "Complete" },
-  error: { bg: "#fee2e2", color: "#dc2626", label: "Error" },
+const STYLES: Record<string, { bg: string; color: string; border: string; label: string }> = {
+  pending: { bg: "var(--bg-inset)", color: "var(--text-muted)", border: "var(--border)", label: "Pending" },
+  translating: { bg: "var(--accent-soft)", color: "var(--accent-text)", border: "transparent", label: "Translating..." },
+  scoring: { bg: "var(--warning-light)", color: "var(--warning)", border: "var(--warning-border)", label: "Scoring..." },
+  complete: { bg: "var(--success-light)", color: "var(--success)", border: "var(--success-border)", label: "Complete" },
+  error: { bg: "var(--danger-light)", color: "var(--danger)", border: "var(--danger-border)", label: "Error" },
 };
 
 export default function StatusPill({ status }: Props) {
   const s = STYLES[status] || STYLES.pending;
   return (
     <span
-      className="inline-block rounded-full text-[11px] font-semibold tracking-wide px-2.5 py-0.5"
-      style={{ background: s.bg, color: s.color }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        borderRadius: 100,
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: "0.01em",
+        padding: "3px 10px",
+        background: s.bg,
+        color: s.color,
+        border: `1px solid ${s.border}`,
+      }}
     >
       {s.label}
     </span>

@@ -132,38 +132,42 @@ export default function UploadPage() {
       : rows.length;
 
   return (
-    <div className="min-h-screen">
+    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "48px 40px 96px" }}>
       <Header />
-      <div className="max-w-2xl mx-auto px-8 pt-16">
-        {/* Title */}
-        <div className="text-center mb-10">
-          <h1 className="text-[32px] font-light text-slate-100 tracking-tight">
-            Upload your{" "}
-            <span
-              className="font-bold"
-              style={{
-                background: "linear-gradient(135deg, #0ea5e9, #6366f1)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-              }}
-            >
-              translation dataset
-            </span>
-          </h1>
-          <p className="mt-2.5 text-slate-500 text-[15px]">
-            CSV or XLSX with{" "}
-            <code className="bg-surface-700 px-2 py-0.5 rounded text-[13px] font-mono">
-              spanish_source
-            </code>{" "}
-            and optional{" "}
-            <code className="bg-surface-700 px-2 py-0.5 rounded text-[13px] font-mono">
-              english_reference
-            </code>{" "}
-            columns
-          </p>
-        </div>
 
-        {/* Drop zone */}
+      {/* Page Header */}
+      <div className="anim" style={{ marginBottom: 40 }}>
+        <h1
+          style={{
+            fontSize: 32,
+            fontWeight: 700,
+            letterSpacing: "-0.025em",
+            color: "var(--text-primary)",
+            marginBottom: 6,
+            lineHeight: 1.2,
+          }}
+        >
+          Upload Dataset
+        </h1>
+        <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
+          Import a CSV/XLSX with clinical translation pairs. Required column:{" "}
+          <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
+            spanish_source
+          </strong>
+          .
+        </p>
+      </div>
+
+      {/* Drop zone / File info card */}
+      <div
+        className="anim d1"
+        style={{
+          background: "var(--bg-surface)",
+          borderRadius: "var(--radius)",
+          padding: 32,
+          boxShadow: "var(--shadow)",
+        }}
+      >
         {rows.length === 0 ? (
           <div
             onClick={() => fileRef.current?.click()}
@@ -173,179 +177,282 @@ export default function UploadPage() {
             }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
-            className="w-full rounded-2xl p-14 text-center cursor-pointer transition-colors"
             style={{
-              border: `2px dashed ${isDragging ? "#0ea5e9" : "#334155"}`,
-              background: isDragging
-                ? "rgba(14, 165, 233, 0.05)"
-                : "transparent",
+              border: `2px dashed ${isDragging ? "var(--accent)" : "var(--border)"}`,
+              borderRadius: "var(--radius-sm)",
+              padding: "80px 40px",
+              textAlign: "center",
+              cursor: "pointer",
+              transition: "all 0.2s",
+              background: isDragging ? "var(--accent-soft)" : "transparent",
             }}
           >
-            <div className="text-5xl text-slate-600 mb-3">+</div>
-            <div className="font-semibold text-base text-slate-300">
-              Drop CSV or XLSX here or click to browse
+            <div style={{ fontSize: 32, marginBottom: 12, color: "var(--text-muted)" }}>
+              &#8593;
             </div>
-            <div className="text-slate-500 text-[13px] mt-1.5">
-              Supports .csv and .xlsx file formats
+            <div style={{ fontSize: 14, color: "var(--text-secondary)" }}>
+              Drag and drop CSV file here or click to browse
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+              Supports .csv and .xlsx up to 50MB
             </div>
           </div>
         ) : (
-          /* File loaded state with delete option */
-          <div
-            className="w-full rounded-2xl p-6 transition-colors"
-            style={{ border: "2px solid #334155" }}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-10 h-10 rounded-lg flex items-center justify-center text-[18px]"
-                  style={{ background: "rgba(14, 165, 233, 0.15)" }}
-                >
-                  <span style={{ color: "#0ea5e9" }}>
-                    {fileName?.endsWith(".xlsx") || fileName?.endsWith(".xls")
-                      ? "XL"
-                      : "CSV"}
-                  </span>
-                </div>
-                <div>
-                  <div className="text-slate-200 text-sm font-semibold">
-                    {fileName}
-                  </div>
-                  <div className="text-slate-500 text-[12px]">
-                    {rows.length.toLocaleString()} rows loaded
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={handleDelete}
-                className="px-4 py-2 rounded-lg text-red-400 text-[13px] font-semibold border border-red-500/30 bg-transparent cursor-pointer hover:bg-red-500/10 transition-colors"
-              >
-                Remove file
-              </button>
-            </div>
-          </div>
-        )}
-
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".csv,.xlsx,.xls"
-          onChange={handleUpload}
-          className="hidden"
-        />
-
-        {error && (
-          <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">
-            {error}
-          </div>
-        )}
-
-        {/* Dataset stats */}
-        {rows.length > 0 && (
-          <div className="mt-6 bg-surface-700 rounded-xl p-4 flex items-center gap-8">
-            <div>
-              <span className="text-accent-blue font-bold text-2xl font-mono">
-                {effectiveRowCount.toLocaleString()}
-              </span>{" "}
-              <span className="text-slate-400 text-[13px]">
-                {rowMode === "custom" && customRowCount
-                  ? `of ${rows.length.toLocaleString()} pairs selected`
-                  : "pairs loaded"}
-              </span>
-            </div>
-            <div className="w-px h-8 bg-surface-600" />
-            <div className="text-[13px] text-slate-400">
-              Sources: {sources.join(", ") || "N/A"}
-            </div>
-            <div className="w-px h-8 bg-surface-600" />
-            <div className="text-[13px] text-slate-400">
-              Reference translations: {hasRef ? "Yes" : "No"}
-            </div>
-          </div>
-        )}
-
-        {/* Row limit option */}
-        {rows.length > 0 && (
-          <div className="mt-6">
-            <label className="text-[12px] font-semibold text-slate-400 tracking-wider block mb-3">
-              ROWS TO ANALYZE
-            </label>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setRowMode("all")}
-                className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold transition-colors cursor-pointer"
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div
                 style={{
-                  background:
-                    rowMode === "all"
-                      ? "rgba(14, 165, 233, 0.15)"
-                      : "transparent",
-                  border: `1.5px solid ${rowMode === "all" ? "#0ea5e9" : "#334155"}`,
-                  color: rowMode === "all" ? "#0ea5e9" : "#94a3b8",
+                  width: 40,
+                  height: 40,
+                  borderRadius: "var(--radius-xs)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 18,
+                  background: "var(--accent-soft)",
+                  color: "var(--accent-text)",
+                  fontWeight: 700,
                 }}
               >
-                Entire file ({rows.length.toLocaleString()} rows)
-              </button>
-              <button
-                onClick={() => setRowMode("custom")}
-                className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold transition-colors cursor-pointer"
-                style={{
-                  background:
-                    rowMode === "custom"
-                      ? "rgba(14, 165, 233, 0.15)"
-                      : "transparent",
-                  border: `1.5px solid ${rowMode === "custom" ? "#0ea5e9" : "#334155"}`,
-                  color: rowMode === "custom" ? "#0ea5e9" : "#94a3b8",
-                }}
-              >
-                Custom number of rows
-              </button>
-            </div>
-            {rowMode === "custom" && (
-              <div className="mt-3">
-                <input
-                  type="number"
-                  min="1"
-                  max={rows.length}
-                  value={customRowCount}
-                  onChange={(e) => setCustomRowCount(e.target.value)}
-                  placeholder={`Enter number (1 - ${rows.length.toLocaleString()})`}
-                  className="w-full bg-surface-700 border border-surface-600 rounded-xl px-4 py-3 text-slate-200 text-sm font-mono focus:outline-none focus:border-accent-blue placeholder:text-slate-600"
-                />
+                {fileName?.endsWith(".xlsx") || fileName?.endsWith(".xls")
+                  ? "XL"
+                  : "CSV"}
               </div>
-            )}
-          </div>
-        )}
-
-        {/* System prompt */}
-        <div className="mt-8">
-          <label className="text-[12px] font-semibold text-slate-400 tracking-wider block mb-2">
-            SYSTEM PROMPT
-          </label>
-          <textarea
-            value={systemPrompt}
-            onChange={(e) => {
-              setSystemPrompt(e.target.value);
-              setSessionPrompt(e.target.value);
-            }}
-            className="w-full h-28 bg-surface-700 border border-surface-600 rounded-xl p-4 text-slate-200 text-[13px] font-mono leading-relaxed resize-y focus:outline-none focus:border-accent-blue"
-          />
-        </div>
-
-        {/* Start button */}
-        {rows.length > 0 && (
-          <div className="mt-8 text-center pb-16">
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+                  {fileName}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  {rows.length.toLocaleString()} rows loaded
+                </div>
+              </div>
+            </div>
             <button
-              onClick={handleContinue}
-              className="px-10 py-3 rounded-xl text-white font-bold text-[15px] border-none cursor-pointer hover:opacity-90"
+              onClick={handleDelete}
               style={{
-                background: "linear-gradient(135deg, #0ea5e9, #6366f1)",
+                padding: "8px 16px",
+                borderRadius: "var(--radius-xs)",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--danger)",
+                border: "1px solid var(--danger-border)",
+                background: "var(--danger-light)",
+                cursor: "pointer",
+                fontFamily: "var(--font)",
               }}
             >
-              Continue to Translation
+              Remove file
             </button>
           </div>
         )}
       </div>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".csv,.xlsx,.xls"
+        onChange={handleUpload}
+        className="hidden"
+      />
+
+      {error && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: 16,
+            background: "var(--danger-light)",
+            border: "1px solid var(--danger-border)",
+            borderRadius: "var(--radius-sm)",
+            color: "var(--danger)",
+            fontSize: 14,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* Dataset stats */}
+      {rows.length > 0 && (
+        <div
+          className="anim d2"
+          style={{
+            marginTop: 24,
+            background: "var(--bg-surface)",
+            borderRadius: "var(--radius)",
+            padding: 32,
+            boxShadow: "var(--shadow)",
+            display: "flex",
+            alignItems: "center",
+            gap: 32,
+          }}
+        >
+          <div>
+            <span style={{ color: "var(--accent-text)", fontWeight: 700, fontSize: 24 }}>
+              {effectiveRowCount.toLocaleString()}
+            </span>{" "}
+            <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
+              {rowMode === "custom" && customRowCount
+                ? `of ${rows.length.toLocaleString()} pairs selected`
+                : "pairs loaded"}
+            </span>
+          </div>
+          <div style={{ width: 1, height: 32, background: "var(--border)" }} />
+          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            Sources: {sources.join(", ") || "N/A"}
+          </div>
+          <div style={{ width: 1, height: 32, background: "var(--border)" }} />
+          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            Reference translations: {hasRef ? "Yes" : "No"}
+          </div>
+        </div>
+      )}
+
+      {/* Row limit option */}
+      {rows.length > 0 && (
+        <div className="anim d3" style={{ marginTop: 24 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "var(--text-muted)",
+              marginBottom: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            Rows to Analyze
+            <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+          <div style={{ display: "flex", gap: 12 }}>
+            <button
+              onClick={() => setRowMode("all")}
+              style={{
+                flex: 1,
+                padding: "12px 16px",
+                borderRadius: "var(--radius-sm)",
+                fontSize: 14,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "var(--font)",
+                transition: "all 0.2s",
+                background: rowMode === "all" ? "var(--accent-soft)" : "transparent",
+                border: `1.5px solid ${rowMode === "all" ? "var(--accent)" : "var(--border)"}`,
+                color: rowMode === "all" ? "var(--accent-text)" : "var(--text-secondary)",
+              }}
+            >
+              Entire file ({rows.length.toLocaleString()} rows)
+            </button>
+            <button
+              onClick={() => setRowMode("custom")}
+              style={{
+                flex: 1,
+                padding: "12px 16px",
+                borderRadius: "var(--radius-sm)",
+                fontSize: 14,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "var(--font)",
+                transition: "all 0.2s",
+                background: rowMode === "custom" ? "var(--accent-soft)" : "transparent",
+                border: `1.5px solid ${rowMode === "custom" ? "var(--accent)" : "var(--border)"}`,
+                color: rowMode === "custom" ? "var(--accent-text)" : "var(--text-secondary)",
+              }}
+            >
+              Custom number of rows
+            </button>
+          </div>
+          {rowMode === "custom" && (
+            <div style={{ marginTop: 12 }}>
+              <input
+                type="number"
+                min="1"
+                max={rows.length}
+                value={customRowCount}
+                onChange={(e) => setCustomRowCount(e.target.value)}
+                placeholder={`Enter number (1 - ${rows.length.toLocaleString()})`}
+                style={{
+                  width: "100%",
+                  background: "var(--bg-inset)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-xs)",
+                  padding: "12px 16px",
+                  color: "var(--text-primary)",
+                  fontSize: 14,
+                  fontFamily: "var(--font)",
+                  outline: "none",
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* System prompt */}
+      <div className="anim d4" style={{ marginTop: 32 }}>
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "var(--text-muted)",
+            marginBottom: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          System Prompt
+          <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        </div>
+        <textarea
+          value={systemPrompt}
+          onChange={(e) => {
+            setSystemPrompt(e.target.value);
+            setSessionPrompt(e.target.value);
+          }}
+          style={{
+            width: "100%",
+            height: 112,
+            background: "var(--bg-inset)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            padding: 16,
+            color: "var(--text-primary)",
+            fontSize: 13,
+            fontFamily: "var(--font)",
+            lineHeight: 1.7,
+            resize: "vertical",
+            outline: "none",
+          }}
+        />
+      </div>
+
+      {/* Continue button */}
+      {rows.length > 0 && (
+        <div className="anim d5" style={{ marginTop: 32, textAlign: "center", paddingBottom: 64 }}>
+          <button
+            onClick={handleContinue}
+            style={{
+              padding: "12px 40px",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--accent)",
+              color: "#fff",
+              fontSize: 15,
+              fontWeight: 600,
+              border: "none",
+              cursor: "pointer",
+              fontFamily: "var(--font)",
+              transition: "all 0.2s",
+            }}
+          >
+            Continue to Translation
+          </button>
+        </div>
+      )}
     </div>
   );
 }
