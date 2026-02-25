@@ -110,7 +110,7 @@ export default function ReviewPage() {
   const noData = completed.length === 0;
 
   return (
-    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "48px 40px 96px" }}>
+    <div className="page-container">
       <Header />
 
       {/* Page Header */}
@@ -131,7 +131,7 @@ export default function ReviewPage() {
       </div>
 
       {/* Threshold control */}
-      <div className="anim d1" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+      <div className="anim d1 threshold-bar">
         <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>METEOR Threshold:</span>
         <input
           type="number" min="0" max="1" step="0.05"
@@ -189,7 +189,7 @@ export default function ReviewPage() {
       ) : view === "queue" ? (
         <div>
           {/* Navigation bar */}
-          <div className="anim d1" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <div className="anim d1 review-nav">
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <button
                 onClick={() => setCurrentIndex(Math.max(0, currentIndex - 1))}
@@ -263,7 +263,7 @@ export default function ReviewPage() {
               </div>
 
               {/* Three columns */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24, marginBottom: 28 }}>
+              <div className="review-grid">
                 <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>Spanish Source</div>
                   <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", maxHeight: 256, overflow: "auto" }}>{currentPair.spanish_source}</div>
@@ -279,10 +279,10 @@ export default function ReviewPage() {
               </div>
 
               {/* Grading controls */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+              <div className="grade-controls">
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 8 }}>Assign Clinical Significance Grade:</div>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div className="grade-buttons">
                     {CLINICAL_GRADES.map((g) => {
                       const isActive = grades[currentPair.pair_id] === g.grade;
                       return (

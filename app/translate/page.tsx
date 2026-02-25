@@ -216,7 +216,7 @@ export default function TranslatePage() {
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
 
   return (
-    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "48px 40px 96px" }}>
+    <div className="page-container">
       <Header />
 
       {/* Page Header */}
@@ -247,7 +247,7 @@ export default function TranslatePage() {
       )}
 
       {/* Action buttons */}
-      <div className="anim d2" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginBottom: 16, alignItems: "center" }}>
+      <div className="anim d2 action-bar">
         {/* BERTScore toggle */}
         {(pageState === "idle" || pageState === "complete" || pageState === "failed") && (
           <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginRight: 8 }}>

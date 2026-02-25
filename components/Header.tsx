@@ -16,15 +16,8 @@ export default function Header() {
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <nav
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: 48,
-      }}
-    >
-      <div style={{ display: "flex", gap: 32 }}>
+    <nav className="site-nav">
+      <div className="site-nav-links">
         {NAV_ITEMS.map(({ href, label }) => {
           const isActive = pathname === href;
           return (
@@ -90,7 +83,7 @@ export default function Header() {
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
           </svg>
         )}
-        {theme === "light" ? "Light Mode" : "Dark Mode"}
+        <span className="theme-toggle-label">{theme === "light" ? "Light Mode" : "Dark Mode"}</span>
       </button>
     </nav>
   );

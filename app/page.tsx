@@ -132,7 +132,7 @@ export default function UploadPage() {
       : rows.length;
 
   return (
-    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "48px 40px 96px" }}>
+    <div className="page-container">
       <Header />
 
       {/* Page Header */}
@@ -170,6 +170,7 @@ export default function UploadPage() {
       >
         {rows.length === 0 ? (
           <div
+            className="drop-zone"
             onClick={() => fileRef.current?.click()}
             onDragOver={(e) => {
               e.preventDefault();
@@ -180,7 +181,6 @@ export default function UploadPage() {
             style={{
               border: `2px dashed ${isDragging ? "var(--accent)" : "var(--border)"}`,
               borderRadius: "var(--radius-sm)",
-              padding: "80px 40px",
               textAlign: "center",
               cursor: "pointer",
               transition: "all 0.2s",
@@ -274,16 +274,13 @@ export default function UploadPage() {
       {/* Dataset stats */}
       {rows.length > 0 && (
         <div
-          className="anim d2"
+          className="anim d2 stats-row"
           style={{
             marginTop: 24,
             background: "var(--bg-surface)",
             borderRadius: "var(--radius)",
             padding: 32,
             boxShadow: "var(--shadow)",
-            display: "flex",
-            alignItems: "center",
-            gap: 32,
           }}
         >
           <div>
@@ -296,11 +293,11 @@ export default function UploadPage() {
                 : "pairs loaded"}
             </span>
           </div>
-          <div style={{ width: 1, height: 32, background: "var(--border)" }} />
+          <div className="stats-divider" />
           <div style={{ fontSize: 14, color: "var(--text-muted)" }}>
             Sources: {sources.join(", ") || "N/A"}
           </div>
-          <div style={{ width: 1, height: 32, background: "var(--border)" }} />
+          <div className="stats-divider" />
           <div style={{ fontSize: 14, color: "var(--text-muted)" }}>
             Reference translations: {hasRef ? "Yes" : "No"}
           </div>
