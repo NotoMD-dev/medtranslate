@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import Header from "@/components/Header";
 import PairDetail from "@/components/PairDetail";
-import { pairsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
+import { pairsToCSVFile, sentenceMetricsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
 import { submitJob, pollUntilDone, fetchJobResults, pollJobStatus, cancelJob } from "@/lib/api";
 import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS } from "@/lib/types";
 import type { JobStatusResponse, JobResults, SentenceMetrics, ClinicalGrade } from "@/lib/types";
@@ -105,7 +105,10 @@ export default function TranslatePage() {
     }
   }, []);
 
-  const runJob = useCallback(async (metricsOnly: boolean = false) => {
+  // Reference to existing results before a BERTScore-only run, so we can merge
+  const preRunResultsRef = useRef<JobResults | null>(null);
+
+  const handleRun = useCallback(async () => {
     const data = getSessionData();
     if (!data || data.length === 0) {
       setError("No dataset loaded. Go to Upload to load your CSV first.");
@@ -116,6 +119,7 @@ export default function TranslatePage() {
     setError(null);
     setJobResults(null);
     setJobStatus(null);
+    preRunResultsRef.current = null;
     abortRef.current = false;
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -130,8 +134,7 @@ export default function TranslatePage() {
         systemPrompt,
         temperature: 0,
         maxTokens: 1024,
-        computeBertscore: metricsOnly ? true : computeBertscore,
-        metricsOnly,
+        computeBertscore,
       });
 
       setSessionJobId(job_id);
@@ -175,8 +178,100 @@ export default function TranslatePage() {
     }
   }, [computeBertscore]);
 
-  const handleRun = useCallback(() => runJob(false), [runJob]);
-  const handleRunBertscoreOnly = useCallback(() => runJob(true), [runJob]);
+  const handleRunBertscoreOnly = useCallback(async () => {
+    // Use existing sentence_metrics (which have translations) rather than
+    // re-translating.  The backend metrics_only mode will skip translation
+    // and only compute metrics on the translations already in the CSV.
+    if (!jobResults || jobResults.sentence_metrics.length === 0) {
+      setError("No translations available. Run translations first.");
+      return;
+    }
+
+    // Save current results so we can merge BERTScore back in
+    preRunResultsRef.current = jobResults;
+
+    setPageState("submitting");
+    setError(null);
+    setJobStatus(null);
+    abortRef.current = false;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
+      const model = getSessionModel() || MODEL_OPTIONS[0].id;
+
+      // Build CSV from existing sentence metrics (includes translations)
+      const csvFile = sentenceMetricsToCSVFile(jobResults.sentence_metrics);
+
+      const { job_id } = await submitJob(csvFile, {
+        model,
+        systemPrompt,
+        temperature: 0,
+        maxTokens: 1024,
+        computeBertscore: true,
+        metricsOnly: true,
+      });
+
+      setSessionJobId(job_id);
+      setPageState("running");
+
+      const newResults = await pollUntilDone(job_id, async (status) => {
+        if (abortRef.current) return;
+        setJobStatus(status);
+      }, 2000, controller.signal);
+
+      // Merge: keep the previous METEOR/BLEU data and layer in BERTScore
+      const prev = preRunResultsRef.current;
+      if (prev && newResults.status === "complete") {
+        const mergedSentences = prev.sentence_metrics.map((existing) => {
+          const fresh = newResults.sentence_metrics.find(
+            (s) => s.pair_id === existing.pair_id,
+          );
+          return {
+            ...existing,
+            // Prefer existing METEOR/BLEU if available, but accept new if not
+            meteor: existing.meteor ?? fresh?.meteor ?? null,
+            bertscore_f1: fresh?.bertscore_f1 ?? existing.bertscore_f1 ?? null,
+          };
+        });
+
+        const mergedResults: JobResults = {
+          ...prev,
+          sentence_metrics: mergedSentences,
+          // Use the corpus metrics from whichever run has them
+          corpus_metrics: prev.corpus_metrics ?? newResults.corpus_metrics,
+          library_versions: newResults.library_versions ?? prev.library_versions,
+        };
+
+        setJobResults(mergedResults);
+        await setSessionJobResultsAsync(mergedResults);
+
+        // Update comparison results
+        const comp = getSessionComparisonResults() || {};
+        comp[model] = mergedResults;
+        setSessionComparisonResults(comp);
+      } else {
+        // Fallback: just use the new results directly
+        setJobResults(newResults);
+        await setSessionJobResultsAsync(newResults);
+      }
+
+      preRunResultsRef.current = null;
+      const isStopped = newResults.status === "cancelled" || abortRef.current;
+      setPageState(isStopped ? "complete" : newResults.status === "complete" ? "complete" : "failed");
+    } catch (err) {
+      if (!abortRef.current) {
+        // Restore previous results on error so nothing is lost
+        if (preRunResultsRef.current) {
+          setJobResults(preRunResultsRef.current);
+        }
+        preRunResultsRef.current = null;
+        setError((err as Error).message);
+        setPageState("complete"); // stay in complete so existing data is visible
+      }
+    }
+  }, [jobResults]);
 
   const handleAbort = useCallback(async () => {
     abortRef.current = true;
@@ -233,9 +328,9 @@ export default function TranslatePage() {
   // Determine which metric columns to show based on available data
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
 
-  // Can run BERTScore-only if we have completed translations but no BERTScore yet
+  // Can run BERTScore-only if we have completed translations
   const canRunBertOnly = pageState !== "running" && pageState !== "submitting"
-    && completedCount > 0 && !hasBertscore;
+    && completedCount > 0;
 
   return (
     <div className="page-container">
@@ -313,7 +408,7 @@ export default function TranslatePage() {
                   border: "1px solid var(--accent)", transition: "all 0.2s",
                 }}
               >
-                Run BERTScore Only
+                {hasBertscore ? "Re-run BERTScore" : "Run BERTScore Only"}
               </button>
             )}
           </div>

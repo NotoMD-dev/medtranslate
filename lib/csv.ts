@@ -91,7 +91,7 @@ function parseCSVLine(line: string): string[] {
 
 /**
  * Convert TranslationPair[] to a CSV File suitable for backend upload.
- * Uses source_text column (the backend understands this generic column).
+ * Includes both source_text AND spanish_source for backward compatibility.
  */
 export function pairsToCSVFile(
   pairs: TranslationPair[],
@@ -103,6 +103,7 @@ export function pairsToCSVFile(
     "content_type",
     "english_reference",
     "source_text",
+    "spanish_source",
     "llm_english_translation",
   ];
 
@@ -113,18 +114,65 @@ export function pairsToCSVFile(
     return v;
   };
 
-  const csvRows = pairs.map((r) =>
-    [
+  const csvRows = pairs.map((r) => {
+    const srcText = r.source_text || r.spanish_source;
+    return [
       r.pair_id,
       r.source,
       r.content_type,
       r.english_reference,
-      r.source_text || r.spanish_source,
+      srcText,
+      srcText,
       r.llm_english_translation,
     ]
       .map(escape)
-      .join(",")
-  );
+      .join(",");
+  });
+
+  const csvContent = [headers.join(","), ...csvRows].join("\n");
+  return new File([csvContent], filename, { type: "text/csv" });
+}
+
+
+/**
+ * Convert SentenceMetrics[] (with completed translations) into a CSV File
+ * for re-submission to the backend in metrics-only mode.
+ */
+export function sentenceMetricsToCSVFile(
+  sentences: SentenceMetrics[],
+  filename: string = "dataset.csv",
+): File {
+  const headers = [
+    "pair_id",
+    "source",
+    "content_type",
+    "english_reference",
+    "source_text",
+    "spanish_source",
+    "llm_english_translation",
+  ];
+
+  const escape = (v: string): string => {
+    if (v.includes(",") || v.includes('"') || v.includes("\n")) {
+      return `"${v.replace(/"/g, '""')}"`;
+    }
+    return v;
+  };
+
+  const csvRows = sentences.map((r) => {
+    const srcText = r.source_text || r.spanish_source;
+    return [
+      r.pair_id,
+      r.source,
+      r.content_type,
+      r.english_reference,
+      srcText,
+      srcText,
+      r.llm_english_translation,
+    ]
+      .map(escape)
+      .join(",");
+  });
 
   const csvContent = [headers.join(","), ...csvRows].join("\n");
   return new File([csvContent], filename, { type: "text/csv" });
