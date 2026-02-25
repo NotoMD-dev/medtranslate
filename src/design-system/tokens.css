@@ -3,11 +3,11 @@
    Light mode defaults
 ═══════════════════════════════════════════ */
 :root {
-  /* Backgrounds — warm ivory base with crisp white surfaces for depth */
-  --bg-base: #EDEAE4;
-  --bg-surface: #FFFFFF;
-  --bg-surface-hover: #F7F6F3;
-  --bg-inset: #F3F1EC;
+  /* Backgrounds — crisp white base, cool-gray surfaces for depth */
+  --bg-base: #FFFFFF;
+  --bg-surface: #F4F5F7;
+  --bg-surface-hover: #ECEDF0;
+  --bg-inset: #E8EAF0;
 
   /* Text — high contrast, legible at smaller sizes */
   --text-primary: #111311;
