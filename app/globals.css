@@ -264,3 +264,37 @@ table tbody tr:hover td {
     grid-template-columns: 1fr;
   }
 }
+
+/* ========================
+   SIDEBAR
+   ======================== */
+
+.sidebar-nav-item:hover {
+  background: var(--bg-surface-hover) !important;
+}
+
+.sidebar-nav-item[style*="var(--accent)"]:hover {
+  background: var(--accent) !important;
+}
+
+/* ========================
+   DASHBOARD
+   ======================== */
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboard-card:hover {
+  box-shadow: var(--shadow-hover) !important;
+  border-color: var(--accent) !important;
+  transform: translateY(-2px);
+}
