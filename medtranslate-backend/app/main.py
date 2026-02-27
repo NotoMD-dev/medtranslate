@@ -6,8 +6,9 @@ import asyncio
 import csv
 import io
 import logging
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from app.config import CORS_ORIGINS, DEFAULT_SYSTEM_PROMPT, SOURCE_LANGUAGE_COLUMNS
@@ -31,6 +32,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +259,12 @@ async def poll_job_status(job_id: str):
 
 
 @app.get("/v1/jobs/{job_id}/results", response_model=JobResults)
-async def get_results(job_id: str):
-    results = get_job_results(job_id)
+async def get_results(
+    job_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=0, ge=0),
+):
+    results = get_job_results(job_id, offset=offset, limit=limit)
     if results is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return results

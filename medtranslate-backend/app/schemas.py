@@ -89,3 +89,5 @@ class JobResults(BaseModel):
     sentence_metrics: list[SentenceMetrics] = []
     library_versions: Optional[LibraryVersions] = None
     translation_config: Optional[ModelConfig] = None
+    total: int = 0
+    offset: int = 0
