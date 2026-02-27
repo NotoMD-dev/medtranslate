@@ -64,6 +64,8 @@ export interface JobResults {
   sentence_metrics: SentenceMetrics[];
   library_versions: LibraryVersions | null;
   translation_config: ModelConfig | null;
+  total?: number;
+  offset?: number;
 }
 
 // ---------------------------------------------------------------------------

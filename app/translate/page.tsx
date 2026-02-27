@@ -82,9 +82,9 @@ export default function TranslatePage() {
         setJobStatus(status);
         setRowCount(status.total);
 
-        // Fetch partial results for real-time table display
+        // Fetch partial results (limited page) for real-time table display
         try {
-          const partial = await fetchJobResults(jobId);
+          const partial = await fetchJobResults(jobId, 0, 500);
           if (partial && partial.sentence_metrics.length > 0) {
             setJobResults(partial);
           }
@@ -145,9 +145,9 @@ export default function TranslatePage() {
         if (abortRef.current) return;
         setJobStatus(status);
 
-        // Fetch partial results for real-time table display
+        // Fetch partial results (limited page) for real-time table display
         try {
-          const partial = await fetchJobResults(job_id);
+          const partial = await fetchJobResults(job_id, 0, 500);
           if (partial && partial.sentence_metrics.length > 0) {
             setJobResults(partial);
           }
@@ -556,9 +556,9 @@ export default function TranslatePage() {
                 })}
               </tbody>
             </table>
-            {sentences.length > 200 && (
+            {(jobResults?.total || sentences.length) > 200 && (
               <div style={{ padding: 14, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
-                Showing first 200 of {sentences.length} rows
+                Showing first 200 of {jobResults?.total || sentences.length} rows
               </div>
             )}
           </div>

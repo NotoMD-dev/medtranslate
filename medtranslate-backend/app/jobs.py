@@ -111,17 +111,25 @@ def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
     )
 
 
-def get_job_results(job_id: str) -> Optional[JobResults]:
+def get_job_results(job_id: str, *, offset: int = 0, limit: int = 0) -> Optional[JobResults]:
     job = _jobs.get(job_id)
     if job is None:
         return None
+    total = len(job.sentence_metrics)
+    metrics = job.sentence_metrics
+    if limit > 0:
+        metrics = job.sentence_metrics[offset:offset + limit]
+    elif offset > 0:
+        metrics = job.sentence_metrics[offset:]
     return JobResults(
         job_id=job.job_id,
         status=job.status,
         corpus_metrics=job.corpus_metrics,
-        sentence_metrics=job.sentence_metrics,
+        sentence_metrics=metrics,
         library_versions=job.library_versions,
         translation_config=job.model_config,
+        total=total,
+        offset=offset,
     )
 
 
