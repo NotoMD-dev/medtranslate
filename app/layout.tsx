@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/react";
 import { ThemeProvider } from "@/src/design-system";
+import Sidebar from "@/components/Sidebar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -18,7 +19,18 @@ export default function RootLayout({
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <body>
         <ThemeProvider>
-          {children}
+          <div style={{ display: "flex", minHeight: "100vh" }}>
+            <Sidebar />
+            <main
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflowY: "auto",
+              }}
+            >
+              {children}
+            </main>
+          </div>
         </ThemeProvider>
         <Analytics />
       </body>
