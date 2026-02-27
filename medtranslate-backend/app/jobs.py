@@ -1,13 +1,18 @@
-"""In-memory job store and background job execution logic."""
+"""Job store (SQLite-backed with in-memory cache) and background job execution."""
 
 from __future__ import annotations
+
+import json
 import os
+import sqlite3
+import threading
 import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.config import DATABASE_PATH
 from app.metrics import (
     compute_bertscore_batch,
     compute_corpus_bleu,
@@ -67,37 +72,207 @@ class Job:
 
 
 # ---------------------------------------------------------------------------
-# In-memory store
+# In-memory cache (hot path) + SQLite persistence (survives restarts)
 # ---------------------------------------------------------------------------
 
 _jobs: dict[str, Job] = {}
 
+# Guards concurrent writes from the asyncio thread pool
+_write_lock = threading.Lock()
 
-def create_job(rows: list[InputRow], config: ModelConfig) -> str:
+# Set to True once the schema has been created
+_db_ready = False
+
+
+def _ensure_db() -> bool:
+    """Create the jobs table if it doesn't exist. Returns False when the DB
+    path is not writable (e.g. Render Disk not mounted), disabling persistence
+    gracefully instead of crashing."""
+    global _db_ready
+    if _db_ready:
+        return True
+    try:
+        db_dir = os.path.dirname(DATABASE_PATH)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS jobs "
+                "(job_id TEXT PRIMARY KEY, data TEXT NOT NULL)"
+            )
+        _db_ready = True
+        logger.info("SQLite job store ready at %s", DATABASE_PATH)
+        return True
+    except Exception as exc:
+        logger.warning(
+            "SQLite unavailable at %s (%s) — job results will not survive restarts",
+            DATABASE_PATH,
+            exc,
+        )
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Serialisation helpers
+# ---------------------------------------------------------------------------
+
+def _job_to_dict(job: Job) -> dict:
+    return {
+        "job_id": job.job_id,
+        "status": job.status.value,
+        "rows": [
+            {
+                "pair_id": r.pair_id,
+                "source": r.source,
+                "content_type": r.content_type,
+                "source_text": r.source_text,
+                "english_reference": r.english_reference,
+                "spanish_source": r.spanish_source,
+                "llm_english_translation": r.llm_english_translation,
+            }
+            for r in job.rows
+        ],
+        "model_config": job.model_config.model_dump(),
+        "translated": job.translated,
+        "scored": job.scored,
+        "failed_rows": job.failed_rows,
+        "sentence_metrics": [m.model_dump() for m in job.sentence_metrics],
+        "corpus_metrics": job.corpus_metrics.model_dump() if job.corpus_metrics else None,
+        "library_versions": job.library_versions.model_dump() if job.library_versions else None,
+        "error": job.error,
+        "cancelled": job.cancelled,
+    }
+
+
+def _job_from_dict(data: dict) -> Job:
+    return Job(
+        job_id=data["job_id"],
+        status=JobStatus(data["status"]),
+        rows=[InputRow(**r) for r in data["rows"]],
+        model_config=ModelConfig.model_validate(data["model_config"]),
+        translated=data.get("translated", 0),
+        scored=data.get("scored", 0),
+        failed_rows=data.get("failed_rows", 0),
+        sentence_metrics=[
+            SentenceMetrics.model_validate(m) for m in data.get("sentence_metrics", [])
+        ],
+        corpus_metrics=(
+            DatasetCorpusMetrics.model_validate(data["corpus_metrics"])
+            if data.get("corpus_metrics")
+            else None
+        ),
+        library_versions=(
+            LibraryVersions.model_validate(data["library_versions"])
+            if data.get("library_versions")
+            else None
+        ),
+        error=data.get("error"),
+        cancelled=data.get("cancelled", False),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Blocking SQLite helpers (called via asyncio.to_thread)
+# ---------------------------------------------------------------------------
+
+def _db_save(job: Job) -> None:
+    """Upsert a job into SQLite. No-op when the DB is unavailable."""
+    if not _ensure_db():
+        return
+    payload = json.dumps(_job_to_dict(job))
+    with _write_lock:
+        try:
+            with sqlite3.connect(DATABASE_PATH) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO jobs (job_id, data) VALUES (?, ?)",
+                    (job.job_id, payload),
+                )
+        except Exception as exc:
+            logger.warning("SQLite write failed for job %s: %s", job.job_id, exc)
+
+
+def _db_load(job_id: str) -> Optional[dict]:
+    """Fetch a job's JSON payload from SQLite. Returns None on miss or error."""
+    if not _ensure_db():
+        return None
+    try:
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            row = conn.execute(
+                "SELECT data FROM jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+    except Exception as exc:
+        logger.warning("SQLite read failed for job %s: %s", job_id, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Async persistence helpers
+# ---------------------------------------------------------------------------
+
+async def _persist(job: Job) -> None:
+    """Write job state to SQLite without blocking the event loop."""
+    await asyncio.to_thread(_db_save, job)
+
+
+async def _fetch_from_db(job_id: str) -> Optional[Job]:
+    """Load a job from SQLite. Returns None on miss.
+
+    Jobs that were queued or running when the server last shut down can never
+    complete — they are immediately flipped to 'failed' so clients receive a
+    useful status instead of polling forever.
+    """
+    data = await asyncio.to_thread(_db_load, job_id)
+    if data is None:
+        return None
+    job = _job_from_dict(data)
+    if job.status in (JobStatus.queued, JobStatus.running):
+        job.status = JobStatus.failed
+        job.error = job.error or "Job was interrupted by a server restart."
+        await _persist(job)
+    _jobs[job_id] = job  # warm the in-memory cache
+    return job
+
+
+async def _get_job(job_id: str) -> Optional[Job]:
+    """Return a job from the in-memory cache, falling back to SQLite."""
+    job = _jobs.get(job_id)
+    if job is not None:
+        return job
+    return await _fetch_from_db(job_id)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+async def create_job(rows: list[InputRow], config: ModelConfig) -> str:
     job_id = uuid.uuid4().hex[:12]
     job = Job(job_id=job_id, rows=rows, model_config=config)
     _jobs[job_id] = job
+    await _persist(job)
     return job_id
 
 
-def cancel_job(job_id: str) -> bool:
+async def cancel_job(job_id: str) -> bool:
     """Cancel a running job. Returns True if the job was found and cancelled."""
-    job = _jobs.get(job_id)
+    job = await _get_job(job_id)
     if job is None:
         return False
     job.cancelled = True
     if job.status in (JobStatus.queued, JobStatus.running):
         job.status = JobStatus.cancelled
         logger.info("Job %s: cancelled by user", job_id)
+    await _persist(job)
     return True
 
 
-def get_job(job_id: str) -> Optional[Job]:
-    return _jobs.get(job_id)
+async def get_job(job_id: str) -> Optional[Job]:
+    return await _get_job(job_id)
 
 
-def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
-    job = _jobs.get(job_id)
+async def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
+    job = await _get_job(job_id)
     if job is None:
         return None
     return JobStatusResponse(
@@ -111,8 +286,8 @@ def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
     )
 
 
-def get_job_results(job_id: str, *, offset: int = 0, limit: int = 0) -> Optional[JobResults]:
-    job = _jobs.get(job_id)
+async def get_job_results(job_id: str, *, offset: int = 0, limit: int = 0) -> Optional[JobResults]:
+    job = await _get_job(job_id)
     if job is None:
         return None
     total = len(job.sentence_metrics)
@@ -159,6 +334,7 @@ async def execute_job(job_id: str) -> None:
         return
 
     job.status = JobStatus.running
+    await _persist(job)  # record running state so restart detection works
     total = len(job.rows)
     logger.info("Job %s: starting (%d rows)", job_id, total)
 
@@ -247,6 +423,7 @@ async def execute_job(job_id: str) -> None:
     if job.cancelled:
         job.status = JobStatus.cancelled
         logger.info("Job %s: stopped after %d translations", job_id, job.translated)
+        await _persist(job)
         return
 
     # ------------------------------------------------------------------
@@ -392,4 +569,5 @@ async def execute_job(job_id: str) -> None:
         logger.error("Job %s version capture failed: %s", job_id, exc)
 
     job.status = JobStatus.complete
+    await _persist(job)  # persist final results to survive future restarts
     logger.info("Job %s: complete", job_id)

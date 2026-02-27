@@ -29,6 +29,13 @@ DEFAULT_MAX_TOKENS: int = 1024
 TRANSLATE_MAX_RETRIES: int = 3
 TRANSLATE_RETRY_DELAY: float = 2.0
 
+# SQLite persistence — path to the database file.
+# On Render, mount a Disk at /data and set DATABASE_PATH=/data/medtranslate.db.
+# Leave unset (or keep the default) for local dev; the directory is created
+# automatically if possible, and the app falls back to in-memory-only mode if
+# the path cannot be written (e.g. the Render Disk is not mounted yet).
+DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "/data/medtranslate.db")
+
 # Known source language column names
 SOURCE_LANGUAGE_COLUMNS: list[str] = [
     "spanish_source",
