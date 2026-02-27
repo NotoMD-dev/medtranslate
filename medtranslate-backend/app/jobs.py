@@ -1,16 +1,18 @@
-"""Job store (Redis-backed with in-memory cache) and background job execution."""
+"""Job store (SQLite-backed with in-memory cache) and background job execution."""
 
 from __future__ import annotations
 
 import json
 import os
+import sqlite3
+import threading
 import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
-from app.config import JOB_TTL_SECONDS, REDIS_URL
+from app.config import DATABASE_PATH
 from app.metrics import (
     compute_bertscore_batch,
     compute_corpus_bleu,
@@ -70,30 +72,48 @@ class Job:
 
 
 # ---------------------------------------------------------------------------
-# In-memory cache (hot path) + Redis persistence (survives restarts)
+# In-memory cache (hot path) + SQLite persistence (survives restarts)
 # ---------------------------------------------------------------------------
 
 _jobs: dict[str, Job] = {}
-_redis_client: Any = None
+
+# Guards concurrent writes from the asyncio thread pool
+_write_lock = threading.Lock()
+
+# Set to True once the schema has been created
+_db_ready = False
 
 
-def _get_redis_client() -> Any:
-    """Lazily create a Redis client. Returns None when REDIS_URL is not set."""
-    global _redis_client
-    if not REDIS_URL:
-        return None
-    if _redis_client is None:
-        try:
-            import redis.asyncio as aioredis  # type: ignore[import]
-            _redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
-        except Exception as exc:  # pragma: no cover
-            logger.warning("Could not create Redis client: %s", exc)
-            return None
-    return _redis_client
+def _ensure_db() -> bool:
+    """Create the jobs table if it doesn't exist. Returns False when the DB
+    path is not writable (e.g. Render Disk not mounted), disabling persistence
+    gracefully instead of crashing."""
+    global _db_ready
+    if _db_ready:
+        return True
+    try:
+        db_dir = os.path.dirname(DATABASE_PATH)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS jobs "
+                "(job_id TEXT PRIMARY KEY, data TEXT NOT NULL)"
+            )
+        _db_ready = True
+        logger.info("SQLite job store ready at %s", DATABASE_PATH)
+        return True
+    except Exception as exc:
+        logger.warning(
+            "SQLite unavailable at %s (%s) — job results will not survive restarts",
+            DATABASE_PATH,
+            exc,
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------
-# Serialization helpers
+# Serialisation helpers
 # ---------------------------------------------------------------------------
 
 def _job_to_dict(job: Job) -> dict:
@@ -152,53 +172,74 @@ def _job_from_dict(data: dict) -> Job:
 
 
 # ---------------------------------------------------------------------------
-# Redis I/O helpers
+# Blocking SQLite helpers (called via asyncio.to_thread)
+# ---------------------------------------------------------------------------
+
+def _db_save(job: Job) -> None:
+    """Upsert a job into SQLite. No-op when the DB is unavailable."""
+    if not _ensure_db():
+        return
+    payload = json.dumps(_job_to_dict(job))
+    with _write_lock:
+        try:
+            with sqlite3.connect(DATABASE_PATH) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO jobs (job_id, data) VALUES (?, ?)",
+                    (job.job_id, payload),
+                )
+        except Exception as exc:
+            logger.warning("SQLite write failed for job %s: %s", job.job_id, exc)
+
+
+def _db_load(job_id: str) -> Optional[dict]:
+    """Fetch a job's JSON payload from SQLite. Returns None on miss or error."""
+    if not _ensure_db():
+        return None
+    try:
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            row = conn.execute(
+                "SELECT data FROM jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+    except Exception as exc:
+        logger.warning("SQLite read failed for job %s: %s", job_id, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Async persistence helpers
 # ---------------------------------------------------------------------------
 
 async def _persist(job: Job) -> None:
-    """Write job state to Redis. No-op when Redis is not configured."""
-    client = _get_redis_client()
-    if client is None:
-        return
-    try:
-        await client.setex(
-            f"job:{job.job_id}",
-            JOB_TTL_SECONDS,
-            json.dumps(_job_to_dict(job)),
-        )
-    except Exception as exc:
-        logger.warning("Redis write failed for job %s: %s", job.job_id, exc)
+    """Write job state to SQLite without blocking the event loop."""
+    await asyncio.to_thread(_db_save, job)
 
 
-async def _fetch_from_redis(job_id: str) -> Optional[Job]:
-    """Load a job from Redis. Returns None on miss or error."""
-    client = _get_redis_client()
-    if client is None:
+async def _fetch_from_db(job_id: str) -> Optional[Job]:
+    """Load a job from SQLite. Returns None on miss.
+
+    Jobs that were queued or running when the server last shut down can never
+    complete — they are immediately flipped to 'failed' so clients receive a
+    useful status instead of polling forever.
+    """
+    data = await asyncio.to_thread(_db_load, job_id)
+    if data is None:
         return None
-    try:
-        data = await client.get(f"job:{job_id}")
-        if data is None:
-            return None
-        job = _job_from_dict(json.loads(data))
-        # A job that was queued/running when the server died can never complete —
-        # mark it failed so clients get a useful status instead of hanging forever.
-        if job.status in (JobStatus.queued, JobStatus.running):
-            job.status = JobStatus.failed
-            job.error = job.error or "Job was interrupted by a server restart."
-            await _persist(job)
-        _jobs[job_id] = job  # warm the in-memory cache
-        return job
-    except Exception as exc:
-        logger.warning("Redis read failed for job %s: %s", job_id, exc)
-        return None
+    job = _job_from_dict(data)
+    if job.status in (JobStatus.queued, JobStatus.running):
+        job.status = JobStatus.failed
+        job.error = job.error or "Job was interrupted by a server restart."
+        await _persist(job)
+    _jobs[job_id] = job  # warm the in-memory cache
+    return job
 
 
 async def _get_job(job_id: str) -> Optional[Job]:
-    """Return a job from the in-memory cache, falling back to Redis."""
+    """Return a job from the in-memory cache, falling back to SQLite."""
     job = _jobs.get(job_id)
     if job is not None:
         return job
-    return await _fetch_from_redis(job_id)
+    return await _fetch_from_db(job_id)
 
 
 # ---------------------------------------------------------------------------

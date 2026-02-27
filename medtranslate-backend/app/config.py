@@ -29,13 +29,12 @@ DEFAULT_MAX_TOKENS: int = 1024
 TRANSLATE_MAX_RETRIES: int = 3
 TRANSLATE_RETRY_DELAY: float = 2.0
 
-# Redis persistence (optional — leave unset to fall back to in-memory only)
-# Set REDIS_URL to a Redis connection string, e.g. "redis://localhost:6379/0"
-# or use a Render Redis add-on URL.
-REDIS_URL: str = os.environ.get("REDIS_URL", "")
-
-# How long to keep job data in Redis (default: 7 days)
-JOB_TTL_SECONDS: int = int(os.environ.get("JOB_TTL_SECONDS", str(7 * 24 * 3600)))
+# SQLite persistence — path to the database file.
+# On Render, mount a Disk at /data and set DATABASE_PATH=/data/medtranslate.db.
+# Leave unset (or keep the default) for local dev; the directory is created
+# automatically if possible, and the app falls back to in-memory-only mode if
+# the path cannot be written (e.g. the Render Disk is not mounted yet).
+DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "/data/medtranslate.db")
 
 # Known source language column names
 SOURCE_LANGUAGE_COLUMNS: list[str] = [

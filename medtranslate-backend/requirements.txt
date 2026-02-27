@@ -11,4 +11,3 @@ pydantic
 python-multipart
 pandas
 openpyxl
-redis[asyncio]
