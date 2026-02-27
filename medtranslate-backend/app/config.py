@@ -29,6 +29,14 @@ DEFAULT_MAX_TOKENS: int = 1024
 TRANSLATE_MAX_RETRIES: int = 3
 TRANSLATE_RETRY_DELAY: float = 2.0
 
+# Redis persistence (optional — leave unset to fall back to in-memory only)
+# Set REDIS_URL to a Redis connection string, e.g. "redis://localhost:6379/0"
+# or use a Render Redis add-on URL.
+REDIS_URL: str = os.environ.get("REDIS_URL", "")
+
+# How long to keep job data in Redis (default: 7 days)
+JOB_TTL_SECONDS: int = int(os.environ.get("JOB_TTL_SECONDS", str(7 * 24 * 3600)))
+
 # Known source language column names
 SOURCE_LANGUAGE_COLUMNS: list[str] = [
     "spanish_source",

@@ -236,7 +236,7 @@ async def submit_job(
         metrics_only=metrics_only,
     )
 
-    job_id = create_job(rows, config)
+    job_id = await create_job(rows, config)
 
     asyncio.create_task(execute_job(job_id))
 
@@ -245,14 +245,14 @@ async def submit_job(
 
 @app.post("/v1/jobs/{job_id}/cancel")
 async def cancel_job_endpoint(job_id: str):
-    if not cancel_job(job_id):
+    if not await cancel_job(job_id):
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job_id": job_id, "status": "cancelled"}
 
 
 @app.get("/v1/jobs/{job_id}", response_model=JobStatusResponse)
 async def poll_job_status(job_id: str):
-    status = get_job_status(job_id)
+    status = await get_job_status(job_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return status
@@ -264,7 +264,7 @@ async def get_results(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=0, ge=0),
 ):
-    results = get_job_results(job_id, offset=offset, limit=limit)
+    results = await get_job_results(job_id, offset=offset, limit=limit)
     if results is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return results

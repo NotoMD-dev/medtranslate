@@ -1,13 +1,16 @@
-"""In-memory job store and background job execution logic."""
+"""Job store (Redis-backed with in-memory cache) and background job execution."""
 
 from __future__ import annotations
+
+import json
 import os
 import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
+from app.config import JOB_TTL_SECONDS, REDIS_URL
 from app.metrics import (
     compute_bertscore_batch,
     compute_corpus_bleu,
@@ -67,37 +70,168 @@ class Job:
 
 
 # ---------------------------------------------------------------------------
-# In-memory store
+# In-memory cache (hot path) + Redis persistence (survives restarts)
 # ---------------------------------------------------------------------------
 
 _jobs: dict[str, Job] = {}
+_redis_client: Any = None
 
 
-def create_job(rows: list[InputRow], config: ModelConfig) -> str:
+def _get_redis_client() -> Any:
+    """Lazily create a Redis client. Returns None when REDIS_URL is not set."""
+    global _redis_client
+    if not REDIS_URL:
+        return None
+    if _redis_client is None:
+        try:
+            import redis.asyncio as aioredis  # type: ignore[import]
+            _redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Could not create Redis client: %s", exc)
+            return None
+    return _redis_client
+
+
+# ---------------------------------------------------------------------------
+# Serialization helpers
+# ---------------------------------------------------------------------------
+
+def _job_to_dict(job: Job) -> dict:
+    return {
+        "job_id": job.job_id,
+        "status": job.status.value,
+        "rows": [
+            {
+                "pair_id": r.pair_id,
+                "source": r.source,
+                "content_type": r.content_type,
+                "source_text": r.source_text,
+                "english_reference": r.english_reference,
+                "spanish_source": r.spanish_source,
+                "llm_english_translation": r.llm_english_translation,
+            }
+            for r in job.rows
+        ],
+        "model_config": job.model_config.model_dump(),
+        "translated": job.translated,
+        "scored": job.scored,
+        "failed_rows": job.failed_rows,
+        "sentence_metrics": [m.model_dump() for m in job.sentence_metrics],
+        "corpus_metrics": job.corpus_metrics.model_dump() if job.corpus_metrics else None,
+        "library_versions": job.library_versions.model_dump() if job.library_versions else None,
+        "error": job.error,
+        "cancelled": job.cancelled,
+    }
+
+
+def _job_from_dict(data: dict) -> Job:
+    return Job(
+        job_id=data["job_id"],
+        status=JobStatus(data["status"]),
+        rows=[InputRow(**r) for r in data["rows"]],
+        model_config=ModelConfig.model_validate(data["model_config"]),
+        translated=data.get("translated", 0),
+        scored=data.get("scored", 0),
+        failed_rows=data.get("failed_rows", 0),
+        sentence_metrics=[
+            SentenceMetrics.model_validate(m) for m in data.get("sentence_metrics", [])
+        ],
+        corpus_metrics=(
+            DatasetCorpusMetrics.model_validate(data["corpus_metrics"])
+            if data.get("corpus_metrics")
+            else None
+        ),
+        library_versions=(
+            LibraryVersions.model_validate(data["library_versions"])
+            if data.get("library_versions")
+            else None
+        ),
+        error=data.get("error"),
+        cancelled=data.get("cancelled", False),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Redis I/O helpers
+# ---------------------------------------------------------------------------
+
+async def _persist(job: Job) -> None:
+    """Write job state to Redis. No-op when Redis is not configured."""
+    client = _get_redis_client()
+    if client is None:
+        return
+    try:
+        await client.setex(
+            f"job:{job.job_id}",
+            JOB_TTL_SECONDS,
+            json.dumps(_job_to_dict(job)),
+        )
+    except Exception as exc:
+        logger.warning("Redis write failed for job %s: %s", job.job_id, exc)
+
+
+async def _fetch_from_redis(job_id: str) -> Optional[Job]:
+    """Load a job from Redis. Returns None on miss or error."""
+    client = _get_redis_client()
+    if client is None:
+        return None
+    try:
+        data = await client.get(f"job:{job_id}")
+        if data is None:
+            return None
+        job = _job_from_dict(json.loads(data))
+        # A job that was queued/running when the server died can never complete —
+        # mark it failed so clients get a useful status instead of hanging forever.
+        if job.status in (JobStatus.queued, JobStatus.running):
+            job.status = JobStatus.failed
+            job.error = job.error or "Job was interrupted by a server restart."
+            await _persist(job)
+        _jobs[job_id] = job  # warm the in-memory cache
+        return job
+    except Exception as exc:
+        logger.warning("Redis read failed for job %s: %s", job_id, exc)
+        return None
+
+
+async def _get_job(job_id: str) -> Optional[Job]:
+    """Return a job from the in-memory cache, falling back to Redis."""
+    job = _jobs.get(job_id)
+    if job is not None:
+        return job
+    return await _fetch_from_redis(job_id)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+async def create_job(rows: list[InputRow], config: ModelConfig) -> str:
     job_id = uuid.uuid4().hex[:12]
     job = Job(job_id=job_id, rows=rows, model_config=config)
     _jobs[job_id] = job
+    await _persist(job)
     return job_id
 
 
-def cancel_job(job_id: str) -> bool:
+async def cancel_job(job_id: str) -> bool:
     """Cancel a running job. Returns True if the job was found and cancelled."""
-    job = _jobs.get(job_id)
+    job = await _get_job(job_id)
     if job is None:
         return False
     job.cancelled = True
     if job.status in (JobStatus.queued, JobStatus.running):
         job.status = JobStatus.cancelled
         logger.info("Job %s: cancelled by user", job_id)
+    await _persist(job)
     return True
 
 
-def get_job(job_id: str) -> Optional[Job]:
-    return _jobs.get(job_id)
+async def get_job(job_id: str) -> Optional[Job]:
+    return await _get_job(job_id)
 
 
-def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
-    job = _jobs.get(job_id)
+async def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
+    job = await _get_job(job_id)
     if job is None:
         return None
     return JobStatusResponse(
@@ -111,8 +245,8 @@ def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
     )
 
 
-def get_job_results(job_id: str, *, offset: int = 0, limit: int = 0) -> Optional[JobResults]:
-    job = _jobs.get(job_id)
+async def get_job_results(job_id: str, *, offset: int = 0, limit: int = 0) -> Optional[JobResults]:
+    job = await _get_job(job_id)
     if job is None:
         return None
     total = len(job.sentence_metrics)
@@ -159,6 +293,7 @@ async def execute_job(job_id: str) -> None:
         return
 
     job.status = JobStatus.running
+    await _persist(job)  # record running state so restart detection works
     total = len(job.rows)
     logger.info("Job %s: starting (%d rows)", job_id, total)
 
@@ -247,6 +382,7 @@ async def execute_job(job_id: str) -> None:
     if job.cancelled:
         job.status = JobStatus.cancelled
         logger.info("Job %s: stopped after %d translations", job_id, job.translated)
+        await _persist(job)
         return
 
     # ------------------------------------------------------------------
@@ -392,4 +528,5 @@ async def execute_job(job_id: str) -> None:
         logger.error("Job %s version capture failed: %s", job_id, exc)
 
     job.status = JobStatus.complete
+    await _persist(job)  # persist final results to survive future restarts
     logger.info("Job %s: complete", job_id)
