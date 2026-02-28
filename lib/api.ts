@@ -121,7 +121,10 @@ export async function submitJob(
   form.append("compute_bertscore", String(config.computeBertscore ?? false));
   form.append("metrics_only", String(config.metricsOnly ?? false));
 
-  const resp = await safeFetch(`${BACKEND_URL}/v1/jobs`, {
+  // Use fetchWithRetry: on large datasets, Render's reverse proxy can
+  // return 502/504 if the backend is cold-starting or parsing takes time.
+  // A retry after backoff usually succeeds once the backend is warm.
+  const resp = await fetchWithRetry(`${BACKEND_URL}/v1/jobs`, {
     method: "POST",
     body: form,
   });

@@ -220,7 +220,14 @@ async def submit_job(
         raise HTTPException(status_code=400, detail="No filename provided")
 
     content = await file.read()
-    raw_rows, detected_col = _parse_upload(file.filename, content, source_column or None)
+    filename = file.filename
+    src_col = source_column or None
+
+    # Run CPU-bound file parsing off the event loop so poll requests
+    # from other clients aren't blocked while we parse a large XLSX.
+    raw_rows, detected_col = await asyncio.to_thread(
+        _parse_upload, filename, content, src_col,
+    )
 
     if not raw_rows:
         raise HTTPException(status_code=400, detail="File contains no data rows")

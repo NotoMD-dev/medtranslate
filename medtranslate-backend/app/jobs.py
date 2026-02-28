@@ -250,7 +250,10 @@ async def create_job(rows: list[InputRow], config: ModelConfig) -> str:
     job_id = uuid.uuid4().hex[:12]
     job = Job(job_id=job_id, rows=rows, model_config=config)
     _jobs[job_id] = job
-    await _persist(job)
+    # Skip synchronous persist here — serializing thousands of rows to JSON
+    # blocks the HTTP response for seconds, risking a Render proxy timeout.
+    # The job is safely in-memory; execute_job persists it when status
+    # changes to "running" (within milliseconds, in the background task).
     return job_id
 
 
