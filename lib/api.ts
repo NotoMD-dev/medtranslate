@@ -10,14 +10,17 @@ import type {
   JobCreated,
   JobResults,
   JobStatusResponse,
-  TranslationPair,
 } from "./types";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
+const RESULTS_PAGE_SIZE = 500;
+const MAX_RETRIES = 3;
+const BASE_RETRY_DELAY_MS = 1500;
+
 // ---------------------------------------------------------------------------
-// Fetch wrapper — provides actionable error messages for network failures
+// Fetch helpers
 // ---------------------------------------------------------------------------
 
 async function safeFetch(input: string, init?: RequestInit): Promise<Response> {
@@ -34,16 +37,51 @@ async function safeFetch(input: string, init?: RequestInit): Promise<Response> {
   }
 }
 
+/**
+ * Fetch with automatic retry on transient errors (5xx, network failures).
+ * Uses exponential backoff: 1.5s, 3s, 6s.
+ */
+async function fetchWithRetry(
+  input: string,
+  init?: RequestInit,
+  retries: number = MAX_RETRIES,
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const resp = await safeFetch(input, init);
+      if (resp.ok || resp.status < 500) return resp;
+
+      // Server error — retry
+      lastError = new Error(`Server error: ${resp.status}`);
+    } catch (err) {
+      lastError = err as Error;
+    }
+
+    if (attempt < retries - 1) {
+      await sleep(BASE_RETRY_DELAY_MS * 2 ** attempt);
+    }
+  }
+
+  throw lastError ?? new Error("Request failed after retries");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 // ---------------------------------------------------------------------------
 // POST /v1/parse — parse CSV or XLSX on the backend, return normalized rows
 // ---------------------------------------------------------------------------
 
-export async function parseFile(file: File, sourceColumn?: string): Promise<TranslationPair[]> {
+export async function parseFile(
+  file: File,
+  sourceColumn?: string,
+): Promise<import("./types").TranslationPair[]> {
   const form = new FormData();
   form.append("file", file);
-  if (sourceColumn) {
-    form.append("source_column", sourceColumn);
-  }
+  if (sourceColumn) form.append("source_column", sourceColumn);
 
   const resp = await safeFetch(`${BACKEND_URL}/v1/parse`, {
     method: "POST",
@@ -55,7 +93,7 @@ export async function parseFile(file: File, sourceColumn?: string): Promise<Tran
     throw new Error(detail.detail || `Backend error: ${resp.status}`);
   }
 
-  const data: { rows: TranslationPair[] } = await resp.json();
+  const data: { rows: import("./types").TranslationPair[] } = await resp.json();
   return data.rows;
 }
 
@@ -97,11 +135,11 @@ export async function submitJob(
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/jobs/{job_id} — poll status
+// GET /v1/jobs/{job_id} — poll status (with retry)
 // ---------------------------------------------------------------------------
 
 export async function pollJobStatus(jobId: string): Promise<JobStatusResponse> {
-  const resp = await safeFetch(`${BACKEND_URL}/v1/jobs/${jobId}`);
+  const resp = await fetchWithRetry(`${BACKEND_URL}/v1/jobs/${jobId}`);
   if (!resp.ok) {
     throw new Error(`Failed to fetch job status: ${resp.status}`);
   }
@@ -109,10 +147,8 @@ export async function pollJobStatus(jobId: string): Promise<JobStatusResponse> {
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/jobs/{job_id}/results — paginated results
+// GET /v1/jobs/{job_id}/results — paginated results (with retry)
 // ---------------------------------------------------------------------------
-
-const RESULTS_PAGE_SIZE = 500;
 
 export async function fetchJobResults(
   jobId: string,
@@ -125,7 +161,7 @@ export async function fetchJobResults(
   const qs = params.toString();
   const url = `${BACKEND_URL}/v1/jobs/${jobId}/results${qs ? `?${qs}` : ""}`;
 
-  const resp = await safeFetch(url);
+  const resp = await fetchWithRetry(url);
   if (!resp.ok) {
     throw new Error(`Failed to fetch results: ${resp.status}`);
   }
@@ -133,8 +169,8 @@ export async function fetchJobResults(
 }
 
 /**
- * Fetch all job results via parallel paginated requests.
- * Each page is small enough to avoid Render's reverse-proxy timeout.
+ * Fetch all job results via sequential paginated requests.
+ * Each page retries individually on failure for maximum resilience.
  */
 export async function fetchAllJobResultsPaginated(
   jobId: string,
@@ -142,28 +178,18 @@ export async function fetchAllJobResultsPaginated(
   const firstPage = await fetchJobResults(jobId, 0, RESULTS_PAGE_SIZE);
   const total = firstPage.total ?? firstPage.sentence_metrics.length;
 
-  if (total <= RESULTS_PAGE_SIZE) {
-    return firstPage;
-  }
+  if (total <= RESULTS_PAGE_SIZE) return firstPage;
 
-  // Fetch remaining pages in parallel
-  const fetches: Promise<JobResults>[] = [];
-  for (let off = RESULTS_PAGE_SIZE; off < total; off += RESULTS_PAGE_SIZE) {
-    fetches.push(fetchJobResults(jobId, off, RESULTS_PAGE_SIZE));
-  }
-  const pages = await Promise.all(fetches);
-
+  // Fetch remaining pages sequentially to avoid overwhelming the backend.
+  // Each individual page already has retry logic via fetchWithRetry.
   const allMetrics = [...firstPage.sentence_metrics];
-  for (const page of pages) {
+
+  for (let off = RESULTS_PAGE_SIZE; off < total; off += RESULTS_PAGE_SIZE) {
+    const page = await fetchJobResults(jobId, off, RESULTS_PAGE_SIZE);
     allMetrics.push(...page.sentence_metrics);
   }
 
-  return {
-    ...firstPage,
-    sentence_metrics: allMetrics,
-    offset: 0,
-    total,
-  };
+  return { ...firstPage, sentence_metrics: allMetrics, offset: 0, total };
 }
 
 // ---------------------------------------------------------------------------
@@ -180,28 +206,55 @@ export async function cancelJob(jobId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Polling helper — polls until complete/failed/cancelled, calling onStatus each tick
+// Polling helper — polls until complete/failed/cancelled
 // ---------------------------------------------------------------------------
 
 export async function pollUntilDone(
   jobId: string,
-  onStatus: (status: JobStatusResponse) => void,
+  onStatus: (status: JobStatusResponse) => void | Promise<void>,
   intervalMs: number = 2000,
   signal?: AbortSignal,
 ): Promise<JobResults> {
-  // eslint-disable-next-line no-constant-condition
+  let consecutiveErrors = 0;
+  const MAX_CONSECUTIVE_ERRORS = 5;
+
   while (true) {
     if (signal?.aborted) {
       return fetchAllJobResultsPaginated(jobId);
     }
 
-    const status = await pollJobStatus(jobId);
-    onStatus(status);
+    try {
+      const status = await pollJobStatus(jobId);
+      consecutiveErrors = 0; // reset on success
 
-    if (status.status === "complete" || status.status === "failed" || status.status === "cancelled") {
-      return fetchAllJobResultsPaginated(jobId);
+      // Await the callback so it completes before the next poll tick,
+      // preventing concurrent partial-result fetches from piling up.
+      await onStatus(status);
+
+      if (
+        status.status === "complete" ||
+        status.status === "failed" ||
+        status.status === "cancelled"
+      ) {
+        return fetchAllJobResultsPaginated(jobId);
+      }
+    } catch {
+      consecutiveErrors++;
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+        // Too many consecutive failures — the backend is likely unreachable.
+        // Try one final fetch in case the job already completed.
+        try {
+          return await fetchAllJobResultsPaginated(jobId);
+        } catch {
+          throw new Error(
+            `Lost connection to the backend after ${MAX_CONSECUTIVE_ERRORS} consecutive poll failures. ` +
+            "The job may still be running on the server. Refresh the page to check."
+          );
+        }
+      }
+      // Transient error — back off and retry on the next tick
     }
 
-    await new Promise((r) => setTimeout(r, intervalMs));
+    await sleep(intervalMs);
   }
 }

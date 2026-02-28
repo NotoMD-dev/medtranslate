@@ -4,9 +4,9 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import Header from "@/components/Header";
 import PairDetail from "@/components/PairDetail";
 import { pairsToCSVFile, sentenceMetricsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
-import { submitJob, pollUntilDone, fetchJobResults, pollJobStatus, cancelJob } from "@/lib/api";
+import { submitJob, pollUntilDone, fetchJobResults, cancelJob } from "@/lib/api";
 import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS } from "@/lib/types";
-import type { JobStatusResponse, JobResults, SentenceMetrics, ClinicalGrade } from "@/lib/types";
+import type { JobStatusResponse, JobResults, ClinicalGrade } from "@/lib/types";
 import {
   getSessionData,
   getSessionPrompt,
@@ -23,6 +23,9 @@ import {
 
 type PageState = "idle" | "submitting" | "running" | "complete" | "failed";
 
+/** Throttle partial-result fetches to avoid request pileup. */
+const PARTIAL_FETCH_INTERVAL_MS = 6000;
+
 export default function TranslatePage() {
   const [pageState, setPageState] = useState<PageState>("idle");
   const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
@@ -34,76 +37,100 @@ export default function TranslatePage() {
   const [computeBertscore, setComputeBertscore] = useState(false);
   const abortRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const lastPartialFetchRef = useRef(0);
 
-  // Model from session (set on Upload page)
   const sessionModel = getSessionModel() || MODEL_OPTIONS[0].id;
   const modelLabel = MODEL_OPTIONS.find((m) => m.id === sessionModel)?.label || sessionModel;
 
   // Restore persisted job results on mount
   useEffect(() => {
-    getSessionGradesAsync().then((persistedGrades) => {
-      if (persistedGrades) {
-        setGrades(persistedGrades);
-      }
+    getSessionGradesAsync().then((persisted) => {
+      if (persisted) setGrades(persisted);
     });
 
-    // Load results async (IndexedDB first, then localStorage fallback)
-    getSessionJobResultsAsync().then((persistedResults) => {
-      if (persistedResults && persistedResults.status === "complete") {
-        setJobResults(persistedResults);
+    getSessionJobResultsAsync().then((persisted) => {
+      if (persisted && persisted.status === "complete") {
+        setJobResults(persisted);
         setPageState("complete");
-        setRowCount(persistedResults.sentence_metrics.length);
-      } else if (persistedResults && persistedResults.status === "failed") {
-        setJobResults(persistedResults);
+        setRowCount(persisted.sentence_metrics.length);
+      } else if (persisted && persisted.status === "failed") {
+        setJobResults(persisted);
         setPageState("failed");
       } else {
         const data = getSessionData();
         if (data) setRowCount(data.length);
       }
 
-      // If there's a running job, resume polling
+      // Resume polling if a job was in progress
       const jobId = getSessionJobId();
-      if (jobId && (!persistedResults || (persistedResults.status !== "complete" && persistedResults.status !== "failed"))) {
+      if (
+        jobId &&
+        (!persisted || (persisted.status !== "complete" && persisted.status !== "failed"))
+      ) {
         resumePolling(jobId);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const resumePolling = useCallback(async (jobId: string) => {
-    setPageState("running");
-    abortRef.current = false;
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    try {
-      const results = await pollUntilDone(jobId, async (status) => {
+  /**
+   * Poll status callback shared by handleRun and resumePolling.
+   * Fetches partial results at most once per PARTIAL_FETCH_INTERVAL_MS
+   * to prevent request pileup on slow backends.
+   */
+  const makeStatusCallback = useCallback(
+    (jobId: string) =>
+      async (status: JobStatusResponse) => {
         if (abortRef.current) return;
         setJobStatus(status);
         setRowCount(status.total);
 
-        // Fetch partial results (limited page) for real-time table display
+        const now = Date.now();
+        if (now - lastPartialFetchRef.current < PARTIAL_FETCH_INTERVAL_MS) return;
+        lastPartialFetchRef.current = now;
+
         try {
           const partial = await fetchJobResults(jobId, 0, 500);
-          if (partial && partial.sentence_metrics.length > 0) {
+          if (partial?.sentence_metrics.length > 0) {
             setJobResults(partial);
           }
         } catch {
           // Partial results not yet available — ignore
         }
-      }, 2000, controller.signal);
+      },
+    [],
+  );
 
-      setJobResults(results);
-      await setSessionJobResultsAsync(results);
-      const isStopped = results.status === "cancelled" || abortRef.current;
-      setPageState(isStopped ? "complete" : results.status === "complete" ? "complete" : "failed");
-    } catch (err) {
-      if (!abortRef.current) {
-        setError((err as Error).message);
-        setPageState("failed");
+  const resumePolling = useCallback(
+    async (jobId: string) => {
+      setPageState("running");
+      abortRef.current = false;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const results = await pollUntilDone(
+          jobId,
+          makeStatusCallback(jobId),
+          2000,
+          controller.signal,
+        );
+
+        setJobResults(results);
+        await setSessionJobResultsAsync(results);
+        const isStopped = results.status === "cancelled" || abortRef.current;
+        setPageState(
+          isStopped ? "complete" : results.status === "complete" ? "complete" : "failed",
+        );
+      } catch (err) {
+        if (!abortRef.current) {
+          setError((err as Error).message);
+          setPageState("failed");
+        }
       }
-    }
-  }, []);
+    },
+    [makeStatusCallback],
+  );
 
   // Reference to existing results before a BERTScore-only run, so we can merge
   const preRunResultsRef = useRef<JobResults | null>(null);
@@ -121,6 +148,7 @@ export default function TranslatePage() {
     setJobStatus(null);
     preRunResultsRef.current = null;
     abortRef.current = false;
+    lastPartialFetchRef.current = 0;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -141,20 +169,12 @@ export default function TranslatePage() {
       setRowCount(data.length);
       setPageState("running");
 
-      const results = await pollUntilDone(job_id, async (status) => {
-        if (abortRef.current) return;
-        setJobStatus(status);
-
-        // Fetch partial results (limited page) for real-time table display
-        try {
-          const partial = await fetchJobResults(job_id, 0, 500);
-          if (partial && partial.sentence_metrics.length > 0) {
-            setJobResults(partial);
-          }
-        } catch {
-          // Partial results not yet available — ignore
-        }
-      }, 2000, controller.signal);
+      const results = await pollUntilDone(
+        job_id,
+        makeStatusCallback(job_id),
+        2000,
+        controller.signal,
+      );
 
       setJobResults(results);
       await setSessionJobResultsAsync(results);
@@ -165,7 +185,9 @@ export default function TranslatePage() {
       setSessionComparisonResults(existing);
 
       const isStopped = results.status === "cancelled" || abortRef.current;
-      setPageState(isStopped ? "complete" : results.status === "complete" ? "complete" : "failed");
+      setPageState(
+        isStopped ? "complete" : results.status === "complete" ? "complete" : "failed",
+      );
 
       if (results.status === "failed") {
         setError("Job failed on the backend. Check server logs for details.");
@@ -176,12 +198,9 @@ export default function TranslatePage() {
         setPageState("failed");
       }
     }
-  }, [computeBertscore]);
+  }, [computeBertscore, makeStatusCallback]);
 
   const handleRunBertscoreOnly = useCallback(async () => {
-    // Use existing sentence_metrics (which have translations) rather than
-    // re-translating.  The backend metrics_only mode will skip translation
-    // and only compute metrics on the translations already in the CSV.
     if (!jobResults || jobResults.sentence_metrics.length === 0) {
       setError("No translations available. Run translations first.");
       return;
@@ -194,14 +213,13 @@ export default function TranslatePage() {
     setError(null);
     setJobStatus(null);
     abortRef.current = false;
+    lastPartialFetchRef.current = 0;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
       const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
       const model = getSessionModel() || MODEL_OPTIONS[0].id;
-
-      // Build CSV from existing sentence metrics (includes translations)
       const csvFile = sentenceMetricsToCSVFile(jobResults.sentence_metrics);
 
       const { job_id } = await submitJob(csvFile, {
@@ -216,10 +234,14 @@ export default function TranslatePage() {
       setSessionJobId(job_id);
       setPageState("running");
 
-      const newResults = await pollUntilDone(job_id, async (status) => {
-        if (abortRef.current) return;
-        setJobStatus(status);
-      }, 2000, controller.signal);
+      const newResults = await pollUntilDone(
+        job_id,
+        async (status) => {
+          if (!abortRef.current) setJobStatus(status);
+        },
+        2000,
+        controller.signal,
+      );
 
       // Merge: keep the previous METEOR/BLEU data and layer in BERTScore
       const prev = preRunResultsRef.current;
@@ -230,7 +252,6 @@ export default function TranslatePage() {
           );
           return {
             ...existing,
-            // Prefer existing METEOR/BLEU if available, but accept new if not
             meteor: existing.meteor ?? fresh?.meteor ?? null,
             bertscore_f1: fresh?.bertscore_f1 ?? existing.bertscore_f1 ?? null,
           };
@@ -239,7 +260,6 @@ export default function TranslatePage() {
         const mergedResults: JobResults = {
           ...prev,
           sentence_metrics: mergedSentences,
-          // Use the corpus metrics from whichever run has them
           corpus_metrics: prev.corpus_metrics ?? newResults.corpus_metrics,
           library_versions: newResults.library_versions ?? prev.library_versions,
         };
@@ -247,25 +267,23 @@ export default function TranslatePage() {
         setJobResults(mergedResults);
         await setSessionJobResultsAsync(mergedResults);
 
-        // Update comparison results
         const comp = getSessionComparisonResults() || {};
         comp[model] = mergedResults;
         setSessionComparisonResults(comp);
       } else {
-        // Fallback: just use the new results directly
         setJobResults(newResults);
         await setSessionJobResultsAsync(newResults);
       }
 
       preRunResultsRef.current = null;
       const isStopped = newResults.status === "cancelled" || abortRef.current;
-      setPageState(isStopped ? "complete" : newResults.status === "complete" ? "complete" : "failed");
+      setPageState(
+        isStopped ? "complete" : newResults.status === "complete" ? "complete" : "failed",
+      );
     } catch (err) {
       if (!abortRef.current) {
         // Restore previous results on error so nothing is lost
-        if (preRunResultsRef.current) {
-          setJobResults(preRunResultsRef.current);
-        }
+        if (preRunResultsRef.current) setJobResults(preRunResultsRef.current);
         preRunResultsRef.current = null;
         setError((err as Error).message);
         setPageState("complete"); // stay in complete so existing data is visible
@@ -277,20 +295,12 @@ export default function TranslatePage() {
     abortRef.current = true;
     abortControllerRef.current?.abort();
 
-    // Tell the backend to stop processing
     const jobId = getSessionJobId();
     if (jobId) {
-      try {
-        await cancelJob(jobId);
-      } catch {
-        // Best-effort — backend may already be done
-      }
+      try { await cancelJob(jobId); } catch { /* best-effort */ }
     }
 
-    // Save whatever partial results we have
-    if (jobResults) {
-      await setSessionJobResultsAsync(jobResults);
-    }
+    if (jobResults) await setSessionJobResultsAsync(jobResults);
     setPageState("complete");
   }, [jobResults]);
 
@@ -302,7 +312,7 @@ export default function TranslatePage() {
         return next;
       });
     },
-    []
+    [],
   );
 
   const handleExport = useCallback(() => {
@@ -315,22 +325,13 @@ export default function TranslatePage() {
   const completedCount = sentences.filter((s) => s.llm_english_translation && !s.error).length;
   const errorCount = sentences.filter((s) => s.error).length;
 
-  const progress = jobStatus
-    ? {
-        done: jobStatus.translated + jobStatus.scored,
-        total: jobStatus.total * 2, // translation + scoring phases
-        pct: jobStatus.total > 0
-          ? ((jobStatus.translated / jobStatus.total) * 100)
-          : 0,
-      }
-    : { done: 0, total: 0, pct: 0 };
+  const progressPct = jobStatus && jobStatus.total > 0
+    ? (jobStatus.translated / jobStatus.total) * 100
+    : 0;
 
-  // Determine which metric columns to show based on available data
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
-
-  // Can run BERTScore-only if we have completed translations
-  const canRunBertOnly = pageState !== "running" && pageState !== "submitting"
-    && completedCount > 0;
+  const canRunBertOnly =
+    pageState !== "running" && pageState !== "submitting" && completedCount > 0;
 
   return (
     <div className="page-container">
@@ -453,10 +454,10 @@ export default function TranslatePage() {
         <div className="anim d2" style={{ marginBottom: 24 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
             <span>{jobStatus ? `${jobStatus.translated} of ${jobStatus.total}` : "Submitting job..."}</span>
-            <span>{progress.pct.toFixed(1)}%</span>
+            <span>{progressPct.toFixed(1)}%</span>
           </div>
           <div style={{ height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
-            <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${progress.pct}%` }} />
+            <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${progressPct}%` }} />
           </div>
           {jobStatus && jobStatus.scored > 0 && (
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{jobStatus.scored} metrics computed</div>
