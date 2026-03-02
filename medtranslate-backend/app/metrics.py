@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import Optional
 
 import nltk
@@ -54,8 +58,28 @@ def compute_meteor(candidate: str, reference: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# BERTScore (lazy-loaded to avoid ~400MB torch import at startup)
+# BERTScore (runs in a subprocess to avoid ~400MB torch staying in main process)
 # ---------------------------------------------------------------------------
+
+# Path to the subprocess helper script
+_BERTSCORE_WORKER = str(Path(__file__).resolve().parent.parent / "bertscore_worker.py")
+
+
+def _bertscore_subprocess(candidates: list[str], references: list[str]) -> list[float]:
+    """Run BERTScore in a subprocess so the ~400MB model is freed after completion."""
+    payload = json.dumps({"candidates": candidates, "references": references})
+    result = subprocess.run(
+        [sys.executable, _BERTSCORE_WORKER],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=600,  # 10 minute timeout for large batches
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"BERTScore subprocess failed: {result.stderr}")
+    output = json.loads(result.stdout)
+    return output["f1_scores"]
+
 
 def compute_bertscore_batch(
     candidates: list[str],
@@ -69,26 +93,7 @@ def compute_bertscore_batch(
             f"BERTScore length mismatch: {len(candidates)} candidates vs {len(references)} references"
         )
 
-    try:
-        batch_size = int(os.getenv("BERTSCORE_BATCH_SIZE", "64"))
-    except ValueError:
-        batch_size = 64
-
-    # Lazy import: torch + bert_score are ~400MB in RAM.
-    # Only load when BERTScore is explicitly requested.
-    from bert_score import score as bert_score_fn
-
-    _P, _R, F1 = bert_score_fn(
-        candidates,
-        references,
-        model_type="roberta-base",
-        lang="en",
-        rescale_with_baseline=True,
-        batch_size=batch_size,
-        verbose=False,
-    )
-
-    return F1.tolist()
+    return _bertscore_subprocess(candidates, references)
 
 
 # ---------------------------------------------------------------------------
