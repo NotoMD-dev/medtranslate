@@ -141,12 +141,21 @@ async def _translate_openai(
 
         except openai.RateLimitError as exc:
             last_error = exc
-            wait = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
+            retry_after = None
+            if hasattr(exc, "response") and exc.response is not None:
+                retry_after_str = exc.response.headers.get("retry-after")
+                if retry_after_str:
+                    try:
+                        retry_after = float(retry_after_str)
+                    except (ValueError, TypeError):
+                        pass
+            wait = retry_after if retry_after else TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
             logger.warning(
-                "Rate limited (attempt %d/%d), retrying in %.1fs",
+                "Rate limited (attempt %d/%d), retrying in %.1fs%s",
                 attempt,
                 TRANSLATE_MAX_RETRIES,
                 wait,
+                " (from Retry-After header)" if retry_after else "",
             )
             await asyncio.sleep(wait)
 
@@ -215,12 +224,21 @@ async def _translate_anthropic(
 
         except anthropic.RateLimitError as exc:
             last_error = exc
-            wait = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
+            retry_after = None
+            if hasattr(exc, "response") and exc.response is not None:
+                retry_after_str = exc.response.headers.get("retry-after")
+                if retry_after_str:
+                    try:
+                        retry_after = float(retry_after_str)
+                    except (ValueError, TypeError):
+                        pass
+            wait = retry_after if retry_after else TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
             logger.warning(
-                "Anthropic rate limited (attempt %d/%d), retrying in %.1fs",
+                "Anthropic rate limited (attempt %d/%d), retrying in %.1fs%s",
                 attempt,
                 TRANSLATE_MAX_RETRIES,
                 wait,
+                " (from Retry-After header)" if retry_after else "",
             )
             await asyncio.sleep(wait)
 
