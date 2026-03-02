@@ -416,8 +416,10 @@ async def execute_job(job_id: str) -> None:
                         job.sentence_metrics[index] = _make_sentence_metrics(
                             row, llm_english_translation="", error=error,
                         )
-
+                        
+                await _persist(job)
                 await asyncio.sleep(0)
+                
 
         # If cancelled, finalize status and return early with partial results
         if job.cancelled:
