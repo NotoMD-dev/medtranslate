@@ -24,8 +24,18 @@ const BASE_RETRY_DELAY_MS = 1500;
 // ---------------------------------------------------------------------------
 
 async function safeFetch(input: string, init?: RequestInit): Promise<Response> {
+  const finalInit: RequestInit = {
+    cache: "no-store",
+    ...init,
+    headers: {
+      "cache-control": "no-cache",
+      pragma: "no-cache",
+      ...(init?.headers || {}),
+    },
+  };
+
   try {
-    return await fetch(input, init);
+    return await fetch(input, finalInit);
   } catch (err) {
     if (err instanceof TypeError) {
       throw new Error(
