@@ -38,6 +38,7 @@ export default function TranslatePage() {
   const abortRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const lastPartialFetchRef = useRef(0);
+  const lastOffsetRef = useRef(0);
 
   const sessionModel = getSessionModel() || MODEL_OPTIONS[0].id;
   const modelLabel = MODEL_OPTIONS.find((m) => m.id === sessionModel)?.label || sessionModel;
@@ -90,9 +91,25 @@ export default function TranslatePage() {
         lastPartialFetchRef.current = now;
 
         try {
-          const partial = await fetchJobResults(jobId, 0, 500);
+          const partial = await fetchJobResults(jobId, lastOffsetRef.current, 500);
           if (partial?.sentence_metrics.length > 0) {
-            setJobResults(partial);
+            if (lastOffsetRef.current === 0) {
+              setJobResults(partial);
+            } else {
+              // Merge new results with existing ones
+              setJobResults((prev) => {
+                if (!prev) return partial;
+                return {
+                  ...partial,
+                  sentence_metrics: [
+                    ...prev.sentence_metrics,
+                    ...partial.sentence_metrics,
+                  ],
+                  offset: 0,
+                };
+              });
+            }
+            lastOffsetRef.current += partial.sentence_metrics.length;
           }
         } catch {
           // Partial results not yet available — ignore
@@ -149,6 +166,7 @@ export default function TranslatePage() {
     preRunResultsRef.current = null;
     abortRef.current = false;
     lastPartialFetchRef.current = 0;
+    lastOffsetRef.current = 0;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -214,6 +232,7 @@ export default function TranslatePage() {
     setJobStatus(null);
     abortRef.current = false;
     lastPartialFetchRef.current = 0;
+    lastOffsetRef.current = 0;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 

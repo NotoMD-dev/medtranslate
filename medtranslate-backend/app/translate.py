@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from typing import Optional
 
 import openai
@@ -149,7 +150,7 @@ async def _translate_openai(
                         retry_after = float(retry_after_str)
                     except (ValueError, TypeError):
                         pass
-            wait = retry_after if retry_after else TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
+            wait = retry_after if retry_after else TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1)) * (0.5 + random.random())
             logger.warning(
                 "Rate limited (attempt %d/%d), retrying in %.1fs%s",
                 attempt,
@@ -162,7 +163,7 @@ async def _translate_openai(
         except openai.APIStatusError as exc:
             if exc.status_code >= 500:
                 last_error = exc
-                wait = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
+                wait = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1)) * (0.5 + random.random())
                 logger.warning(
                     "Server error %d (attempt %d/%d), retrying in %.1fs",
                     exc.status_code,
@@ -176,7 +177,7 @@ async def _translate_openai(
 
         except openai.APIConnectionError as exc:
             last_error = exc
-            wait = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
+            wait = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1)) * (0.5 + random.random())
             logger.warning(
                 "Connection error (attempt %d/%d), retrying in %.1fs",
                 attempt,
@@ -232,7 +233,7 @@ async def _translate_anthropic(
                         retry_after = float(retry_after_str)
                     except (ValueError, TypeError):
                         pass
-            wait = retry_after if retry_after else TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
+            wait = retry_after if retry_after else TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1)) * (0.5 + random.random())
             logger.warning(
                 "Anthropic rate limited (attempt %d/%d), retrying in %.1fs%s",
                 attempt,
@@ -245,7 +246,7 @@ async def _translate_anthropic(
         except anthropic.APIStatusError as exc:
             if exc.status_code >= 500:
                 last_error = exc
-                wait = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
+                wait = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1)) * (0.5 + random.random())
                 logger.warning(
                     "Anthropic server error %d (attempt %d/%d), retrying in %.1fs",
                     exc.status_code,
@@ -259,7 +260,7 @@ async def _translate_anthropic(
 
         except anthropic.APIConnectionError as exc:
             last_error = exc
-            wait = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1))
+            wait = TRANSLATE_RETRY_DELAY * (2 ** (attempt - 1)) * (0.5 + random.random())
             logger.warning(
                 "Anthropic connection error (attempt %d/%d), retrying in %.1fs",
                 attempt,

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
 import threading
+import time
 import asyncio
 import logging
 import uuid
@@ -53,6 +55,9 @@ class InputRow:
 # Per-job state
 # ---------------------------------------------------------------------------
 
+IDLE_TIMEOUT_SECONDS = int(os.getenv("JOB_IDLE_TIMEOUT", "300"))
+
+
 @dataclass
 class Job:
     job_id: str
@@ -69,6 +74,7 @@ class Job:
     library_versions: Optional[LibraryVersions] = None
     error: Optional[str] = None
     cancelled: bool = False
+    last_poll_at: float = field(default_factory=time.time)
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +82,7 @@ class Job:
 # ---------------------------------------------------------------------------
 
 _jobs: dict[str, Job] = {}
+_MAX_CACHED_JOBS = int(os.getenv("MAX_CACHED_JOBS", "50"))
 
 # Tracks which job IDs this instance is actively executing, so we know
 # to trust the in-memory state rather than reading back from SQLite.
@@ -86,6 +93,24 @@ _write_lock = threading.Lock()
 
 # Set to True once the schema has been created
 _db_ready = False
+
+
+def _evict_oldest_terminal_jobs() -> None:
+    """Evict the oldest terminal-state jobs from the in-memory cache when
+    it exceeds _MAX_CACHED_JOBS entries. Skips jobs that are actively executing."""
+    if len(_jobs) <= _MAX_CACHED_JOBS:
+        return
+    terminal = {JobStatus.complete, JobStatus.failed, JobStatus.cancelled}
+    to_evict = [
+        jid for jid, j in _jobs.items()
+        if j.status in terminal and jid not in _executing
+    ]
+    # Evict until we're under the limit
+    for jid in to_evict:
+        if len(_jobs) <= _MAX_CACHED_JOBS:
+            break
+        del _jobs[jid]
+        logger.debug("Evicted job %s from in-memory cache", jid)
 
 
 def _ensure_db() -> bool:
@@ -102,7 +127,25 @@ def _ensure_db() -> bool:
         with sqlite3.connect(DATABASE_PATH) as conn:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS jobs "
-                "(job_id TEXT PRIMARY KEY, data TEXT NOT NULL)"
+                "(job_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'queued', "
+                "cancelled INTEGER DEFAULT 0, created_at REAL, data TEXT NOT NULL)"
+            )
+            # Migration: add columns if upgrading from older schema
+            for col, definition in [
+                ("cancelled", "INTEGER DEFAULT 0"),
+                ("created_at", "REAL"),
+                ("status", "TEXT NOT NULL DEFAULT 'queued'"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {definition}")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+
+            # Translation cache table: avoids redundant LLM calls for
+            # identical inputs across jobs and re-runs.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS translation_cache "
+                "(cache_key TEXT PRIMARY KEY, translation TEXT NOT NULL, created_at REAL)"
             )
         _db_ready = True
         logger.info("SQLite job store ready at %s", DATABASE_PATH)
@@ -120,22 +163,10 @@ def _ensure_db() -> bool:
 # Serialisation helpers
 # ---------------------------------------------------------------------------
 
-def _job_to_dict(job: Job) -> dict:
-    return {
+def _job_to_dict(job: Job, *, include_rows: bool = True) -> dict:
+    d: dict = {
         "job_id": job.job_id,
         "status": job.status.value,
-        "rows": [
-            {
-                "pair_id": r.pair_id,
-                "source": r.source,
-                "content_type": r.content_type,
-                "source_text": r.source_text,
-                "english_reference": r.english_reference,
-                "spanish_source": r.spanish_source,
-                "llm_english_translation": r.llm_english_translation,
-            }
-            for r in job.rows
-        ],
         "model_config": job.model_config.model_dump(),
         "translated": job.translated,
         "scored": job.scored,
@@ -146,13 +177,29 @@ def _job_to_dict(job: Job) -> dict:
         "error": job.error,
         "cancelled": job.cancelled,
     }
+    if include_rows:
+        d["rows"] = [
+            {
+                "pair_id": r.pair_id,
+                "source": r.source,
+                "content_type": r.content_type,
+                "source_text": r.source_text,
+                "english_reference": r.english_reference,
+                "spanish_source": r.spanish_source,
+                "llm_english_translation": r.llm_english_translation,
+            }
+            for r in job.rows
+        ]
+    else:
+        d["rows"] = []
+    return d
 
 
 def _job_from_dict(data: dict) -> Job:
     return Job(
         job_id=data["job_id"],
         status=JobStatus(data["status"]),
-        rows=[InputRow(**r) for r in data["rows"]],
+        rows=[InputRow(**r) for r in data.get("rows", [])],
         model_config=ModelConfig.model_validate(data["model_config"]),
         translated=data.get("translated", 0),
         scored=data.get("scored", 0),
@@ -183,16 +230,41 @@ def _db_save(job: Job) -> None:
     """Upsert a job into SQLite. No-op when the DB is unavailable."""
     if not _ensure_db():
         return
-    payload = json.dumps(_job_to_dict(job))
+    # At terminal states, omit rows[] to halve the blob size —
+    # sentence_metrics already contains everything the frontend needs.
+    is_terminal = job.status in (JobStatus.complete, JobStatus.failed, JobStatus.cancelled)
+    payload = json.dumps(_job_to_dict(job, include_rows=not is_terminal))
     with _write_lock:
         try:
             with sqlite3.connect(DATABASE_PATH) as conn:
                 conn.execute(
-                    "INSERT OR REPLACE INTO jobs (job_id, data) VALUES (?, ?)",
-                    (job.job_id, payload),
+                    "INSERT OR REPLACE INTO jobs (job_id, status, cancelled, created_at, data) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (job.job_id, job.status.value, int(job.cancelled), time.time(), payload),
                 )
         except Exception as exc:
             logger.warning("SQLite write failed for job %s: %s", job.job_id, exc)
+
+
+def _db_save_status(job: Job) -> None:
+    """Lightweight persist: update only status and progress counters.
+    Avoids serializing the entire rows/metrics JSON blob at chunk boundaries."""
+    if not _ensure_db():
+        return
+    progress = json.dumps({
+        "translated": job.translated,
+        "scored": job.scored,
+        "failed_rows": job.failed_rows,
+    })
+    with _write_lock:
+        try:
+            with sqlite3.connect(DATABASE_PATH) as conn:
+                conn.execute(
+                    "UPDATE jobs SET status = ?, cancelled = ? WHERE job_id = ?",
+                    (job.status.value, int(job.cancelled), job.job_id),
+                )
+        except Exception as exc:
+            logger.warning("SQLite status write failed for job %s: %s", job.job_id, exc)
 
 
 def _db_load(job_id: str) -> Optional[dict]:
@@ -211,22 +283,99 @@ def _db_load(job_id: str) -> Optional[dict]:
 
 
 def _db_load_cancelled(job_id: str) -> Optional[bool]:
-    """Read only the cancelled flag from SQLite. Lightweight check used by
-    the executing instance to detect cross-instance cancellation without
-    deserializing the entire job payload."""
+    """Read only the cancelled flag from the dedicated SQLite column.
+    Avoids deserializing the entire multi-MB JSON blob for a boolean check."""
     if not _ensure_db():
         return None
     try:
         with sqlite3.connect(DATABASE_PATH) as conn:
             row = conn.execute(
-                "SELECT data FROM jobs WHERE job_id = ?", (job_id,)
+                "SELECT cancelled FROM jobs WHERE job_id = ?", (job_id,)
             ).fetchone()
         if row is None:
             return None
-        data = json.loads(row[0])
-        return data.get("cancelled", False)
+        return bool(row[0])
     except Exception:
         return None
+
+
+def _db_set_cancelled(job_id: str) -> None:
+    """Set the cancelled flag directly in the dedicated column."""
+    if not _ensure_db():
+        return
+    try:
+        with _write_lock:
+            with sqlite3.connect(DATABASE_PATH) as conn:
+                conn.execute(
+                    "UPDATE jobs SET cancelled = 1 WHERE job_id = ?", (job_id,)
+                )
+    except Exception as exc:
+        logger.warning("SQLite cancel flag write failed for job %s: %s", job_id, exc)
+
+
+def _db_cleanup_old_jobs(days: int = 7) -> int:
+    """Delete terminal-state jobs older than `days` days. Returns count deleted."""
+    if not _ensure_db():
+        return 0
+    cutoff = time.time() - (days * 86400)
+    try:
+        with _write_lock:
+            with sqlite3.connect(DATABASE_PATH) as conn:
+                cursor = conn.execute(
+                    "DELETE FROM jobs WHERE created_at IS NOT NULL AND created_at < ? "
+                    "AND status IN ('complete', 'failed', 'cancelled')",
+                    (cutoff,),
+                )
+                deleted = cursor.rowcount
+        if deleted:
+            logger.info("TTL cleanup: deleted %d jobs older than %d days", deleted, days)
+        return deleted
+    except Exception as exc:
+        logger.warning("TTL cleanup failed: %s", exc)
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# Translation cache helpers
+# ---------------------------------------------------------------------------
+
+def _cache_key(model: str, system_prompt: str, temperature: float, source_text: str) -> str:
+    """Build a deterministic cache key from the translation parameters."""
+    raw = f"{model}|{system_prompt}|{temperature}|{source_text}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:64]
+
+
+def _cache_get(key: str) -> Optional[str]:
+    """Look up a cached translation. Returns None on miss or error."""
+    if not _ensure_db():
+        return None
+    try:
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            row = conn.execute(
+                "SELECT translation FROM translation_cache WHERE cache_key = ?",
+                (key,),
+            ).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _cache_set(key: str, translation: str, temperature: float) -> None:
+    """Store a translation in the cache. Only caches deterministic (temperature=0) outputs."""
+    if temperature != 0.0:
+        return
+    if not _ensure_db():
+        return
+    try:
+        with _write_lock:
+            with sqlite3.connect(DATABASE_PATH) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO translation_cache (cache_key, translation, created_at) "
+                    "VALUES (?, ?, ?)",
+                    (key, translation, time.time()),
+                )
+    except Exception:
+        pass  # cache write failure is non-critical
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +469,8 @@ async def cancel_job(job_id: str) -> bool:
         job.status = JobStatus.cancelled
         logger.info("Job %s: cancelled by user", job_id)
     _jobs[job_id] = job
+    # Fast-path: update the dedicated cancelled column directly
+    await asyncio.to_thread(_db_set_cancelled, job_id)
     await _persist(job)
     return True
 
@@ -332,6 +483,8 @@ async def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
     job = await _get_job(job_id)
     if job is None:
         return None
+    # Update last_poll_at so the idle timeout knows the client is still connected
+    job.last_poll_at = time.time()
     return JobStatusResponse(
         job_id=job.job_id,
         status=job.status,
@@ -445,48 +598,138 @@ async def execute_job(job_id: str) -> None:
             logger.info("Job %s: metrics-only mode, skipping translation", job_id)
             job.translated = sum(1 for r in job.rows if r.llm_english_translation)
         else:
-            for start in range(0, total, CHUNK_SIZE):
-                # Check for cancellation from both local state and SQLite
-                # (another instance may have received the cancel request)
+            # --- Deduplication pre-pass: translate each unique source text once ---
+            unique_texts: dict[str, str | None] = {}  # source_text -> translation (None = not yet translated)
+            for row in job.rows:
+                text_key = row.source_text or row.spanish_source
+                if text_key and text_key not in unique_texts:
+                    unique_texts[text_key] = None
+
+            # Check translation cache for unique texts (warm up from previous runs)
+            cache_hits = 0
+            for text_key in list(unique_texts.keys()):
+                try:
+                    ck = _cache_key(model, system_prompt, temperature, text_key)
+                    cached = await asyncio.to_thread(_cache_get, ck)
+                    if cached is not None:
+                        unique_texts[text_key] = cached
+                        cache_hits += 1
+                except Exception:
+                    pass  # cache miss is fine
+            if cache_hits:
+                logger.info("Job %s: translation cache hit for %d unique texts", job_id, cache_hits)
+
+            # Build list of unique texts that still need translation
+            texts_to_translate = [t for t, v in unique_texts.items() if v is None]
+            dedup_savings = total - len(texts_to_translate) - cache_hits
+            if dedup_savings > 0 or cache_hits > 0:
+                logger.info(
+                    "Job %s: %d cache hits, %d dedup savings (%d texts need API calls of %d total)",
+                    job_id, cache_hits, max(0, dedup_savings), len(texts_to_translate), total,
+                )
+
+            # Translate unique texts in chunks
+            async def _translate_unique(idx: int, text: str):
+                async with semaphore:
+                    try:
+                        translation = await translate_text(
+                            text,
+                            model=model,
+                            system_prompt=system_prompt,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                        )
+                        # Write to cache (only for deterministic temperature=0)
+                        try:
+                            ck = _cache_key(model, system_prompt, temperature, text)
+                            await asyncio.to_thread(_cache_set, ck, translation, temperature)
+                        except Exception:
+                            pass  # cache write failure is non-critical
+                        return idx, text, translation, None
+                    except Exception as exc:
+                        return idx, text, "", str(exc)
+
+            unique_total = len(texts_to_translate)
+            for start in range(0, unique_total, CHUNK_SIZE):
+                # Check for cancellation (local + cross-instance)
                 if job.cancelled or await _check_cancelled_from_db(job_id):
                     job.cancelled = True
                     logger.info("Job %s: cancelled during translation phase", job_id)
                     break
 
-                end = min(start + CHUNK_SIZE, total)
+                # Server-side idle timeout: cancel if no client poll for too long
+                if time.time() - job.last_poll_at > IDLE_TIMEOUT_SECONDS:
+                    job.cancelled = True
+                    logger.info("Job %s: auto-cancelled due to idle timeout (%ds)", job_id, IDLE_TIMEOUT_SECONDS)
+                    break
+
+                end = min(start + CHUNK_SIZE, unique_total)
                 tasks = [
-                    asyncio.create_task(_translate_one(i, job.rows[i]))
+                    asyncio.create_task(_translate_unique(i, texts_to_translate[i]))
                     for i in range(start, end)
                 ]
 
                 results = await asyncio.gather(*tasks)
 
-                # Apply results deterministically
-                for index, translation, error in sorted(results, key=lambda x: x[0]):
-                    row = job.rows[index]
-
+                for _idx, src_text, translation, error in sorted(results, key=lambda x: x[0]):
                     if error is None:
-                        row.llm_english_translation = translation
-                        job.translated += 1
-                        job.sentence_metrics[index] = _make_sentence_metrics(
-                            row, llm_english_translation=translation,
-                        )
+                        unique_texts[src_text] = translation
                     else:
-                        logger.error("Job %s row %d translation failed: %s", job_id, index, error)
-                        row.llm_english_translation = ""
-                        job.failed_rows += 1
-                        job.sentence_metrics[index] = _make_sentence_metrics(
-                            row, llm_english_translation="", error=error,
-                        )
+                        unique_texts[src_text] = None
+                        logger.error("Job %s unique text translation failed: %s", job_id, error)
 
-                await _persist(job)
+                # Fan results back to all rows sharing each translated text
+                for i, row in enumerate(job.rows):
+                    text_key = row.source_text or row.spanish_source
+                    cached = unique_texts.get(text_key)
+                    if cached is not None and not row.llm_english_translation:
+                        row.llm_english_translation = cached
+                        job.translated = sum(1 for r in job.rows if r.llm_english_translation)
+                        job.sentence_metrics[i] = _make_sentence_metrics(
+                            row, llm_english_translation=cached,
+                        )
+                    elif cached is None and text_key and unique_texts.get(text_key) is None:
+                        # Check if this text was attempted but failed
+                        pass
+
+                # Count failures: rows whose unique text was attempted but got None
+                job.failed_rows = sum(
+                    1 for row in job.rows
+                    if not row.llm_english_translation and unique_texts.get(row.source_text or row.spanish_source) is None
+                    and (row.source_text or row.spanish_source) in unique_texts
+                )
+
+                # Lightweight persist: only status/progress, not the full blob
+                await asyncio.to_thread(_db_save_status, job)
                 await asyncio.sleep(0)
+
+            # Final fan-out: ensure all rows with successful translations are populated
+            for i, row in enumerate(job.rows):
+                text_key = row.source_text or row.spanish_source
+                cached = unique_texts.get(text_key)
+                if cached is not None:
+                    row.llm_english_translation = cached
+                    job.sentence_metrics[i] = _make_sentence_metrics(
+                        row, llm_english_translation=cached,
+                    )
+                elif text_key:
+                    # Translation failed for this unique text
+                    job.sentence_metrics[i] = _make_sentence_metrics(
+                        row, llm_english_translation="", error="Translation failed",
+                    )
+
+            job.translated = sum(1 for r in job.rows if r.llm_english_translation)
+            job.failed_rows = sum(
+                1 for r in job.rows
+                if not r.llm_english_translation and (r.source_text or r.spanish_source)
+            )
 
         # If cancelled, finalize status and return early with partial results
         if job.cancelled:
             job.status = JobStatus.cancelled
             logger.info("Job %s: stopped after %d translations", job_id, job.translated)
             await _persist(job)
+            _evict_oldest_terminal_jobs()
             return
 
         # ------------------------------------------------------------------
@@ -633,6 +876,7 @@ async def execute_job(job_id: str) -> None:
 
         job.status = JobStatus.complete
         await _persist(job)  # persist final results to survive future restarts
+        _evict_oldest_terminal_jobs()
         logger.info("Job %s: complete", job_id)
 
     except Exception as exc:
@@ -640,6 +884,7 @@ async def execute_job(job_id: str) -> None:
         job.status = JobStatus.failed
         job.error = f"Job execution failed: {exc}"
         await _persist(job)
+        _evict_oldest_terminal_jobs()
 
     finally:
         _executing.discard(job_id)

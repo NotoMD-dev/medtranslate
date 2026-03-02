@@ -6,13 +6,15 @@ import asyncio
 import csv
 import io
 import logging
+import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from app.config import CORS_ORIGINS, DEFAULT_SYSTEM_PROMPT, SOURCE_LANGUAGE_COLUMNS
-from app.jobs import InputRow, cancel_job, create_job, execute_job, get_job_results, get_job_status
+from app.jobs import InputRow, cancel_job, create_job, execute_job, get_job_results, get_job_status, _db_cleanup_old_jobs
 from app.schemas import JobCreated, JobResults, JobStatusResponse, ModelConfig
 
 logging.basicConfig(
@@ -20,9 +22,53 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
+
+logger = logging.getLogger(__name__)
+
+# Global concurrency limit on simultaneously executing jobs to prevent
+# unbounded API spend from concurrent submissions.
+MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "2"))
+_job_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=20)
+_worker_tasks: list[asyncio.Task] = []
+
+
+async def _job_worker(worker_id: int) -> None:
+    """Worker coroutine that pulls job IDs from the bounded queue and executes them."""
+    while True:
+        try:
+            job_id = await _job_queue.get()
+            logger.info("Worker %d: starting job %s", worker_id, job_id)
+            try:
+                await execute_job(job_id)
+            except Exception as exc:
+                logger.error("Worker %d: job %s failed: %s", worker_id, job_id, exc)
+            finally:
+                _job_queue.task_done()
+        except asyncio.CancelledError:
+            break
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: run TTL cleanup of old jobs
+    await asyncio.to_thread(_db_cleanup_old_jobs, 7)
+    # Start job worker pool
+    for i in range(MAX_CONCURRENT_JOBS):
+        task = asyncio.create_task(_job_worker(i))
+        _worker_tasks.append(task)
+    logger.info("Started %d job worker(s)", MAX_CONCURRENT_JOBS)
+    yield
+    # Shutdown: cancel worker tasks
+    for task in _worker_tasks:
+        task.cancel()
+    await asyncio.gather(*_worker_tasks, return_exceptions=True)
+    _worker_tasks.clear()
+
+
 app = FastAPI(
     title="MedTranslate Backend",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -243,7 +289,13 @@ async def submit_job(
 
     job_id = await create_job(rows, config)
 
-    asyncio.create_task(execute_job(job_id))
+    try:
+        _job_queue.put_nowait(job_id)
+    except asyncio.QueueFull:
+        raise HTTPException(
+            status_code=503,
+            detail="Server busy, try again shortly",
+        )
 
     return JobCreated(job_id=job_id)
 
