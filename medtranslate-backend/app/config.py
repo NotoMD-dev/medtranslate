@@ -26,8 +26,8 @@ DEFAULT_TEMPERATURE: float = 0.0
 DEFAULT_MAX_TOKENS: int = 1024
 
 # Translation retry settings
-TRANSLATE_MAX_RETRIES: int = 3
-TRANSLATE_RETRY_DELAY: float = 2.0
+TRANSLATE_MAX_RETRIES: int = 6
+TRANSLATE_RETRY_DELAY: float = 4.0
 
 # SQLite persistence — path to the database file.
 # On Render, mount a Disk at /data and set DATABASE_PATH=/data/medtranslate.db.
