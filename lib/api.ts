@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+  process.env.NEXT_PUBLIC_BACKEND_URL || "/api";
 
 const RESULTS_PAGE_SIZE = 500;
 const MAX_RETRIES = 3;
@@ -29,8 +29,9 @@ async function safeFetch(input: string, init?: RequestInit): Promise<Response> {
   } catch (err) {
     if (err instanceof TypeError) {
       throw new Error(
-        `Cannot reach the backend at ${BACKEND_URL}. ` +
-        "Ensure the backend is running and CORS_ORIGINS is configured to allow your frontend URL."
+        `Cannot reach the backend. ` +
+        "Ensure the FastAPI backend is running (e.g. uvicorn app.main:app --port 8000) " +
+        "and the BACKEND_URL environment variable is set correctly."
       );
     }
     throw err;
