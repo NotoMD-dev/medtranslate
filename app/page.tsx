@@ -120,7 +120,7 @@ export default function UploadPage() {
     }
   }, []);
 
-  const handleContinue = useCallback(() => {
+  const handleContinue = useCallback(async () => {
     let dataToUse: TranslationPair[];
 
     if (rowMode === "custom") {
@@ -147,7 +147,8 @@ export default function UploadPage() {
     setSessionRowLimit(dataToUse.length !== rows.length ? dataToUse.length : undefined);
     setSessionModel(selectedModel);
     setSessionSourceLanguage(sourceLanguage);
-    setSessionJobResultsAsync(undefined);
+    // Await IDB clear so the translate page doesn't read stale results
+    await setSessionJobResultsAsync(undefined);
     setSessionJobId(undefined);
     router.push("/translate");
   }, [rowMode, customRowCount, rangeStart, rangeEnd, rows, systemPrompt, selectedModel, sourceLanguage, router]);
