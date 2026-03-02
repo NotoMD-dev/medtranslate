@@ -218,18 +218,17 @@ async def _persist(job: Job) -> None:
 async def _fetch_from_db(job_id: str) -> Optional[Job]:
     """Load a job from SQLite. Returns None on miss.
 
-    Jobs that were queued or running when the server last shut down can never
-    complete — they are immediately flipped to 'failed' so clients receive a
-    useful status instead of polling forever.
+    Returns the job in whatever state it was last persisted. This allows
+    multi-instance deployments (e.g. Render with 2+ instances) to read
+    job status written by a different instance without incorrectly marking
+    in-progress jobs as failed. The execute_job try/except handles real
+    failures by explicitly setting status to 'failed' with a meaningful
+    error message.
     """
     data = await asyncio.to_thread(_db_load, job_id)
     if data is None:
         return None
     job = _job_from_dict(data)
-    if job.status in (JobStatus.queued, JobStatus.running):
-        job.status = JobStatus.failed
-        job.error = job.error or "Job was interrupted by a server restart."
-        await _persist(job)
     _jobs[job_id] = job  # warm the in-memory cache
     return job
 
@@ -335,7 +334,7 @@ async def execute_job(job_id: str) -> None:
 
     try:
         job.status = JobStatus.running
-        await _persist(job)  # record running state so restart detection works
+        await _persist(job)  # record running state
         total = len(job.rows)
         logger.info("Job %s: starting (%d rows)", job_id, total)
 
