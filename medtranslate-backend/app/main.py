@@ -8,7 +8,9 @@ import io
 import logging
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response as StarletteResponse
 from pydantic import BaseModel
 
 from app.config import CORS_ORIGINS, DEFAULT_SYSTEM_PROMPT, SOURCE_LANGUAGE_COLUMNS
@@ -33,7 +35,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    """Prevent CDN/proxy caching of API responses so polling always hits the origin."""
+
+    async def dispatch(self, request: StarletteRequest, call_next) -> StarletteResponse:
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+
+app.add_middleware(NoCacheMiddleware)
 
 
 @app.get("/")
