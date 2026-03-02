@@ -485,10 +485,13 @@ async def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
         return None
     # Update last_poll_at so the idle timeout knows the client is still connected
     job.last_poll_at = time.time()
+    # Use rows length if available; fall back to sentence_metrics length for
+    # terminal jobs loaded from SQLite where rows were omitted to save space.
+    total = len(job.rows) if job.rows else len(job.sentence_metrics)
     return JobStatusResponse(
         job_id=job.job_id,
         status=job.status,
-        total=len(job.rows),
+        total=total,
         translated=job.translated,
         scored=job.scored,
         failed_rows=job.failed_rows,

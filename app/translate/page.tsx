@@ -57,6 +57,11 @@ export default function TranslatePage() {
       } else if (persisted && persisted.status === "failed") {
         setJobResults(persisted);
         setPageState("failed");
+        // Ensure rowCount is set even for failed results
+        const data = getSessionData();
+        setRowCount(
+          persisted.sentence_metrics.length || (data ? data.length : 0),
+        );
       } else {
         const data = getSessionData();
         if (data) setRowCount(data.length);
