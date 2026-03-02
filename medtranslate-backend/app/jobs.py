@@ -77,6 +77,10 @@ class Job:
 
 _jobs: dict[str, Job] = {}
 
+# Tracks which job IDs this instance is actively executing, so we know
+# to trust the in-memory state rather than reading back from SQLite.
+_executing: set[str] = set()
+
 # Guards concurrent writes from the asyncio thread pool
 _write_lock = threading.Lock()
 
@@ -206,6 +210,25 @@ def _db_load(job_id: str) -> Optional[dict]:
         return None
 
 
+def _db_load_cancelled(job_id: str) -> Optional[bool]:
+    """Read only the cancelled flag from SQLite. Lightweight check used by
+    the executing instance to detect cross-instance cancellation without
+    deserializing the entire job payload."""
+    if not _ensure_db():
+        return None
+    try:
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            row = conn.execute(
+                "SELECT data FROM jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        data = json.loads(row[0])
+        return data.get("cancelled", False)
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Async persistence helpers
 # ---------------------------------------------------------------------------
@@ -228,17 +251,46 @@ async def _fetch_from_db(job_id: str) -> Optional[Job]:
     data = await asyncio.to_thread(_db_load, job_id)
     if data is None:
         return None
-    job = _job_from_dict(data)
-    _jobs[job_id] = job  # warm the in-memory cache
-    return job
+    return _job_from_dict(data)
+
+
+async def _check_cancelled_from_db(job_id: str) -> bool:
+    """Check whether a job has been cancelled in SQLite. Used by the
+    executing instance to pick up cancellation requests made by a
+    different instance."""
+    result = await asyncio.to_thread(_db_load_cancelled, job_id)
+    return result is True
 
 
 async def _get_job(job_id: str) -> Optional[Job]:
-    """Return a job from the in-memory cache, falling back to SQLite."""
+    """Return the most up-to-date job state.
+
+    If this instance is actively executing the job, the in-memory state
+    is authoritative (it has live progress counts, partial results, etc.).
+
+    If this instance is NOT executing the job (i.e. it is a second Render
+    instance handling a poll request), always read from SQLite to get the
+    latest progress written by the executing instance.
+
+    For jobs in a terminal state (complete, failed, cancelled), serve from
+    the in-memory cache if available to avoid unnecessary SQLite reads.
+    """
+    # This instance is running the job: in-memory state is authoritative
+    if job_id in _executing:
+        return _jobs.get(job_id)
+
+    # Check in-memory cache for terminal states (fast path)
     job = _jobs.get(job_id)
-    if job is not None:
+    if job is not None and job.status not in (JobStatus.queued, JobStatus.running):
         return job
-    return await _fetch_from_db(job_id)
+
+    # For in-progress or unknown jobs, always read latest from SQLite
+    refreshed = await _fetch_from_db(job_id)
+    if refreshed is not None:
+        _jobs[job_id] = refreshed  # update cache
+        return refreshed
+
+    return job
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +306,12 @@ async def create_job(rows: list[InputRow], config: ModelConfig) -> str:
 
 
 async def cancel_job(job_id: str) -> bool:
-    """Cancel a running job. Returns True if the job was found and cancelled."""
+    """Cancel a running job. Returns True if the job was found and cancelled.
+
+    Persists the cancelled flag to SQLite so that the executing instance
+    (which may be a different Render instance) picks it up on its next
+    chunk boundary check.
+    """
     job = await _get_job(job_id)
     if job is None:
         return False
@@ -262,6 +319,7 @@ async def cancel_job(job_id: str) -> bool:
     if job.status in (JobStatus.queued, JobStatus.running):
         job.status = JobStatus.cancelled
         logger.info("Job %s: cancelled by user", job_id)
+    _jobs[job_id] = job
     await _persist(job)
     return True
 
@@ -332,6 +390,8 @@ async def execute_job(job_id: str) -> None:
     if job is None:
         return
 
+    _executing.add(job_id)
+
     try:
         job.status = JobStatus.running
         await _persist(job)  # record running state
@@ -386,8 +446,10 @@ async def execute_job(job_id: str) -> None:
             job.translated = sum(1 for r in job.rows if r.llm_english_translation)
         else:
             for start in range(0, total, CHUNK_SIZE):
-                # Check for cancellation before starting each chunk
-                if job.cancelled:
+                # Check for cancellation from both local state and SQLite
+                # (another instance may have received the cancel request)
+                if job.cancelled or await _check_cancelled_from_db(job_id):
+                    job.cancelled = True
                     logger.info("Job %s: cancelled during translation phase", job_id)
                     break
 
@@ -416,10 +478,9 @@ async def execute_job(job_id: str) -> None:
                         job.sentence_metrics[index] = _make_sentence_metrics(
                             row, llm_english_translation="", error=error,
                         )
-                        
+
                 await _persist(job)
                 await asyncio.sleep(0)
-                
 
         # If cancelled, finalize status and return early with partial results
         if job.cancelled:
@@ -579,3 +640,6 @@ async def execute_job(job_id: str) -> None:
         job.status = JobStatus.failed
         job.error = f"Job execution failed: {exc}"
         await _persist(job)
+
+    finally:
+        _executing.discard(job_id)
