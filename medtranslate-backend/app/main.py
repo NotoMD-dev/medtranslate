@@ -36,6 +36,11 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
+@app.get("/")
+async def health_check():
+    return {"status": "ok"}
+
+
 # ---------------------------------------------------------------------------
 # File parsing helpers
 # ---------------------------------------------------------------------------
