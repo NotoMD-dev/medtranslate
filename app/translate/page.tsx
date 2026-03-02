@@ -9,6 +9,7 @@ import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS } from "@/lib/types";
 import type { JobStatusResponse, JobResults, ClinicalGrade } from "@/lib/types";
 import {
   getSessionData,
+  getSessionDataAsync,
   getSessionPrompt,
   getSessionJobId,
   getSessionJobResultsAsync,
@@ -49,7 +50,7 @@ export default function TranslatePage() {
       if (persisted) setGrades(persisted);
     });
 
-    getSessionJobResultsAsync().then((persisted) => {
+    getSessionJobResultsAsync().then(async (persisted) => {
       if (persisted && persisted.status === "complete") {
         setJobResults(persisted);
         setPageState("complete");
@@ -58,12 +59,13 @@ export default function TranslatePage() {
         setJobResults(persisted);
         setPageState("failed");
         // Ensure rowCount is set even for failed results
-        const data = getSessionData();
+        const data = await getSessionDataAsync();
         setRowCount(
           persisted.sentence_metrics.length || (data ? data.length : 0),
         );
       } else {
-        const data = getSessionData();
+        // Read from IDB first (handles large datasets that exceed localStorage)
+        const data = await getSessionDataAsync();
         if (data) setRowCount(data.length);
       }
 
@@ -158,7 +160,7 @@ export default function TranslatePage() {
   const preRunResultsRef = useRef<JobResults | null>(null);
 
   const handleRun = useCallback(async () => {
-    const data = getSessionData();
+    const data = await getSessionDataAsync();
     if (!data || data.length === 0) {
       setError("No dataset loaded. Go to Upload to load your CSV first.");
       return;

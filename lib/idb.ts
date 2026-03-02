@@ -5,7 +5,7 @@
  * sentence-level metrics (clinical text pairs).
  */
 
-import type { JobResults, ClinicalGrade, ReferenceFlag } from "@/lib/types";
+import type { JobResults, ClinicalGrade, ReferenceFlag, TranslationPair } from "@/lib/types";
 
 const DB_NAME = "medtranslate";
 const DB_VERSION = 1;
@@ -13,6 +13,7 @@ const STORE_NAME = "session";
 const JOB_RESULTS_KEY = "jobResults";
 const GRADES_KEY = "grades";
 const REF_FLAGS_KEY = "referenceFlags";
+const SESSION_DATA_KEY = "sessionData";
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -142,6 +143,49 @@ export async function setRefFlagsIDB(
         store.delete(REF_FLAGS_KEY);
       } else {
         store.put(flags, REF_FLAGS_KEY);
+      }
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+    });
+  } catch {
+    // IndexedDB unavailable — silent fallback
+  }
+}
+
+export async function getSessionDataIDB(): Promise<TranslationPair[] | undefined> {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.get(SESSION_DATA_KEY);
+      req.onsuccess = () => resolve(req.result ?? undefined);
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => db.close();
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+export async function setSessionDataIDB(
+  data: TranslationPair[] | undefined,
+): Promise<void> {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      if (data == null) {
+        store.delete(SESSION_DATA_KEY);
+      } else {
+        store.put(data, SESSION_DATA_KEY);
       }
       tx.oncomplete = () => {
         db.close();

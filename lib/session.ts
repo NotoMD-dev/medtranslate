@@ -1,5 +1,5 @@
 import type { TranslationPair, JobResults, ClinicalGrade, ReferenceFlag } from "@/lib/types";
-import { getJobResultsIDB, setJobResultsIDB, getGradesIDB, setGradesIDB, getRefFlagsIDB, setRefFlagsIDB } from "@/lib/idb";
+import { getJobResultsIDB, setJobResultsIDB, getGradesIDB, setGradesIDB, getRefFlagsIDB, setRefFlagsIDB, getSessionDataIDB, setSessionDataIDB } from "@/lib/idb";
 
 const STORAGE_KEYS = {
   data: "medtranslate:data",
@@ -52,6 +52,19 @@ export function getSessionData() {
 
 export function setSessionData(data: TranslationPair[] | undefined) {
   writeJSON(STORAGE_KEYS.data, data);
+}
+
+// Async getter — tries IndexedDB first, falls back to localStorage.
+export async function getSessionDataAsync(): Promise<TranslationPair[] | undefined> {
+  const fromIDB = await getSessionDataIDB();
+  if (fromIDB) return fromIDB;
+  return getSessionData();
+}
+
+// Async setter — writes to IndexedDB (large-data safe) and attempts localStorage.
+export async function setSessionDataAsync(data: TranslationPair[] | undefined): Promise<void> {
+  await setSessionDataIDB(data);
+  setSessionData(data);
 }
 
 // Prompt
@@ -235,4 +248,5 @@ export function clearSessionState() {
   setJobResultsIDB(undefined).catch(() => {});
   setGradesIDB(undefined).catch(() => {});
   setRefFlagsIDB(undefined).catch(() => {});
+  setSessionDataIDB(undefined).catch(() => {});
 }
