@@ -65,25 +65,61 @@ def compute_meteor(candidate: str, reference: str) -> float:
 _BERTSCORE_WORKER = str(Path(__file__).resolve().parent.parent / "bertscore_worker.py")
 
 
-def _bertscore_subprocess(candidates: list[str], references: list[str]) -> list[float]:
-    """Run BERTScore in a subprocess so the ~400MB model is freed after completion."""
-    payload = json.dumps({"candidates": candidates, "references": references})
-    result = subprocess.run(
+def _bertscore_subprocess(
+    candidates: list[str],
+    references: list[str],
+    on_progress: "Optional[callable]" = None,
+) -> list[float]:
+    """Run BERTScore in a subprocess so the ~400MB model is freed after completion.
+
+    The worker processes inputs in chunks and writes JSON-line progress
+    messages to stdout, allowing the caller to track completion via the
+    optional *on_progress(completed, total)* callback.
+    """
+    chunk_size = int(os.getenv("BERTSCORE_CHUNK_SIZE", "500"))
+    payload = json.dumps({
+        "candidates": candidates,
+        "references": references,
+        "chunk_size": chunk_size,
+    })
+    proc = subprocess.Popen(
         [sys.executable, _BERTSCORE_WORKER],
-        input=payload,
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=600,  # 10 minute timeout for large batches
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"BERTScore subprocess failed: {result.stderr}")
-    output = json.loads(result.stdout)
-    return output["f1_scores"]
+    assert proc.stdin is not None
+    proc.stdin.write(payload)
+    proc.stdin.close()
+
+    f1_scores: list[float] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if msg.get("type") == "progress" and on_progress:
+            on_progress(msg["completed"], msg["total"])
+        elif msg.get("type") == "done":
+            f1_scores = msg["f1_scores"]
+
+    returncode = proc.wait(timeout=600)
+    if returncode != 0:
+        stderr_text = proc.stderr.read() if proc.stderr else ""
+        raise RuntimeError(f"BERTScore subprocess failed: {stderr_text}")
+
+    return f1_scores
 
 
 def compute_bertscore_batch(
     candidates: list[str],
     references: list[str],
+    on_progress: "Optional[callable]" = None,
 ) -> list[float]:
     if not candidates:
         return []
@@ -93,7 +129,7 @@ def compute_bertscore_batch(
             f"BERTScore length mismatch: {len(candidates)} candidates vs {len(references)} references"
         )
 
-    return _bertscore_subprocess(candidates, references)
+    return _bertscore_subprocess(candidates, references, on_progress)
 
 
 # ---------------------------------------------------------------------------
