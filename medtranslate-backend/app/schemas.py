@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +73,8 @@ class CorpusMetrics(BaseModel):
 
 class DatasetCorpusMetrics(BaseModel):
     overall: CorpusMetrics
+    by_source: dict[str, CorpusMetrics] = Field(default_factory=dict)
+    # Backward-compatible aliases used by existing frontend views
     clinspen: Optional[CorpusMetrics] = None
     umass: Optional[CorpusMetrics] = None
 

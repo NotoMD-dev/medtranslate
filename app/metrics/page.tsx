@@ -43,30 +43,23 @@ export default function MetricsPage() {
   );
   const totalGraded = graded.length;
 
-  // Performance by source
-  const sources = [
-    {
-      key: "ClinSpEn_ClinicalCases" as const,
-      label: "ClinSpEn (Case Reports)",
-      color: "#7dd3fc",
-    },
-    {
-      key: "UMass_EHR" as const,
-      label: "UMass (EHR Notes)",
-      color: "#fda4af",
-    },
-  ];
+  // Performance by source (works for any corpus labels in the dataset)
+  const sourceKeys = Array.from(new Set(completed.map((r) => r.source))).filter(Boolean);
 
-  const sourceMetrics = sources.map((src) => {
-    const srcCompleted = completed.filter((r) => r.source === src.key);
+  const sourceMetrics = sourceKeys.map((sourceKey) => {
+    const srcCompleted = completed.filter((r) => r.source === sourceKey);
     const srcMeteor = srcCompleted
       .map((r) => r.meteor)
       .filter((v): v is number => v != null);
     const srcBert = srcCompleted
       .map((r) => r.bertscore_f1)
       .filter((v): v is number => v != null);
+    const isClinspen = sourceKey === "ClinSpEn_ClinicalCases";
+    const isUmass = sourceKey === "UMass_EHR";
     return {
-      ...src,
+      key: sourceKey,
+      label: isClinspen ? "ClinSpEn" : isUmass ? "UMass" : sourceKey,
+      dotColor: isClinspen ? "var(--accent)" : isUmass ? "#7C3AED" : "var(--text-muted)",
       count: srcCompleted.length,
       meteor: srcMeteor.length > 0 ? summarizeMetric(srcMeteor).mean : null,
       bert: srcBert.length > 0 ? summarizeMetric(srcBert).mean : null,
@@ -234,13 +227,19 @@ export default function MetricsPage() {
             <tbody>
               {sourceMetrics.map((src) => {
                 const srcFlagged = completed.filter((r) => r.source === src.key && r.meteor != null && r.meteor < 0.4).length;
-                const corpusVal = corpusBleu ? (src.key === "ClinSpEn_ClinicalCases" ? corpusBleu.clinspen : corpusBleu.umass) : null;
+                const corpusVal = corpusBleu?.by_source?.[src.key] ?? (
+                  src.key === "ClinSpEn_ClinicalCases"
+                    ? corpusBleu?.clinspen
+                    : src.key === "UMass_EHR"
+                    ? corpusBleu?.umass
+                    : null
+                );
                 return (
                   <tr key={src.key}>
                     <td>
                       <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, color: "var(--text-primary)" }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: src.key === "ClinSpEn_ClinicalCases" ? "var(--accent)" : "#7C3AED" }} />
-                        {src.key === "ClinSpEn_ClinicalCases" ? "ClinSpEn" : "UMass"}
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: src.dotColor }} />
+                        {src.label}
                       </span>
                     </td>
                     <td>{src.count.toLocaleString()}</td>

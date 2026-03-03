@@ -68,6 +68,11 @@ def _uses_max_completion_tokens(model: str) -> bool:
     return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
 
 
+def _supports_temperature(model: str) -> bool:
+    """Some newer reasoning models reject explicit temperature values."""
+    return not model.lower().startswith("gpt-5")
+
+
 # ---------------------------------------------------------------------------
 # Translation entry point
 # ---------------------------------------------------------------------------
@@ -120,18 +125,20 @@ async def _translate_openai(
     last_error: Exception | None = None
 
     # Newer OpenAI models require max_completion_tokens instead of max_tokens
-    token_kwargs: dict = {}
+    request_kwargs: dict = {}
     if _uses_max_completion_tokens(model):
-        token_kwargs["max_completion_tokens"] = max_tokens
+        request_kwargs["max_completion_tokens"] = max_tokens
     else:
-        token_kwargs["max_tokens"] = max_tokens
+        request_kwargs["max_tokens"] = max_tokens
+
+    if _supports_temperature(model):
+        request_kwargs["temperature"] = temperature
 
     for attempt in range(1, TRANSLATE_MAX_RETRIES + 1):
         try:
             response = await client.chat.completions.create(
                 model=model,
-                temperature=temperature,
-                **token_kwargs,
+                **request_kwargs,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text},

@@ -562,7 +562,9 @@ async def execute_job(job_id: str) -> None:
 
         system_prompt = job.model_config.system_prompt or ""
         model = job.model_config.model
-        temperature = job.model_config.temperature
+        # Force deterministic translations for reproducible SacreBLEU runs.
+        # We keep this server-side so API callers cannot accidentally override it.
+        temperature = 0.0
         max_tokens = job.model_config.max_tokens
         compute_bertscore = getattr(job.model_config, "compute_bertscore", False)
         metrics_only = getattr(job.model_config, "metrics_only", False)
@@ -792,39 +794,33 @@ async def execute_job(job_id: str) -> None:
                 bleu_signature=f"error: {exc}",
             )
 
-        clinspen_corpus = None
-        umass_corpus = None
+        # Compute per-source BLEU for all corpora present in the uploaded dataset.
+        by_source: dict[str, CorpusMetrics] = {}
+        pairs_by_source: dict[str, list[tuple[str, str]]] = {}
+        for _, row in successfully_translated:
+            pairs_by_source.setdefault(row.source, []).append(
+                (row.llm_english_translation, row.english_reference)
+            )
 
-        clinspen_pairs = [
-            (row.llm_english_translation, row.english_reference)
-            for _, row in successfully_translated
-            if row.source == "ClinSpEn_ClinicalCases"
-        ]
-
-        if clinspen_pairs:
+        for source_name, source_pairs in pairs_by_source.items():
+            if not source_pairs:
+                continue
             try:
-                cs_hyps, cs_refs = zip(*clinspen_pairs)
-                cs_score, cs_sig = compute_corpus_bleu(list(cs_hyps), list(cs_refs))
-                clinspen_corpus = CorpusMetrics(cs_score, cs_sig)
-            except Exception:
-                pass
+                src_hyps, src_refs = zip(*source_pairs)
+                src_score, src_sig = compute_corpus_bleu(list(src_hyps), list(src_refs))
+                by_source[source_name] = CorpusMetrics(
+                    bleu_score=src_score,
+                    bleu_signature=src_sig,
+                )
+            except Exception as exc:
+                logger.error("Job %s source BLEU failed for %s: %s", job_id, source_name, exc)
 
-        umass_pairs = [
-            (row.llm_english_translation, row.english_reference)
-            for _, row in successfully_translated
-            if row.source == "UMass_EHR"
-        ]
-
-        if umass_pairs:
-            try:
-                um_hyps, um_refs = zip(*umass_pairs)
-                um_score, um_sig = compute_corpus_bleu(list(um_hyps), list(um_refs))
-                umass_corpus = CorpusMetrics(um_score, um_sig)
-            except Exception:
-                pass
+        clinspen_corpus = by_source.get("ClinSpEn_ClinicalCases")
+        umass_corpus = by_source.get("UMass_EHR")
 
         job.corpus_metrics = DatasetCorpusMetrics(
             overall=overall_corpus,
+            by_source=by_source,
             clinspen=clinspen_corpus,
             umass=umass_corpus,
         )
@@ -847,6 +843,10 @@ async def execute_job(job_id: str) -> None:
 
             def _on_bert_progress(completed: int, total_count: int) -> None:
                 job.bertscore_completed = completed
+                job.bertscore_total = total_count
+                # Persist so polling requests handled by other instances report
+                # real BERTScore progress instead of staying at 0.
+                _db_save_status(job)
 
             try:
                 bert_f1_scores = await asyncio.to_thread(

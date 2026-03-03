@@ -41,6 +41,7 @@ export interface CorpusMetrics {
 
 export interface DatasetCorpusMetrics {
   overall: CorpusMetrics;
+  by_source?: Record<string, CorpusMetrics>;
   clinspen: CorpusMetrics | null;
   umass: CorpusMetrics | null;
 }

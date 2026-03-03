@@ -39,6 +39,8 @@ export default function TranslatePage() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const lastPartialFetchRef = useRef(0);
   const lastOffsetRef = useRef(0);
+  const maxTranslatedRef = useRef(0);
+  const maxBertCompletedRef = useRef(0);
 
   const sessionModel = getSessionModel() || MODEL_OPTIONS[0].id;
   const modelLabel = MODEL_OPTIONS.find((m) => m.id === sessionModel)?.label || sessionModel;
@@ -89,8 +91,16 @@ export default function TranslatePage() {
     (jobId: string) =>
       async (status: JobStatusResponse) => {
         if (abortRef.current) return;
-        setJobStatus(status);
-        setRowCount(status.total);
+        const normalized: JobStatusResponse = {
+          ...status,
+          translated: Math.max(status.translated, maxTranslatedRef.current),
+          bertscore_completed: Math.max(status.bertscore_completed, maxBertCompletedRef.current),
+        };
+        maxTranslatedRef.current = normalized.translated;
+        maxBertCompletedRef.current = normalized.bertscore_completed;
+
+        setJobStatus(normalized);
+        setRowCount(normalized.total);
 
         const now = Date.now();
         if (now - lastPartialFetchRef.current < PARTIAL_FETCH_INTERVAL_MS) return;
@@ -173,6 +183,8 @@ export default function TranslatePage() {
     abortRef.current = false;
     lastPartialFetchRef.current = 0;
     lastOffsetRef.current = 0;
+    maxTranslatedRef.current = 0;
+    maxBertCompletedRef.current = 0;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -239,6 +251,8 @@ export default function TranslatePage() {
     abortRef.current = false;
     lastPartialFetchRef.current = 0;
     lastOffsetRef.current = 0;
+    maxTranslatedRef.current = 0;
+    maxBertCompletedRef.current = 0;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -262,7 +276,15 @@ export default function TranslatePage() {
       const newResults = await pollUntilDone(
         job_id,
         async (status) => {
-          if (!abortRef.current) setJobStatus(status);
+          if (abortRef.current) return;
+          const normalized: JobStatusResponse = {
+            ...status,
+            translated: Math.max(status.translated, maxTranslatedRef.current),
+            bertscore_completed: Math.max(status.bertscore_completed, maxBertCompletedRef.current),
+          };
+          maxTranslatedRef.current = normalized.translated;
+          maxBertCompletedRef.current = normalized.bertscore_completed;
+          setJobStatus(normalized);
         },
         2000,
         controller.signal,
@@ -481,13 +503,21 @@ export default function TranslatePage() {
       {/* Progress Bar */}
       {(pageState === "running" || pageState === "submitting") && (
         <div className="anim d2" style={{ marginBottom: 24 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
-            <span>{jobStatus ? `${jobStatus.translated} of ${jobStatus.total}` : "Submitting job..."}</span>
-            <span>{progressPct.toFixed(1)}%</span>
-          </div>
-          <div style={{ height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
-            <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${progressPct}%` }} />
-          </div>
+          {!(jobStatus && jobStatus.bertscore_total > 0) ? (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
+                <span>{jobStatus ? `${jobStatus.translated} of ${jobStatus.total}` : "Submitting job..."}</span>
+                <span>{progressPct.toFixed(1)}%</span>
+              </div>
+              <div style={{ height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
+                <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${progressPct}%` }} />
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
+              Translation complete ({jobStatus.translated} of {jobStatus.total})
+            </div>
+          )}
           {jobStatus && jobStatus.scored > 0 && jobStatus.bertscore_total === 0 && (
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{jobStatus.scored} metrics computed</div>
           )}
