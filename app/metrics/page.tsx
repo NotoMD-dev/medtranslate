@@ -43,19 +43,18 @@ export default function MetricsPage() {
   );
   const totalGraded = graded.length;
 
-  // Performance by source
-  const sources = [
-    {
-      key: "ClinSpEn_ClinicalCases" as const,
-      label: "ClinSpEn (Case Reports)",
-      color: "#7dd3fc",
-    },
-    {
-      key: "UMass_EHR" as const,
-      label: "UMass (EHR Notes)",
-      color: "#fda4af",
-    },
-  ];
+  // Performance by source (supports arbitrary corpora in a mixed dataset)
+  const uniqueSources = Array.from(new Set(completed.map((r) => r.source || "Unknown")));
+  const sources = uniqueSources.map((key, idx) => ({
+    key,
+    label:
+      key === "ClinSpEn_ClinicalCases"
+        ? "ClinSpEn (Case Reports)"
+        : key === "UMass_EHR"
+          ? "UMass (EHR Notes)"
+          : key,
+    color: idx % 2 === 0 ? "var(--accent)" : "#7C3AED",
+  }));
 
   const sourceMetrics = sources.map((src) => {
     const srcCompleted = completed.filter((r) => r.source === src.key);
@@ -234,13 +233,17 @@ export default function MetricsPage() {
             <tbody>
               {sourceMetrics.map((src) => {
                 const srcFlagged = completed.filter((r) => r.source === src.key && r.meteor != null && r.meteor < 0.4).length;
-                const corpusVal = corpusBleu ? (src.key === "ClinSpEn_ClinicalCases" ? corpusBleu.clinspen : corpusBleu.umass) : null;
+                const corpusVal = corpusBleu
+                  ? (corpusBleu.by_source?.[src.key]
+                    ?? (src.key === "ClinSpEn_ClinicalCases" ? corpusBleu.clinspen : null)
+                    ?? (src.key === "UMass_EHR" ? corpusBleu.umass : null))
+                  : null;
                 return (
                   <tr key={src.key}>
                     <td>
                       <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, color: "var(--text-primary)" }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: src.key === "ClinSpEn_ClinicalCases" ? "var(--accent)" : "#7C3AED" }} />
-                        {src.key === "ClinSpEn_ClinicalCases" ? "ClinSpEn" : "UMass"}
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: src.color }} />
+                        {src.label}
                       </span>
                     </td>
                     <td>{src.count.toLocaleString()}</td>
