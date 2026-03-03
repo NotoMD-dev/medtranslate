@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import Header from "@/components/Header";
 import { CLINICAL_GRADES, REFERENCE_FLAG_REASONS } from "@/lib/types";
-import { exportReviewCSV, downloadFile } from "@/lib/csv";
+import { exportResultsCSV, downloadFile } from "@/lib/csv";
 import {
   getSessionJobResultsAsync,
   getSessionGradesAsync,
@@ -132,10 +132,10 @@ export default function ReviewPage() {
   }, [jumpInput, flagged.length]);
 
   const handleExport = useCallback(() => {
-    if (!jobResults || flagged.length === 0) return;
-    const csv = exportReviewCSV(flagged, grades, refFlags);
-    downloadFile(csv, "medtranslate_review.csv");
-  }, [jobResults, flagged, grades, refFlags]);
+    if (!jobResults) return;
+    const csv = exportResultsCSV(jobResults.sentence_metrics, grades, refFlags);
+    downloadFile(csv, "medtranslate_results.csv");
+  }, [jobResults, grades, refFlags]);
 
   // Navigate to next ungraded pair
   const handleSkip = useCallback(() => {
@@ -218,10 +218,10 @@ export default function ReviewPage() {
         </button>
         <button
           onClick={handleExport}
-          disabled={!jobResults || flagged.length === 0}
-          style={{ fontFamily: "var(--font)", fontSize: 12, fontWeight: 500, padding: "6px 14px", borderRadius: "var(--radius-sm)", background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border)", cursor: !jobResults || flagged.length === 0 ? "not-allowed" : "pointer", opacity: !jobResults || flagged.length === 0 ? 0.4 : 1 }}
+          disabled={!jobResults || sentences.length === 0}
+          style={{ fontFamily: "var(--font)", fontSize: 12, fontWeight: 500, padding: "6px 14px", borderRadius: "var(--radius-sm)", background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border)", cursor: !jobResults || sentences.length === 0 ? "not-allowed" : "pointer", opacity: !jobResults || sentences.length === 0 ? 0.4 : 1 }}
         >
-          Export Review
+          Export CSV
         </button>
       </div>
 
