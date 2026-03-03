@@ -763,6 +763,7 @@ async def execute_job(job_id: str) -> None:
 
         meteor_scores = await asyncio.to_thread(_meteor_pass, successfully_translated)
         job.scored = len(meteor_scores)
+        await asyncio.to_thread(_db_save_status, job)
 
         # Update sentence_metrics with METEOR scores
         for idx, (i, row) in enumerate(successfully_translated):
@@ -792,42 +793,39 @@ async def execute_job(job_id: str) -> None:
                 bleu_signature=f"error: {exc}",
             )
 
-        clinspen_corpus = None
-        umass_corpus = None
+        by_source: dict[str, CorpusMetrics] = {}
+        grouped_pairs: dict[str, list[tuple[str, str]]] = {}
+        for _, row in successfully_translated:
+            source_key = row.source or "Unknown"
+            grouped_pairs.setdefault(source_key, []).append(
+                (row.llm_english_translation, row.english_reference)
+            )
 
-        clinspen_pairs = [
-            (row.llm_english_translation, row.english_reference)
-            for _, row in successfully_translated
-            if row.source == "ClinSpEn_ClinicalCases"
-        ]
-
-        if clinspen_pairs:
+        for source_key, pairs in grouped_pairs.items():
             try:
-                cs_hyps, cs_refs = zip(*clinspen_pairs)
-                cs_score, cs_sig = compute_corpus_bleu(list(cs_hyps), list(cs_refs))
-                clinspen_corpus = CorpusMetrics(cs_score, cs_sig)
-            except Exception:
-                pass
-
-        umass_pairs = [
-            (row.llm_english_translation, row.english_reference)
-            for _, row in successfully_translated
-            if row.source == "UMass_EHR"
-        ]
-
-        if umass_pairs:
-            try:
-                um_hyps, um_refs = zip(*umass_pairs)
-                um_score, um_sig = compute_corpus_bleu(list(um_hyps), list(um_refs))
-                umass_corpus = CorpusMetrics(um_score, um_sig)
-            except Exception:
-                pass
+                hyps, refs = zip(*pairs)
+                src_score, src_sig = compute_corpus_bleu(list(hyps), list(refs))
+                by_source[source_key] = CorpusMetrics(
+                    bleu_score=src_score,
+                    bleu_signature=src_sig,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Job %s source-level BLEU failed for %s: %s",
+                    job_id,
+                    source_key,
+                    exc,
+                )
 
         job.corpus_metrics = DatasetCorpusMetrics(
             overall=overall_corpus,
-            clinspen=clinspen_corpus,
-            umass=umass_corpus,
+            by_source=by_source,
+            clinspen=by_source.get("ClinSpEn_ClinicalCases"),
+            umass=by_source.get("UMass_EHR"),
         )
+
+        # Persist post-BLEU state so non-executing instances return stable progress.
+        await asyncio.to_thread(_db_save_status, job)
 
         # ------------------------------------------------------------------
         # Phase 4: BERTScore (optional — only if user toggled it on)
@@ -847,6 +845,9 @@ async def execute_job(job_id: str) -> None:
 
             def _on_bert_progress(completed: int, total_count: int) -> None:
                 job.bertscore_completed = completed
+                job.bertscore_total = total_count
+                # Persist from the worker thread so progress is visible across instances.
+                _db_save_status(job)
 
             try:
                 bert_f1_scores = await asyncio.to_thread(
