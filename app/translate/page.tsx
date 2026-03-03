@@ -17,8 +17,8 @@ import {
   setSessionJobId,
   setSessionJobResultsAsync,
   setSessionGradesAsync,
-  setSessionComparisonResults,
-  getSessionComparisonResults,
+  setSessionComparisonResultsAsync,
+  getSessionComparisonResultsAsync,
 } from "@/lib/session";
 
 type PageState = "idle" | "submitting" | "running" | "complete" | "failed";
@@ -204,9 +204,9 @@ export default function TranslatePage() {
       await setSessionJobResultsAsync(results);
 
       // Save to comparison results for head-to-head page
-      const existing = getSessionComparisonResults() || {};
+      const existing = (await getSessionComparisonResultsAsync()) || {};
       existing[model] = results;
-      setSessionComparisonResults(existing);
+      await setSessionComparisonResultsAsync(existing);
 
       const isStopped = results.status === "cancelled" || abortRef.current;
       setPageState(
@@ -292,9 +292,9 @@ export default function TranslatePage() {
         setJobResults(mergedResults);
         await setSessionJobResultsAsync(mergedResults);
 
-        const comp = getSessionComparisonResults() || {};
+        const comp = (await getSessionComparisonResultsAsync()) || {};
         comp[model] = mergedResults;
-        setSessionComparisonResults(comp);
+        await setSessionComparisonResultsAsync(comp);
       } else {
         setJobResults(newResults);
         await setSessionJobResultsAsync(newResults);
@@ -357,6 +357,7 @@ export default function TranslatePage() {
   const bertscorePct = jobStatus && jobStatus.bertscore_total > 0
     ? (jobStatus.bertscore_completed / jobStatus.bertscore_total) * 100
     : 0;
+  const isBertscorePhase = !!jobStatus && jobStatus.bertscore_total > 0;
 
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
   const canRunBertOnly =
@@ -481,19 +482,23 @@ export default function TranslatePage() {
       {/* Progress Bar */}
       {(pageState === "running" || pageState === "submitting") && (
         <div className="anim d2" style={{ marginBottom: 24 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
-            <span>{jobStatus ? `${jobStatus.translated} of ${jobStatus.total}` : "Submitting job..."}</span>
-            <span>{progressPct.toFixed(1)}%</span>
-          </div>
-          <div style={{ height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
-            <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${progressPct}%` }} />
-          </div>
-          {jobStatus && jobStatus.scored > 0 && jobStatus.bertscore_total === 0 && (
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{jobStatus.scored} metrics computed</div>
+          {!isBertscorePhase && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
+                <span>{jobStatus ? `${jobStatus.translated} of ${jobStatus.total}` : "Submitting job..."}</span>
+                <span>{progressPct.toFixed(1)}%</span>
+              </div>
+              <div style={{ height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
+                <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${progressPct}%` }} />
+              </div>
+              {jobStatus && jobStatus.scored > 0 && (
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{jobStatus.scored} metrics computed</div>
+              )}
+            </>
           )}
           {/* BERTScore Progress Bar */}
           {jobStatus && jobStatus.bertscore_total > 0 && (
-            <div style={{ marginTop: 12 }}>
+            <div style={{ marginTop: isBertscorePhase ? 0 : 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
                 <span>BERTScore: {jobStatus.bertscore_completed} of {jobStatus.bertscore_total}</span>
                 <span>{bertscorePct.toFixed(1)}%</span>

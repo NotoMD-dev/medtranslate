@@ -73,6 +73,7 @@ class CorpusMetrics(BaseModel):
 
 class DatasetCorpusMetrics(BaseModel):
     overall: CorpusMetrics
+    by_source: dict[str, CorpusMetrics] = {}
     clinspen: Optional[CorpusMetrics] = None
     umass: Optional[CorpusMetrics] = None
 

@@ -1,5 +1,5 @@
 import type { TranslationPair, JobResults, ClinicalGrade, ReferenceFlag } from "@/lib/types";
-import { getJobResultsIDB, setJobResultsIDB, getGradesIDB, setGradesIDB, getRefFlagsIDB, setRefFlagsIDB, getSessionDataIDB, setSessionDataIDB } from "@/lib/idb";
+import { getJobResultsIDB, setJobResultsIDB, getGradesIDB, setGradesIDB, getRefFlagsIDB, setRefFlagsIDB, getSessionDataIDB, setSessionDataIDB, getComparisonResultsIDB, setComparisonResultsIDB } from "@/lib/idb";
 
 const STORAGE_KEYS = {
   data: "medtranslate:data",
@@ -239,6 +239,19 @@ export function setSessionComparisonResults(results: Record<string, import("@/li
   writeJSON(STORAGE_KEYS.comparisonResults, results);
 }
 
+export async function getSessionComparisonResultsAsync(): Promise<Record<string, import("@/lib/types").JobResults> | undefined> {
+  const fromIDB = await getComparisonResultsIDB();
+  if (fromIDB) return fromIDB;
+  return getSessionComparisonResults();
+}
+
+export async function setSessionComparisonResultsAsync(
+  results: Record<string, import("@/lib/types").JobResults> | undefined,
+): Promise<void> {
+  await setComparisonResultsIDB(results);
+  setSessionComparisonResults(results);
+}
+
 export function clearSessionState() {
   setSessionData(undefined);
   setSessionPrompt(undefined);
@@ -256,4 +269,5 @@ export function clearSessionState() {
   setGradesIDB(undefined).catch(() => {});
   setRefFlagsIDB(undefined).catch(() => {});
   setSessionDataIDB(undefined).catch(() => {});
+  setComparisonResultsIDB(undefined).catch(() => {});
 }

@@ -5,7 +5,7 @@ import Header from "@/components/Header";
 import { MODEL_OPTIONS } from "@/lib/types";
 import { summarizeMetric } from "@/lib/metrics";
 import type { JobResults } from "@/lib/types";
-import { getSessionComparisonResults } from "@/lib/session";
+import { getSessionComparisonResultsAsync } from "@/lib/session";
 
 interface ModelSummary {
   modelId: string;
@@ -67,13 +67,13 @@ export default function ComparePage() {
   const [modelB, setModelB] = useState<string>("");
 
   useEffect(() => {
-    const saved = getSessionComparisonResults();
-    if (saved) {
+    getSessionComparisonResultsAsync().then((saved) => {
+      if (!saved) return;
       setComparisonData(saved);
       const keys = Object.keys(saved);
       if (keys.length >= 1) setModelA(keys[0]);
       if (keys.length >= 2) setModelB(keys[1]);
-    }
+    });
   }, []);
 
   const availableModels = Object.keys(comparisonData);
