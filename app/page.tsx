@@ -15,6 +15,7 @@ import {
 import {
   clearSessionState,
   setSessionData,
+  setSessionDataAsync,
   setSessionPrompt,
   setSessionRowLimit,
   setSessionJobResultsAsync,
@@ -60,6 +61,7 @@ export default function UploadPage() {
           .then((parsed) => {
             setRows(parsed);
             setSessionData(parsed);
+            setSessionDataAsync(parsed); // fire-and-forget IDB write
             setSessionPrompt(systemPrompt);
             setSessionCsvFileName(file.name);
           })
@@ -73,6 +75,7 @@ export default function UploadPage() {
             const parsed = parseCSV(ev.target?.result as string, currentLang.columnName);
             setRows(parsed);
             setSessionData(parsed);
+            setSessionDataAsync(parsed); // fire-and-forget IDB write
             setSessionPrompt(systemPrompt);
             setSessionCsvFileName(file.name);
           } catch (err) {
@@ -142,12 +145,13 @@ export default function UploadPage() {
       dataToUse = rows;
     }
 
-    setSessionData(dataToUse);
+    // Write data to IDB (reliable for large datasets) + localStorage
+    await setSessionDataAsync(dataToUse);
     setSessionPrompt(systemPrompt);
     setSessionRowLimit(dataToUse.length !== rows.length ? dataToUse.length : undefined);
     setSessionModel(selectedModel);
     setSessionSourceLanguage(sourceLanguage);
-    // Await IDB clear so the translate page doesn't read stale results
+    // Clear stale results before navigation
     await setSessionJobResultsAsync(undefined);
     setSessionJobId(undefined);
     router.push("/translate");
