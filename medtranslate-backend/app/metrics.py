@@ -7,6 +7,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -96,6 +97,21 @@ def _bertscore_subprocess(
     proc.stdin.write(payload)
     proc.stdin.close()
 
+    # Drain stderr in a background thread to prevent pipe-buffer deadlock.
+    # bert_score/transformers write model-loading warnings and download progress
+    # to stderr; if that output fills the OS pipe buffer (~64 KB) the subprocess
+    # will block on its stderr write while the parent blocks on proc.stdout —
+    # a classic two-pipe deadlock that hangs the frontend indefinitely.
+    stderr_chunks: list[str] = []
+
+    def _drain_stderr() -> None:
+        assert proc.stderr is not None
+        for chunk in proc.stderr:
+            stderr_chunks.append(chunk)
+
+    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    stderr_thread.start()
+
     f1_scores: list[float] = []
     assert proc.stdout is not None
     for line in proc.stdout:
@@ -111,9 +127,10 @@ def _bertscore_subprocess(
         elif msg.get("type") == "done":
             f1_scores = msg["f1_scores"]
 
-    returncode = proc.wait(timeout=600)
+    stderr_thread.join()
+    returncode = proc.wait(timeout=60)
     if returncode != 0:
-        stderr_text = proc.stderr.read() if proc.stderr else ""
+        stderr_text = "".join(stderr_chunks)
         raise RuntimeError(f"BERTScore subprocess failed: {stderr_text}")
 
     return f1_scores
