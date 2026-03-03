@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { parseCSV, detectSourceColumn } from "@/lib/csv";
@@ -14,6 +14,11 @@ import {
 } from "@/lib/types";
 import {
   clearSessionState,
+  getSessionDataAsync,
+  getSessionCsvFileName,
+  getSessionSourceLanguage,
+  getSessionPrompt,
+  getSessionModel,
   setSessionData,
   setSessionDataAsync,
   setSessionPrompt,
@@ -41,6 +46,24 @@ export default function UploadPage() {
   const [customRowCount, setCustomRowCount] = useState<string>("");
   const [rangeStart, setRangeStart] = useState<string>("");
   const [rangeEnd, setRangeEnd] = useState<string>("");
+
+  // Restore dataset from session on mount so users can re-use the same dataset
+  // for head-to-head model comparison without re-uploading.
+  useEffect(() => {
+    getSessionDataAsync().then((savedData) => {
+      if (!savedData || savedData.length === 0) return;
+      setRows(savedData);
+      const savedFileName = getSessionCsvFileName();
+      if (savedFileName) setFileName(savedFileName);
+      const savedLang = getSessionSourceLanguage();
+      if (savedLang) setSourceLanguage(savedLang);
+      const savedPrompt = getSessionPrompt();
+      if (savedPrompt) setSystemPrompt(savedPrompt);
+      const savedModel = getSessionModel();
+      if (savedModel) setSelectedModel(savedModel);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const processFile = useCallback(
     (file: File) => {

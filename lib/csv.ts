@@ -173,6 +173,39 @@ export function exportResultsCSV(
   return [headers.join(","), ...rows.map((r) => r.map(escapeCSV).join(","))].join("\n");
 }
 
+/**
+ * Export only the flagged pairs that went through clinical review.
+ * Unlike exportResultsCSV, this skips un-reviewed translations and omits
+ * the redundant "error" column — callers should pass the already-filtered
+ * `flagged` array from the review page.
+ */
+export function exportReviewCSV(
+  flaggedPairs: SentenceMetrics[],
+  grades?: Record<string, ClinicalGrade>,
+  refFlags?: Record<string, ReferenceFlag>,
+): string {
+  const headers = [
+    "pair_id", "source", "content_type", "english_reference", "source_text",
+    "llm_english_translation", "meteor_score", "bertscore_f1",
+    "clinical_significance_grade", "reference_flag_issues", "reference_flag_notes",
+  ];
+
+  const rows = flaggedPairs.map((r) => {
+    const flag = refFlags?.[r.pair_id];
+    return [
+      r.pair_id, r.source, r.content_type, r.english_reference,
+      r.source_text || r.spanish_source, r.llm_english_translation,
+      r.meteor != null ? r.meteor.toFixed(4) : "",
+      r.bertscore_f1 != null ? r.bertscore_f1.toFixed(4) : "",
+      grades?.[r.pair_id] != null ? String(grades[r.pair_id]) : "",
+      flag ? flag.reasons.join("; ") : "",
+      flag?.notes ?? "",
+    ];
+  });
+
+  return [headers.join(","), ...rows.map((r) => r.map(escapeCSV).join(","))].join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // Browser file download
 // ---------------------------------------------------------------------------
