@@ -76,7 +76,10 @@ def _bertscore_subprocess(
     messages to stdout, allowing the caller to track completion via the
     optional *on_progress(completed, total)* callback.
     """
-    chunk_size = int(os.getenv("BERTSCORE_CHUNK_SIZE", "500"))
+    # Keep chunks reasonably small so progress updates are meaningful on large jobs
+    # even when BERTSCORE_CHUNK_SIZE is set too high in the environment.
+    requested_chunk_size = int(os.getenv("BERTSCORE_CHUNK_SIZE", "256"))
+    chunk_size = max(32, min(requested_chunk_size, 512, len(candidates)))
     payload = json.dumps({
         "candidates": candidates,
         "references": references,

@@ -842,6 +842,7 @@ async def execute_job(job_id: str) -> None:
 
             job.bertscore_total = len(candidates_for_bert)
             job.bertscore_completed = 0
+            await asyncio.to_thread(_db_save_status, job)
 
             def _on_bert_progress(completed: int, total_count: int) -> None:
                 job.bertscore_completed = completed

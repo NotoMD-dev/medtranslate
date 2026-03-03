@@ -17,8 +17,8 @@ import {
   setSessionJobId,
   setSessionJobResultsAsync,
   setSessionGradesAsync,
-  setSessionComparisonResults,
-  getSessionComparisonResults,
+  setSessionComparisonResultsAsync,
+  getSessionComparisonResultsAsync,
 } from "@/lib/session";
 
 type PageState = "idle" | "submitting" | "running" | "complete" | "failed";
@@ -204,9 +204,9 @@ export default function TranslatePage() {
       await setSessionJobResultsAsync(results);
 
       // Save to comparison results for head-to-head page
-      const existing = getSessionComparisonResults() || {};
+      const existing = (await getSessionComparisonResultsAsync()) || {};
       existing[model] = results;
-      setSessionComparisonResults(existing);
+      await setSessionComparisonResultsAsync(existing);
 
       const isStopped = results.status === "cancelled" || abortRef.current;
       setPageState(
@@ -292,9 +292,9 @@ export default function TranslatePage() {
         setJobResults(mergedResults);
         await setSessionJobResultsAsync(mergedResults);
 
-        const comp = getSessionComparisonResults() || {};
+        const comp = (await getSessionComparisonResultsAsync()) || {};
         comp[model] = mergedResults;
-        setSessionComparisonResults(comp);
+        await setSessionComparisonResultsAsync(comp);
       } else {
         setJobResults(newResults);
         await setSessionJobResultsAsync(newResults);
