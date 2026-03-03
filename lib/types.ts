@@ -16,6 +16,8 @@ export interface JobStatusResponse {
   scored: number;
   failed_rows: number;
   error: string | null;
+  bertscore_completed: number;
+  bertscore_total: number;
 }
 
 export interface SentenceMetrics {

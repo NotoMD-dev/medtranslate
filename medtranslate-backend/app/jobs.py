@@ -75,6 +75,8 @@ class Job:
     error: Optional[str] = None
     cancelled: bool = False
     last_poll_at: float = field(default_factory=time.time)
+    bertscore_completed: int = 0
+    bertscore_total: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +178,8 @@ def _job_to_dict(job: Job, *, include_rows: bool = True) -> dict:
         "library_versions": job.library_versions.model_dump() if job.library_versions else None,
         "error": job.error,
         "cancelled": job.cancelled,
+        "bertscore_completed": job.bertscore_completed,
+        "bertscore_total": job.bertscore_total,
     }
     if include_rows:
         d["rows"] = [
@@ -219,6 +223,8 @@ def _job_from_dict(data: dict) -> Job:
         ),
         error=data.get("error"),
         cancelled=data.get("cancelled", False),
+        bertscore_completed=data.get("bertscore_completed", 0),
+        bertscore_total=data.get("bertscore_total", 0),
     )
 
 
@@ -247,21 +253,19 @@ def _db_save(job: Job) -> None:
 
 
 def _db_save_status(job: Job) -> None:
-    """Lightweight persist: update only status and progress counters.
-    Avoids serializing the entire rows/metrics JSON blob at chunk boundaries."""
+    """Persist job state at chunk boundaries. Serializes the full state
+    (minus the heavy rows array) so that non-executing instances can
+    serve accurate progress via their SQLite read path."""
     if not _ensure_db():
         return
-    progress = json.dumps({
-        "translated": job.translated,
-        "scored": job.scored,
-        "failed_rows": job.failed_rows,
-    })
+    payload = json.dumps(_job_to_dict(job, include_rows=False))
     with _write_lock:
         try:
             with sqlite3.connect(DATABASE_PATH) as conn:
                 conn.execute(
-                    "UPDATE jobs SET status = ?, cancelled = ? WHERE job_id = ?",
-                    (job.status.value, int(job.cancelled), job.job_id),
+                    "INSERT OR REPLACE INTO jobs (job_id, status, cancelled, created_at, data) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (job.job_id, job.status.value, int(job.cancelled), time.time(), payload),
                 )
         except Exception as exc:
             logger.warning("SQLite status write failed for job %s: %s", job.job_id, exc)
@@ -496,6 +500,8 @@ async def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
         scored=job.scored,
         failed_rows=job.failed_rows,
         error=job.error,
+        bertscore_completed=job.bertscore_completed,
+        bertscore_total=job.bertscore_total,
     )
 
 
@@ -836,11 +842,18 @@ async def execute_job(job_id: str) -> None:
                 row.english_reference for _, row in successfully_translated
             ]
 
+            job.bertscore_total = len(candidates_for_bert)
+            job.bertscore_completed = 0
+
+            def _on_bert_progress(completed: int, total_count: int) -> None:
+                job.bertscore_completed = completed
+
             try:
                 bert_f1_scores = await asyncio.to_thread(
                     compute_bertscore_batch,
                     candidates_for_bert,
                     references_for_bert,
+                    _on_bert_progress,
                 )
             except Exception as exc:
                 logger.error("Job %s BERTScore batch failed: %s", job_id, exc)

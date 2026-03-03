@@ -58,13 +58,20 @@ export function setSessionData(data: TranslationPair[] | undefined) {
 export async function getSessionDataAsync(): Promise<TranslationPair[] | undefined> {
   const fromIDB = await getSessionDataIDB();
   if (fromIDB) return fromIDB;
-  return getSessionData();
+  // localStorage may contain full data (small datasets written by the sync
+  // setter) or a lightweight presence flag written by setSessionDataAsync.
+  // Only return actual arrays — ignore presence flags.
+  const fromLS = getSessionData();
+  if (Array.isArray(fromLS)) return fromLS;
+  return undefined;
 }
 
-// Async setter — writes to IndexedDB (large-data safe) and attempts localStorage.
+// Async setter — writes to IndexedDB (large-data safe) and a lightweight
+// presence flag to localStorage (avoids wasteful full-data writes that would
+// silently fail on quota-exceeded for large datasets).
 export async function setSessionDataAsync(data: TranslationPair[] | undefined): Promise<void> {
   await setSessionDataIDB(data);
-  setSessionData(data);
+  writeJSON(STORAGE_KEYS.data, data ? { _idb: true, length: data.length } : undefined);
 }
 
 // Prompt

@@ -49,6 +49,8 @@ class JobStatusResponse(BaseModel):
     scored: int = 0
     failed_rows: int = 0
     error: Optional[str] = None
+    bertscore_completed: int = 0
+    bertscore_total: int = 0
 
 
 class SentenceMetrics(BaseModel):

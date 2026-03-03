@@ -8,7 +8,6 @@ import { submitJob, pollUntilDone, fetchJobResults, cancelJob } from "@/lib/api"
 import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS } from "@/lib/types";
 import type { JobStatusResponse, JobResults, ClinicalGrade } from "@/lib/types";
 import {
-  getSessionData,
   getSessionDataAsync,
   getSessionPrompt,
   getSessionJobId,
@@ -355,6 +354,10 @@ export default function TranslatePage() {
     ? (jobStatus.translated / jobStatus.total) * 100
     : 0;
 
+  const bertscorePct = jobStatus && jobStatus.bertscore_total > 0
+    ? (jobStatus.bertscore_completed / jobStatus.bertscore_total) * 100
+    : 0;
+
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
   const canRunBertOnly =
     pageState !== "running" && pageState !== "submitting" && completedCount > 0;
@@ -485,8 +488,20 @@ export default function TranslatePage() {
           <div style={{ height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
             <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${progressPct}%` }} />
           </div>
-          {jobStatus && jobStatus.scored > 0 && (
+          {jobStatus && jobStatus.scored > 0 && jobStatus.bertscore_total === 0 && (
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{jobStatus.scored} metrics computed</div>
+          )}
+          {/* BERTScore Progress Bar */}
+          {jobStatus && jobStatus.bertscore_total > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
+                <span>BERTScore: {jobStatus.bertscore_completed} of {jobStatus.bertscore_total}</span>
+                <span>{bertscorePct.toFixed(1)}%</span>
+              </div>
+              <div style={{ height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
+                <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${bertscorePct}%` }} />
+              </div>
+            </div>
           )}
         </div>
       )}
