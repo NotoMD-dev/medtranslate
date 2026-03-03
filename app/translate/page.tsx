@@ -379,6 +379,7 @@ export default function TranslatePage() {
   const bertscorePct = jobStatus && jobStatus.bertscore_total > 0
     ? (jobStatus.bertscore_completed / jobStatus.bertscore_total) * 100
     : 0;
+  const isBertscorePhase = !!jobStatus && jobStatus.bertscore_total > 0;
 
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
   const canRunBertOnly =
@@ -523,7 +524,7 @@ export default function TranslatePage() {
           )}
           {/* BERTScore Progress Bar */}
           {jobStatus && jobStatus.bertscore_total > 0 && (
-            <div style={{ marginTop: 12 }}>
+            <div style={{ marginTop: isBertscorePhase ? 0 : 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
                 <span>BERTScore: {jobStatus.bertscore_completed} of {jobStatus.bertscore_total}</span>
                 <span>{bertscorePct.toFixed(1)}%</span>

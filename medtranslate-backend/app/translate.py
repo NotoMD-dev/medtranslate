@@ -134,6 +134,10 @@ async def _translate_openai(
     if _supports_temperature(model):
         request_kwargs["temperature"] = temperature
 
+    sampling_kwargs: dict = {}
+    if _supports_temperature(model):
+        sampling_kwargs["temperature"] = temperature
+
     for attempt in range(1, TRANSLATE_MAX_RETRIES + 1):
         try:
             response = await client.chat.completions.create(

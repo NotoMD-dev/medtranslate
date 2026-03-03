@@ -765,6 +765,7 @@ async def execute_job(job_id: str) -> None:
 
         meteor_scores = await asyncio.to_thread(_meteor_pass, successfully_translated)
         job.scored = len(meteor_scores)
+        await asyncio.to_thread(_db_save_status, job)
 
         # Update sentence_metrics with METEOR scores
         for idx, (i, row) in enumerate(successfully_translated):
@@ -824,6 +825,9 @@ async def execute_job(job_id: str) -> None:
             clinspen=clinspen_corpus,
             umass=umass_corpus,
         )
+
+        # Persist post-BLEU state so non-executing instances return stable progress.
+        await asyncio.to_thread(_db_save_status, job)
 
         # ------------------------------------------------------------------
         # Phase 4: BERTScore (optional — only if user toggled it on)

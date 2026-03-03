@@ -278,10 +278,11 @@ async def submit_job(
 
     rows = _raw_rows_to_input(raw_rows, detected_col)
 
+    # Force deterministic decoding for reproducible metrics across runs.
     config = ModelConfig(
         model=model,
         system_prompt=system_prompt,
-        temperature=temperature,
+        temperature=0.0,
         max_tokens=max_tokens,
         compute_bertscore=compute_bertscore,
         metrics_only=metrics_only,
