@@ -247,7 +247,12 @@ export async function pollUntilDone(
         status.status === "failed" ||
         status.status === "cancelled"
       ) {
-        return fetchAllJobResultsPaginated(jobId);
+        // Break out of the polling loop so the results fetch happens *outside*
+        // this try/catch.  If fetchAllJobResultsPaginated were called here and
+        // threw, the catch block would reset consecutiveErrors to 0 on the very
+        // next successful pollJobStatus, making MAX_CONSECUTIVE_ERRORS
+        // unreachable and causing the loop to spin forever in "running" state.
+        break;
       }
     } catch {
       consecutiveErrors++;
@@ -268,4 +273,9 @@ export async function pollUntilDone(
 
     await sleep(intervalMs);
   }
+
+  // Job has reached a terminal state.  Fetch results outside the error-tracking
+  // try/catch so any failure propagates directly to the caller instead of
+  // silently re-entering the polling loop.
+  return fetchAllJobResultsPaginated(jobId);
 }

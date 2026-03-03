@@ -89,7 +89,12 @@ def _bertscore_subprocess(
         [sys.executable, _BERTSCORE_WORKER],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # Discard stderr to prevent the OS pipe buffer from filling up and
+        # deadlocking: if the subprocess writes >64 KB to stderr (e.g. tqdm
+        # progress bars from the HuggingFace model download) it blocks waiting
+        # for the parent to drain the pipe.  The parent is simultaneously
+        # blocked in the stdout-reading loop, so neither side can proceed.
+        stderr=subprocess.DEVNULL,
         text=True,
     )
     assert proc.stdin is not None
@@ -113,8 +118,7 @@ def _bertscore_subprocess(
 
     returncode = proc.wait(timeout=600)
     if returncode != 0:
-        stderr_text = proc.stderr.read() if proc.stderr else ""
-        raise RuntimeError(f"BERTScore subprocess failed: {stderr_text}")
+        raise RuntimeError(f"BERTScore subprocess exited with code {returncode}")
 
     return f1_scores
 
