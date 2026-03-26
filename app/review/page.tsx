@@ -26,7 +26,7 @@ export default function ReviewPage() {
   const [jumpInput, setJumpInput] = useState("");
   const [refFlagOpen, setRefFlagOpen] = useState(false);
   const [showGradeInfo, setShowGradeInfo] = useState(false);
-  const [gradeInfoPos, setGradeInfoPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [gradeInfoPos, setGradeInfoPos] = useState<{ top: number; left: number; openUp: boolean }>({ top: 0, left: 0, openUp: false });
   const gradeInfoBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -349,7 +349,14 @@ export default function ReviewPage() {
                       onClick={() => {
                         if (!showGradeInfo && gradeInfoBtnRef.current) {
                           const rect = gradeInfoBtnRef.current.getBoundingClientRect();
-                          setGradeInfoPos({ top: rect.bottom + 8, left: rect.left });
+                          const spaceBelow = window.innerHeight - rect.bottom;
+                          const popoverHeight = 320;
+                          const openUp = spaceBelow < popoverHeight + 16;
+                          setGradeInfoPos({
+                            top: openUp ? rect.top : rect.bottom + 8,
+                            left: rect.left,
+                            openUp,
+                          });
                         }
                         setShowGradeInfo((v) => !v);
                       }}
@@ -592,11 +599,16 @@ export default function ReviewPage() {
             style={{ position: "fixed", inset: 0, zIndex: 999 }}
           />
           <div style={{
-            position: "fixed", top: gradeInfoPos.top, left: gradeInfoPos.left,
+            position: "fixed",
+            ...(gradeInfoPos.openUp
+              ? { bottom: window.innerHeight - gradeInfoPos.top + 8 }
+              : { top: gradeInfoPos.top }),
+            left: gradeInfoPos.left,
             zIndex: 1000, background: "var(--bg-primary, #fff)",
             border: "1px solid var(--border)", borderRadius: "var(--radius-sm, 8px)",
             boxShadow: "0 8px 24px rgba(0,0,0,0.15)", padding: 16,
-            width: 580, fontSize: 12, color: "var(--text-primary)",
+            width: 580, maxHeight: "70vh", overflowY: "auto",
+            fontSize: 12, color: "var(--text-primary)",
           }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
