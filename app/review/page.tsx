@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import Header from "@/components/Header";
 import { CLINICAL_GRADES, REFERENCE_FLAG_REASONS } from "@/lib/types";
 import { exportReviewCSV, downloadFile } from "@/lib/csv";
@@ -26,8 +26,6 @@ export default function ReviewPage() {
   const [jumpInput, setJumpInput] = useState("");
   const [refFlagOpen, setRefFlagOpen] = useState(false);
   const [showGradeInfo, setShowGradeInfo] = useState(false);
-  const [gradeInfoPos, setGradeInfoPos] = useState<{ top: number; left: number; openUp: boolean }>({ top: 0, left: 0, openUp: false });
-  const gradeInfoBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     getSessionJobResultsAsync().then((persisted) => {
@@ -345,21 +343,7 @@ export default function ReviewPage() {
                   <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
                     Assign Clinical Significance Grade:
                     <button
-                      ref={gradeInfoBtnRef}
-                      onClick={() => {
-                        if (!showGradeInfo && gradeInfoBtnRef.current) {
-                          const rect = gradeInfoBtnRef.current.getBoundingClientRect();
-                          const spaceBelow = window.innerHeight - rect.bottom;
-                          const popoverHeight = 320;
-                          const openUp = spaceBelow < popoverHeight + 16;
-                          setGradeInfoPos({
-                            top: openUp ? rect.top : rect.bottom + 8,
-                            left: rect.left,
-                            openUp,
-                          });
-                        }
-                        setShowGradeInfo((v) => !v);
-                      }}
+                      onClick={() => setShowGradeInfo((v) => !v)}
                       aria-label="Show grading scale definitions"
                       style={{
                         display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -591,39 +575,45 @@ export default function ReviewPage() {
           </div>
         </div>
       )}
-      {/* Grade info popover - rendered at top level to avoid overflow clipping */}
+      {/* Grade info modal - centered overlay */}
       {showGradeInfo && (
         <>
           <div
             onClick={() => setShowGradeInfo(false)}
-            style={{ position: "fixed", inset: 0, zIndex: 999 }}
+            style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.25)" }}
           />
           <div style={{
-            position: "fixed",
-            ...(gradeInfoPos.openUp
-              ? { bottom: window.innerHeight - gradeInfoPos.top + 8 }
-              : { top: gradeInfoPos.top }),
-            left: gradeInfoPos.left,
+            position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
             zIndex: 1000, background: "var(--bg-primary, #fff)",
             border: "1px solid var(--border)", borderRadius: "var(--radius-sm, 8px)",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.15)", padding: 16,
-            width: 580, maxHeight: "70vh", overflowY: "auto",
-            fontSize: 12, color: "var(--text-primary)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.15)", padding: "24px 28px",
+            width: 620, maxWidth: "90vw", fontSize: 13, color: "var(--text-primary)",
           }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <span style={{ fontSize: 15, fontWeight: 600 }}>Clinical Grading Scale</span>
+              <button
+                onClick={() => setShowGradeInfo(false)}
+                aria-label="Close"
+                style={{
+                  background: "transparent", border: "none", cursor: "pointer",
+                  fontSize: 18, color: "var(--text-muted)", padding: "0 4px", lineHeight: 1,
+                }}
+              >&times;</button>
+            </div>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: "2px solid var(--border)" }}>
-                  <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Grade</th>
-                  <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Category</th>
-                  <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Definition</th>
+                  <th style={{ textAlign: "left", padding: "6px 10px", fontWeight: 600 }}>Grade</th>
+                  <th style={{ textAlign: "left", padding: "6px 10px", fontWeight: 600 }}>Category</th>
+                  <th style={{ textAlign: "left", padding: "6px 10px", fontWeight: 600 }}>Definition</th>
                 </tr>
               </thead>
               <tbody>
                 {CLINICAL_GRADES.map((g) => (
                   <tr key={g.grade} style={{ borderBottom: "1px solid var(--border-subtle, #eee)" }}>
-                    <td style={{ padding: "6px 8px", fontWeight: 600 }}>{g.grade}</td>
-                    <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{g.label}</td>
-                    <td style={{ padding: "6px 8px" }}>{g.description}</td>
+                    <td style={{ padding: "10px 10px", fontWeight: 600 }}>{g.grade}</td>
+                    <td style={{ padding: "10px 10px", whiteSpace: "nowrap" }}>{g.label}</td>
+                    <td style={{ padding: "10px 10px" }}>{g.description}</td>
                   </tr>
                 ))}
               </tbody>
