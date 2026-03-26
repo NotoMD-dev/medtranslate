@@ -339,7 +339,56 @@ export default function ReviewPage() {
               {/* Grading controls */}
               <div className="grade-controls">
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 8 }}>Assign Clinical Significance Grade:</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    Assign Clinical Significance Grade:
+                    <span
+                      style={{ position: "relative", display: "inline-flex", cursor: "help" }}
+                      onMouseEnter={(e) => {
+                        const tip = e.currentTarget.querySelector("[data-tooltip]") as HTMLElement;
+                        if (tip) tip.style.display = "block";
+                      }}
+                      onMouseLeave={(e) => {
+                        const tip = e.currentTarget.querySelector("[data-tooltip]") as HTMLElement;
+                        if (tip) tip.style.display = "none";
+                      }}
+                    >
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        width: 16, height: 16, borderRadius: "50%",
+                        border: "1px solid var(--text-muted)", fontSize: 11,
+                        fontWeight: 700, color: "var(--text-muted)", lineHeight: 1,
+                      }}>?</span>
+                      <div
+                        data-tooltip
+                        style={{
+                          display: "none", position: "absolute", top: "calc(100% + 8px)", left: 0,
+                          zIndex: 100, background: "var(--bg-primary, #fff)",
+                          border: "1px solid var(--border)", borderRadius: "var(--radius-sm, 8px)",
+                          boxShadow: "0 4px 16px rgba(0,0,0,0.12)", padding: 16,
+                          width: 520, fontSize: 12, color: "var(--text-primary)",
+                        }}
+                      >
+                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                          <thead>
+                            <tr style={{ borderBottom: "2px solid var(--border)" }}>
+                              <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Grade</th>
+                              <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Category</th>
+                              <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Definition</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {CLINICAL_GRADES.map((g) => (
+                              <tr key={g.grade} style={{ borderBottom: "1px solid var(--border-subtle, #eee)" }}>
+                                <td style={{ padding: "6px 8px", fontWeight: 600 }}>{g.grade}</td>
+                                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{g.label}</td>
+                                <td style={{ padding: "6px 8px" }}>{g.description}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </span>
+                  </div>
                   <div className="grade-buttons">
                     {CLINICAL_GRADES.map((g) => {
                       const isActive = grades[currentPair.pair_id] === g.grade;
