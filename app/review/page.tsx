@@ -25,6 +25,7 @@ export default function ReviewPage() {
   const [view, setView] = useState<ReviewView>("queue");
   const [jumpInput, setJumpInput] = useState("");
   const [refFlagOpen, setRefFlagOpen] = useState(false);
+  const [showGradeInfo, setShowGradeInfo] = useState(false);
 
   useEffect(() => {
     getSessionJobResultsAsync().then((persisted) => {
@@ -339,7 +340,20 @@ export default function ReviewPage() {
               {/* Grading controls */}
               <div className="grade-controls">
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 8 }}>Assign Clinical Significance Grade:</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    Assign Clinical Significance Grade:
+                    <button
+                      onClick={() => setShowGradeInfo((v) => !v)}
+                      aria-label="Show grading scale definitions"
+                      style={{
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        width: 16, height: 16, borderRadius: "50%",
+                        border: "1px solid var(--text-muted)", fontSize: 11,
+                        fontWeight: 700, color: "var(--text-muted)", lineHeight: 1,
+                        background: "transparent", cursor: "pointer", padding: 0,
+                      }}
+                    >?</button>
+                  </div>
                   <div className="grade-buttons">
                     {CLINICAL_GRADES.map((g) => {
                       const isActive = grades[currentPair.pair_id] === g.grade;
@@ -560,6 +574,52 @@ export default function ReviewPage() {
             </table>
           </div>
         </div>
+      )}
+      {/* Grade info modal - centered overlay */}
+      {showGradeInfo && (
+        <>
+          <div
+            onClick={() => setShowGradeInfo(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.25)" }}
+          />
+          <div style={{
+            position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+            zIndex: 1000, background: "var(--bg-primary, #fff)",
+            border: "1px solid var(--border)", borderRadius: "var(--radius-sm, 8px)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.15)", padding: "24px 28px",
+            width: 620, maxWidth: "90vw", fontSize: 13, color: "var(--text-primary)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <span style={{ fontSize: 15, fontWeight: 600 }}>Clinical Grading Scale</span>
+              <button
+                onClick={() => setShowGradeInfo(false)}
+                aria-label="Close"
+                style={{
+                  background: "transparent", border: "none", cursor: "pointer",
+                  fontSize: 18, color: "var(--text-muted)", padding: "0 4px", lineHeight: 1,
+                }}
+              >&times;</button>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid var(--border)" }}>
+                  <th style={{ textAlign: "left", padding: "6px 10px", fontWeight: 600 }}>Grade</th>
+                  <th style={{ textAlign: "left", padding: "6px 10px", fontWeight: 600 }}>Category</th>
+                  <th style={{ textAlign: "left", padding: "6px 10px", fontWeight: 600 }}>Definition</th>
+                </tr>
+              </thead>
+              <tbody>
+                {CLINICAL_GRADES.map((g) => (
+                  <tr key={g.grade} style={{ borderBottom: "1px solid var(--border-subtle, #eee)" }}>
+                    <td style={{ padding: "10px 10px", fontWeight: 600 }}>{g.grade}</td>
+                    <td style={{ padding: "10px 10px", whiteSpace: "nowrap" }}>{g.label}</td>
+                    <td style={{ padding: "10px 10px" }}>{g.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );

@@ -88,31 +88,31 @@ export interface ClinicalGradeInfo {
 export const CLINICAL_GRADES: ClinicalGradeInfo[] = [
   {
     grade: 0,
-    label: "No error",
+    label: "No Error",
     color: "#10b981",
     bg: "#ecfdf5",
-    description: "LLM translation accurately preserves clinical meaning",
+    description: "Translation accurately preserves the clinical meaning of the source text",
   },
   {
     grade: 1,
-    label: "Minor linguistic",
+    label: "Minor Linguistic Error",
     color: "#f59e0b",
     bg: "#fffbeb",
-    description: "Stylistic or grammatical difference, no change in clinical meaning",
+    description: "Stylistic or grammatical difference that does not change the clinical meaning of the source text",
   },
   {
     grade: 2,
-    label: "Moderate error",
+    label: "Addition or Omission Error",
     color: "#f97316",
     bg: "#fff7ed",
-    description: "Potential for confusion, unlikely to change clinical management",
+    description: "Translation contains addition or omission errors that do not change the meaning of the original clinical context",
   },
   {
     grade: 3,
-    label: "Clinically significant",
+    label: "Clinically Significant Error",
     color: "#ef4444",
     bg: "#fef2f2",
-    description: "Could alter diagnosis, treatment, or disposition",
+    description: "Translation error that could lead to a clinically significant change in diagnosis, treatment, or patient disposition (e.g., omitted negation, incorrect dosage or frequency, severity misrepresentation)",
   },
 ];
 
