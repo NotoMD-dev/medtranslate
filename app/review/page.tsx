@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import Header from "@/components/Header";
 import { CLINICAL_GRADES, REFERENCE_FLAG_REASONS } from "@/lib/types";
 import { exportReviewCSV, downloadFile } from "@/lib/csv";
@@ -25,6 +25,9 @@ export default function ReviewPage() {
   const [view, setView] = useState<ReviewView>("queue");
   const [jumpInput, setJumpInput] = useState("");
   const [refFlagOpen, setRefFlagOpen] = useState(false);
+  const [showGradeInfo, setShowGradeInfo] = useState(false);
+  const [gradeInfoPos, setGradeInfoPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const gradeInfoBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     getSessionJobResultsAsync().then((persisted) => {
@@ -341,53 +344,24 @@ export default function ReviewPage() {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
                     Assign Clinical Significance Grade:
-                    <span
-                      style={{ position: "relative", display: "inline-flex", cursor: "help" }}
-                      onMouseEnter={(e) => {
-                        const tip = e.currentTarget.querySelector("[data-tooltip]") as HTMLElement;
-                        if (tip) tip.style.display = "block";
+                    <button
+                      ref={gradeInfoBtnRef}
+                      onClick={() => {
+                        if (!showGradeInfo && gradeInfoBtnRef.current) {
+                          const rect = gradeInfoBtnRef.current.getBoundingClientRect();
+                          setGradeInfoPos({ top: rect.bottom + 8, left: rect.left });
+                        }
+                        setShowGradeInfo((v) => !v);
                       }}
-                      onMouseLeave={(e) => {
-                        const tip = e.currentTarget.querySelector("[data-tooltip]") as HTMLElement;
-                        if (tip) tip.style.display = "none";
-                      }}
-                    >
-                      <span style={{
+                      aria-label="Show grading scale definitions"
+                      style={{
                         display: "inline-flex", alignItems: "center", justifyContent: "center",
                         width: 16, height: 16, borderRadius: "50%",
                         border: "1px solid var(--text-muted)", fontSize: 11,
                         fontWeight: 700, color: "var(--text-muted)", lineHeight: 1,
-                      }}>?</span>
-                      <div
-                        data-tooltip
-                        style={{
-                          display: "none", position: "absolute", top: "calc(100% + 8px)", left: 0,
-                          zIndex: 100, background: "var(--bg-primary, #fff)",
-                          border: "1px solid var(--border)", borderRadius: "var(--radius-sm, 8px)",
-                          boxShadow: "0 4px 16px rgba(0,0,0,0.12)", padding: 16,
-                          width: 520, fontSize: 12, color: "var(--text-primary)",
-                        }}
-                      >
-                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead>
-                            <tr style={{ borderBottom: "2px solid var(--border)" }}>
-                              <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Grade</th>
-                              <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Category</th>
-                              <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Definition</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {CLINICAL_GRADES.map((g) => (
-                              <tr key={g.grade} style={{ borderBottom: "1px solid var(--border-subtle, #eee)" }}>
-                                <td style={{ padding: "6px 8px", fontWeight: 600 }}>{g.grade}</td>
-                                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{g.label}</td>
-                                <td style={{ padding: "6px 8px" }}>{g.description}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </span>
+                        background: "transparent", cursor: "pointer", padding: 0,
+                      }}
+                    >?</button>
                   </div>
                   <div className="grade-buttons">
                     {CLINICAL_GRADES.map((g) => {
@@ -609,6 +583,41 @@ export default function ReviewPage() {
             </table>
           </div>
         </div>
+      )}
+      {/* Grade info popover - rendered at top level to avoid overflow clipping */}
+      {showGradeInfo && (
+        <>
+          <div
+            onClick={() => setShowGradeInfo(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 999 }}
+          />
+          <div style={{
+            position: "fixed", top: gradeInfoPos.top, left: gradeInfoPos.left,
+            zIndex: 1000, background: "var(--bg-primary, #fff)",
+            border: "1px solid var(--border)", borderRadius: "var(--radius-sm, 8px)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.15)", padding: 16,
+            width: 580, fontSize: 12, color: "var(--text-primary)",
+          }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid var(--border)" }}>
+                  <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Grade</th>
+                  <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Category</th>
+                  <th style={{ textAlign: "left", padding: "4px 8px", fontWeight: 600 }}>Definition</th>
+                </tr>
+              </thead>
+              <tbody>
+                {CLINICAL_GRADES.map((g) => (
+                  <tr key={g.grade} style={{ borderBottom: "1px solid var(--border-subtle, #eee)" }}>
+                    <td style={{ padding: "6px 8px", fontWeight: 600 }}>{g.grade}</td>
+                    <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{g.label}</td>
+                    <td style={{ padding: "6px 8px" }}>{g.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
