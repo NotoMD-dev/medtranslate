@@ -43,29 +43,23 @@ export default function MetricsPage() {
   );
   const totalGraded = graded.length;
 
-  // Performance by source (supports arbitrary corpora in a mixed dataset)
-  const uniqueSources = Array.from(new Set(completed.map((r) => r.source || "Unknown")));
-  const sources = uniqueSources.map((key, idx) => ({
-    key,
-    label:
-      key === "ClinSpEn_ClinicalCases"
-        ? "ClinSpEn (Case Reports)"
-        : key === "UMass_EHR"
-          ? "UMass (EHR Notes)"
-          : key,
-    color: idx % 2 === 0 ? "var(--accent)" : "#7C3AED",
-  }));
+  // Performance by source (works for any corpus labels in the dataset)
+  const sourceKeys = Array.from(new Set(completed.map((r) => r.source))).filter(Boolean);
 
-  const sourceMetrics = sources.map((src) => {
-    const srcCompleted = completed.filter((r) => r.source === src.key);
+  const sourceMetrics = sourceKeys.map((sourceKey) => {
+    const srcCompleted = completed.filter((r) => r.source === sourceKey);
     const srcMeteor = srcCompleted
       .map((r) => r.meteor)
       .filter((v): v is number => v != null);
     const srcBert = srcCompleted
       .map((r) => r.bertscore_f1)
       .filter((v): v is number => v != null);
+    const isClinspen = sourceKey === "ClinSpEn_ClinicalCases";
+    const isUmass = sourceKey === "UMass_EHR";
     return {
-      ...src,
+      key: sourceKey,
+      label: isClinspen ? "ClinSpEn" : isUmass ? "UMass" : sourceKey,
+      dotColor: isClinspen ? "var(--accent)" : isUmass ? "#7C3AED" : "var(--text-muted)",
       count: srcCompleted.length,
       meteor: srcMeteor.length > 0 ? summarizeMetric(srcMeteor).mean : null,
       bert: srcBert.length > 0 ? summarizeMetric(srcBert).mean : null,
@@ -233,16 +227,18 @@ export default function MetricsPage() {
             <tbody>
               {sourceMetrics.map((src) => {
                 const srcFlagged = completed.filter((r) => r.source === src.key && r.meteor != null && r.meteor < 0.4).length;
-                const corpusVal = corpusBleu
-                  ? (corpusBleu.by_source?.[src.key]
-                    ?? (src.key === "ClinSpEn_ClinicalCases" ? corpusBleu.clinspen : null)
-                    ?? (src.key === "UMass_EHR" ? corpusBleu.umass : null))
-                  : null;
+                const corpusVal = corpusBleu?.by_source?.[src.key] ?? (
+                  src.key === "ClinSpEn_ClinicalCases"
+                    ? corpusBleu?.clinspen
+                    : src.key === "UMass_EHR"
+                    ? corpusBleu?.umass
+                    : null
+                );
                 return (
                   <tr key={src.key}>
                     <td>
                       <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, color: "var(--text-primary)" }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: src.color }} />
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: src.dotColor }} />
                         {src.label}
                       </span>
                     </td>
