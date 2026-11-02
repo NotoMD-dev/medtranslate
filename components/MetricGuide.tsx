@@ -71,7 +71,7 @@ export const METRIC_EXPLAINERS: MetricExplainer[] = [
       { range: "Over 0.75", meaning: "Strong. Nearly the same content and wording." },
     ],
     gotcha:
-      "The ± number shown next to the average is the spread between sentences. A big spread means some sentences scored very well and others poorly. When the target language is not English, word forms and synonyms are matched with that language's stemmer and dictionary where NLTK has them (Spanish, French, Portuguese, German, Russian and Arabic get stemming; Spanish, French, Portuguese, Japanese, Chinese and Arabic get synonyms); Chinese, Japanese and Korean are scored character by character.",
+      "The ± number shown next to the average is the spread between sentences. A big spread means some sentences scored very well and others poorly.",
   },
   {
     key: "bertscore",
@@ -79,7 +79,7 @@ export const METRIC_EXPLAINERS: MetricExplainer[] = [
     range: "0 to 1 (rescaled, can dip slightly below 0)",
     oneLiner: "Compares meaning instead of words, using an AI language model.",
     howItWorks:
-      "Each word is turned into a point in \"meaning space\" by a language model (roberta-base when the target language is English, bert-base-multilingual-cased for any other target), and the score measures how close the AI translation's words are to the human translation's words in that space. \"The patient has no fever\" and \"Fever is absent\" score high even though almost no words match.",
+      "Each word is turned into a point in \"meaning space\" by a language model (roberta-base), and the score measures how close the AI translation's words are to the human translation's words in that space. \"The patient has no fever\" and \"Fever is absent\" score high even though almost no words match.",
     howCalculated: {
       formula: "F1 = 2PR / (P + R), then rescaled as (F1 \u2212 b) / (1 \u2212 b)",
       terms: "Every word in each sentence becomes a vector from the roberta-base model. R (recall) is the average, over the human translation's words, of each word's best cosine similarity to any AI word; P (precision) is the same in the other direction. b is a baseline similarity measured on random sentence pairs, so 0 means \"no better than random\" and 1 means identical.",
@@ -100,7 +100,7 @@ export const METRIC_EXPLAINERS: MetricExplainer[] = [
 
 export const METRIC_GUIDE_NOTES = {
   sharedIdea:
-    "All three scores compare the AI's translation against a human translation of the same sentence in the same target language (the \"reference\"). Higher is always better. None of them can tell whether the translation is medically safe; that is what the physician review step is for.",
+    "All three scores compare the AI's English translation against a human English translation of the same sentence (the \"reference\"). Higher is always better. None of them can tell whether the translation is medically safe; that is what the physician review step is for.",
   whyTheyDisagree: [
     "BLEU is strict about exact words, METEOR forgives synonyms, and BERTScore only cares about meaning. So the same translation can look bad on BLEU and fine on the other two.",
     "Low BLEU but decent METEOR and BERTScore usually means the AI rephrased, expanded abbreviations, or added extra words such as a note. That is not necessarily wrong.",

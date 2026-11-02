@@ -13,11 +13,11 @@ import { CLINICAL_GRADES, MODEL_OPTIONS, DEFAULT_SYSTEM_PROMPT } from "@/lib/typ
 const STEPS = [
   {
     title: "Upload",
-    text: "You give MedTranslate a spreadsheet of sentences. Each row has the original clinical text and a human-written translation to compare against. The column names say which way to translate: spanish_source plus english_reference means Spanish into English, and english_source plus spanish_reference means English into Spanish. No dataset? Load one of the built-in demo files on the Upload page.",
+    text: "You give MedTranslate a spreadsheet of sentences. Each row has the original clinical text (for example Spanish) and a human-written English translation to compare against. No dataset? Load one of the built-in demo files on the Upload page.",
   },
   {
     title: "Translate",
-    text: "The backend sends each sentence, one at a time, to the AI model you picked, with a short instruction telling it to act as a medical interpreter. The model's answer, in the target language, is saved next to the human translation.",
+    text: "The backend sends each sentence, one at a time, to the AI model you picked, with a short instruction telling it to act as a medical interpreter. The model's English answer is saved next to the human translation.",
   },
   {
     title: "Score",
@@ -84,26 +84,6 @@ const P: React.CSSProperties = { fontSize: 15, lineHeight: 1.7, color: "var(--te
 const LINK: React.CSSProperties = { color: "var(--accent-text)", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 3 };
 
 // ---------------------------------------------------------------------------
-// Creator and contact
-// ---------------------------------------------------------------------------
-
-/**
- * Shown in the "Creator and contact" section. Fill in `name` and `email` to
- * put a name on the card and enable the email button; both are left empty
- * here on purpose so no personal details are published by accident.
- */
-const CREATOR = {
-  /** Display name. Empty shows "the creator of ScopeMD". */
-  name: "",
-  /** Public contact address for the "Email me" button. Empty hides the button. */
-  email: "",
-  website: "https://scopemd.net",
-  websiteLabel: "ScopeMD.net",
-  formerly: "notomed.dev",
-  emailSubject: "MedTranslate question",
-};
-
-// ---------------------------------------------------------------------------
 // Section navigation
 // ---------------------------------------------------------------------------
 
@@ -114,7 +94,6 @@ const SECTIONS = [
   { id: "scores", label: "Reading the scores" },
   { id: "grading", label: "Physician grading scale" },
   { id: "data", label: "Data" },
-  { id: "creator", label: "Creator and contact" },
   { id: "caveat", label: "Not a clinical tool" },
 ] as const;
 
@@ -218,7 +197,7 @@ export default function AboutPage() {
         <SectionLabel>Purpose</SectionLabel>
         <Card>
           <p style={P}>
-            MedTranslate is a research instrument. It exists to answer one question: <strong style={{ color: "var(--text-primary)" }}>can a large language model translate clinical text accurately enough to be safe?</strong>
+            MedTranslate is a research instrument. It exists to answer one question: <strong style={{ color: "var(--text-primary)" }}>can a large language model translate medical text into English accurately enough to be safe?</strong>
           </p>
           <p style={P}>
             Hospitals see patients who speak many languages, and professional interpreters are not always available. AI translation is fast and cheap, but a single wrong word in a clinical note (a dropped &ldquo;no,&rdquo; a wrong dose, a swapped left and right) can change a diagnosis or a treatment. Before anyone relies on these models, their mistakes need to be counted and classified.
@@ -301,7 +280,7 @@ export default function AboutPage() {
               &ldquo;{DEFAULT_SYSTEM_PROMPT}&rdquo;
             </div>
             <p style={{ ...P, fontSize: 13, color: "var(--text-muted)", margin: "10px 0 0" }}>
-              The two language names follow the direction chosen on the Upload page, in either direction (for example English into Spanish). The same instruction goes to every model so the comparison is fair. Each sentence is sent on its own, with no other context.
+              The language name changes with the source language you pick. The same instruction goes to every model so the comparison is fair. Each sentence is sent on its own, with no other context.
             </p>
           </Card>
         </div>
@@ -373,58 +352,6 @@ export default function AboutPage() {
           <p style={{ ...P, marginBottom: 0 }}>
             To try MedTranslate without providing your own dataset, the <Link href="/" style={LINK}>Upload page</Link> includes small synthetic Spanish and French demonstration files. These files contain no real patient data.
           </p>
-        </Card>
-      </div>
-
-      {/* Creator and contact */}
-      <div id="creator" className="anim d5 about-section" style={{ marginBottom: 48 }}>
-        <SectionLabel>Creator and contact</SectionLabel>
-        <Card>
-          <div className="creator-card">
-            <div className="creator-mark" aria-hidden="true">
-              <span style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontWeight: 700 }}>Med</span>
-              <span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", display: "inline-block", margin: "0 1px 3px" }} />
-              <span style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic" }}>T</span>
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", marginBottom: 4 }}>
-                Built by {CREATOR.name || "the creator of ScopeMD"}
-              </div>
-              <p style={{ ...P, fontSize: 14, marginBottom: 8 }}>
-                MedTranslate is an independent research project from the maker of{" "}
-                <a href={CREATOR.website} target="_blank" rel="noopener noreferrer" style={LINK}>{CREATOR.websiteLabel}</a>
-                {" "}(formerly {CREATOR.formerly}), where you can find more clinical software and research tools.
-              </p>
-              <p style={{ ...P, fontSize: 14, marginBottom: 16 }}>
-                Questions about the methods, the datasets, or the scores? Found a translation the scores got wrong? Want to run the study on your own corpus or language pair? Get in touch.
-              </p>
-              <div className="button-row">
-                <a
-                  href={CREATOR.website}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ fontFamily: "var(--font)", fontSize: 14, fontWeight: 600, padding: "10px 20px", borderRadius: "var(--radius-sm)", background: "var(--accent)", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8 }}
-                >
-                  Visit {CREATOR.websiteLabel}
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                </a>
-                {CREATOR.email && (
-                  <a
-                    href={`mailto:${CREATOR.email}?subject=${encodeURIComponent(CREATOR.emailSubject)}`}
-                    style={{ fontFamily: "var(--font)", fontSize: 14, fontWeight: 600, padding: "10px 20px", borderRadius: "var(--radius-sm)", background: "transparent", color: "var(--accent-text)", border: "1.5px solid var(--accent)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8 }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                    Email me
-                  </a>
-                )}
-              </div>
-              {CREATOR.email && (
-                <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "10px 0 0" }}>
-                  Opens your mail app with a new message to <span style={{ color: "var(--text-secondary)" }}>{CREATOR.email}</span>.
-                </p>
-              )}
-            </div>
-          </div>
         </Card>
       </div>
 

@@ -38,12 +38,6 @@ class ModelConfig(BaseModel):
     # the model does not take an effort setting). Recorded so results stay
     # reproducible and the UI can show how the run was configured.
     reasoning_effort: Optional[str] = None
-    # Translation direction (language codes from config.LANGUAGES). The target
-    # language picks the tokenizer, stemmer, synonym dictionary and BERTScore
-    # model used for scoring. Older stored jobs carry no value and are treated
-    # as Spanish -> English, which is all the app did before.
-    source_language: str = "es"
-    target_language: str = "en"
 
 
 # ---------------------------------------------------------------------------
@@ -79,9 +73,6 @@ class SentenceMetrics(BaseModel):
     content_type: str
     source_text: str = ""
     spanish_source: str = ""  # backward compat
-    # The human reference translation and the model's translation, both in
-    # the job's target language. The field names predate support for targets
-    # other than English and are kept so stored results and exports still load.
     english_reference: str
     llm_english_translation: str
     meteor: Optional[float] = None

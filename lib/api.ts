@@ -86,21 +86,13 @@ function sleep(ms: number): Promise<void> {
 // POST /v1/parse — parse CSV or XLSX on the backend, return normalized rows
 // ---------------------------------------------------------------------------
 
-export interface ParsedFile {
-  rows: import("./types").TranslationPair[];
-  /** Columns the backend used, and the direction their names imply (null for generic columns). */
-  columns: import("./csv").DetectedColumns;
-}
-
 export async function parseFile(
   file: File,
   sourceColumn?: string,
-  referenceColumn?: string,
-): Promise<ParsedFile> {
+): Promise<import("./types").TranslationPair[]> {
   const form = new FormData();
   form.append("file", file);
   if (sourceColumn) form.append("source_column", sourceColumn);
-  if (referenceColumn) form.append("reference_column", referenceColumn);
 
   const resp = await safeFetch(`${BACKEND_URL}/v1/parse`, {
     method: "POST",
@@ -112,22 +104,8 @@ export async function parseFile(
     throw new Error(detail.detail || `Backend error: ${resp.status}`);
   }
 
-  const data: {
-    rows: import("./types").TranslationPair[];
-    source_column?: string;
-    reference_column?: string;
-    source_language?: string | null;
-    target_language?: string | null;
-  } = await resp.json();
-  return {
-    rows: data.rows,
-    columns: {
-      sourceColumn: data.source_column || null,
-      referenceColumn: data.reference_column || null,
-      sourceLanguage: data.source_language ?? null,
-      targetLanguage: data.target_language ?? null,
-    },
-  };
+  const data: { rows: import("./types").TranslationPair[] } = await resp.json();
+  return data.rows;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,9 +121,6 @@ export async function submitJob(
     maxTokens: number;
     computeBertscore?: boolean;
     metricsOnly?: boolean;
-    /** Language codes; the backend falls back to the column names, then Spanish to English. */
-    sourceLanguage?: string;
-    targetLanguage?: string;
   },
 ): Promise<JobCreated> {
   const form = new FormData();
@@ -156,8 +131,6 @@ export async function submitJob(
   form.append("max_tokens", String(config.maxTokens));
   form.append("compute_bertscore", String(config.computeBertscore ?? false));
   form.append("metrics_only", String(config.metricsOnly ?? false));
-  if (config.sourceLanguage) form.append("source_language", config.sourceLanguage);
-  if (config.targetLanguage) form.append("target_language", config.targetLanguage);
 
   const resp = await safeFetch(`${BACKEND_URL}/v1/jobs`, {
     method: "POST",

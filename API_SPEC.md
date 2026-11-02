@@ -23,21 +23,18 @@ Submit a CSV or XLSX file and model configuration to start a translation + metri
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `file` | file (CSV/XLSX) | Yes | — | CSV or XLSX file with a `<language>_source` column (e.g. `spanish_source`) and a `<language>_reference` column (e.g. `english_reference`); the names set the direction. Generic `source_text` / `reference_text` are also accepted. Optional `error` / `error_kind` columns let a metrics-only re-score keep failed rows' status. |
+| `file` | file (CSV/XLSX) | Yes | — | CSV or XLSX file with a source-language column (e.g. `spanish_source`) and `english_reference`. Optional `error` / `error_kind` columns let a metrics-only re-score keep failed rows' status. |
 | `model` | string | No | `"gpt-5.6-sol"` | Model identifier (`gpt-5.6-sol` or `claude-opus-5-5`) |
 | `system_prompt` | string | No | *(medical interpreter prompt)* | System prompt for the LLM |
 | `temperature` | float | No | `0.0` | Accepted for compatibility but overridden: the backend sends `0.0` to models that accept temperature and omits it for models that reject it (see `translation_config.temperature` in results) |
 | `max_tokens` | int | No | `1024` | Maximum tokens in the LLM response |
 | `compute_bertscore` | boolean | No | `false` | Whether to compute BERTScore (requires ~400MB torch) |
-| `source_language` | string | No | from column names, else `es` | Language code of the text to translate (`en`, `es`, `fr`, `ko`, `zh`, `pt`, `de`, `ar`, `ja`, `ru`) |
-| `target_language` | string | No | from column names, else `en` | Language code of the reference and the translation. Picks the BLEU tokenizer, METEOR stemmer/synonyms and BERTScore model (`roberta-base` for `en`, `bert-base-multilingual-cased` otherwise). Must differ from `source_language`. |
-| `source_column` / `reference_column` | string | No | detected | Override which columns hold the source text and the reference |
 
 **Supported file types**: `.csv`, `.xlsx`
 
-**Required columns**: one `<language>_source` column and one `<language>_reference` column (e.g. `spanish_source` + `english_reference`, or `english_source` + `spanish_reference`)
+**Required columns**: `spanish_source`
 
-**Optional columns**: `pair_id`, `source`, `content_type`, `llm_translation` (or `llm_english_translation`), `error`, `error_kind`
+**Optional columns**: `pair_id`, `source`, `content_type`, `english_reference`, `llm_english_translation`
 
 ### Response — Success
 
@@ -55,7 +52,7 @@ Submit a CSV or XLSX file and model configuration to start a translation + metri
 
 ```json
 {
-  "detail": "Missing a source column such as \"spanish_source\" or \"english_source\". Name the columns after their languages so the app knows which way to translate. Found: pair_id, texto"
+  "detail": "CSV must contain a \"spanish_source\" column"
 }
 ```
 

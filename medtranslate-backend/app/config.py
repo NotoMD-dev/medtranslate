@@ -18,48 +18,15 @@ CORS_ORIGINS: list[str] = (
 
 # Default translation settings
 DEFAULT_MODEL: str = os.environ.get("DEFAULT_MODEL", "gpt-5.6-sol")
-# Languages the app can translate between. Column names in uploaded files
-# are built from the lowercase name: "<name>_source" holds the text to
-# translate and "<name>_reference" the human translation to score against,
-# so the file itself says which way the translation goes (e.g.
-# spanish_source + english_reference, or english_source + french_reference).
-# Keep in sync with LANGUAGES in lib/types.ts.
-LANGUAGES: dict[str, str] = {
-    "en": "english",
-    "es": "spanish",
-    "fr": "french",
-    "ko": "korean",
-    "zh": "chinese",
-    "pt": "portuguese",
-    "de": "german",
-    "ar": "arabic",
-    "ja": "japanese",
-    "ru": "russian",
-}
-DEFAULT_SOURCE_LANGUAGE: str = "es"
-DEFAULT_TARGET_LANGUAGE: str = "en"
-
-
-def language_label(code: str) -> str:
-    """Human-readable name for a language code ("es" -> "Spanish")."""
-    return LANGUAGES.get(code, code).capitalize()
-
-
-def build_system_prompt(source_language: str, target_language: str) -> str:
-    """Keep in sync with buildSystemPrompt() in lib/types.ts. The final sentence
-    matters for scoring: metrics compare the whole reply to the reference, so a
-    preamble or note counts as translation text and lowers BLEU sharply."""
-    src = language_label(source_language)
-    tgt = language_label(target_language)
-    return (
-        f"You are a medical interpreter. Translate the following {src} clinical "
-        f"text into {tgt}, preserving all medical terminology and clinical meaning. "
-        f"Output only the {tgt} translation, with no preamble, notes, quotation "
-        "marks, or explanations."
-    )
-
-
-DEFAULT_SYSTEM_PROMPT: str = build_system_prompt(DEFAULT_SOURCE_LANGUAGE, DEFAULT_TARGET_LANGUAGE)
+# Keep in sync with buildSystemPrompt() in lib/types.ts. The final sentence
+# matters for scoring: metrics compare the whole reply to the reference, so a
+# preamble or note counts as translation text and lowers BLEU sharply.
+DEFAULT_SYSTEM_PROMPT: str = (
+    "You are a medical interpreter. Translate the following Spanish clinical "
+    "text into English, preserving all medical terminology and clinical meaning. "
+    "Output only the English translation, with no preamble, notes, quotation "
+    "marks, or explanations."
+)
 DEFAULT_TEMPERATURE: float = 0.0
 DEFAULT_MAX_TOKENS: int = 1024
 
@@ -85,6 +52,16 @@ TRANSLATE_RETRY_DELAY: float = 4.0
 # the path cannot be written (e.g. the Render Disk is not mounted yet).
 DATABASE_PATH: str = os.environ.get("DATABASE_PATH", "/data/medtranslate.db")
 
-# Column names derived from the language table, plus the generic fallbacks.
-SOURCE_LANGUAGE_COLUMNS: list[str] = [f"{name}_source" for name in LANGUAGES.values()] + ["source_text"]
-REFERENCE_LANGUAGE_COLUMNS: list[str] = [f"{name}_reference" for name in LANGUAGES.values()] + ["reference_text"]
+# Known source language column names
+SOURCE_LANGUAGE_COLUMNS: list[str] = [
+    "spanish_source",
+    "french_source",
+    "korean_source",
+    "chinese_source",
+    "portuguese_source",
+    "german_source",
+    "arabic_source",
+    "japanese_source",
+    "russian_source",
+    "source_text",
+]

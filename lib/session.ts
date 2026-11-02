@@ -15,7 +15,6 @@ const STORAGE_KEYS = {
   csvFile: "medtranslate:csvFile",
   model: "medtranslate:model",
   sourceLanguage: "medtranslate:sourceLanguage",
-  targetLanguage: "medtranslate:targetLanguage",
   comparisonResults: "medtranslate:comparisonResults",
 } as const;
 
@@ -352,21 +351,6 @@ export function setSessionSourceLanguage(lang: string | undefined) {
   }
 }
 
-// Target language
-export function getSessionTargetLanguage() {
-  if (!canUseStorage()) return undefined;
-  return localStorage.getItem(STORAGE_KEYS.targetLanguage) || undefined;
-}
-
-export function setSessionTargetLanguage(lang: string | undefined) {
-  if (!canUseStorage()) return;
-  if (lang == null) {
-    localStorage.removeItem(STORAGE_KEYS.targetLanguage);
-  } else {
-    localStorage.setItem(STORAGE_KEYS.targetLanguage, lang);
-  }
-}
-
 // Comparison results (stores results keyed by model id for head-to-head)
 export function getSessionComparisonResults() {
   return readJSON<Record<string, import("@/lib/types").JobResults>>(STORAGE_KEYS.comparisonResults);
@@ -401,7 +385,6 @@ export function clearSessionState() {
   setSessionCsvFileName(undefined);
   setSessionModel(undefined);
   setSessionSourceLanguage(undefined);
-  setSessionTargetLanguage(undefined);
   setSessionComparisonResults(undefined);
   // Also clear IndexedDB (fire-and-forget)
   setJobResultsIDB(undefined).catch(() => {});

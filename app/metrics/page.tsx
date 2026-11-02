@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
-import { languageLabel, sourceLanguageOf, targetLanguageOf, bertscoreModelFor } from "@/lib/types";
 import MetricGuideLink from "@/components/MetricGuide";
 import { CLINICAL_GRADES } from "@/lib/types";
 import { summarizeMetric, countRun, failureReasons, isScored, isRefused, applyRefusalOverrides, bleuBand, meteorBand, bandStyle, DEFAULT_REVIEW_THRESHOLD, SMALL_SAMPLE_THRESHOLD, explainRefusal } from "@/lib/metrics";
@@ -109,7 +108,6 @@ export default function MetricsPage() {
           {sentences.length > 0 ? (
             <>
               <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{counts.completed}</strong> of {sentences.length} translations completed
-              {" "}&middot; <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{languageLabel(sourceLanguageOf(jobResults?.translation_config))} &rarr; {languageLabel(targetLanguageOf(jobResults?.translation_config))}</strong>
               {counts.refused > 0 && <> &middot; <span style={{ color: "var(--danger)" }}>{counts.refused} refused (scored 0)</span></>}
               {counts.excluded > 0 && <> &middot; {counts.excluded} excluded by reviewer</>}
               {counts.incomplete > 0 && <> &middot; <span style={{ color: "var(--warning)" }}>{counts.incomplete} incomplete (not scored)</span></>}
@@ -240,7 +238,7 @@ export default function MetricsPage() {
                 {bertSummary.mean.toFixed(3)}
               </div>
               <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
-                Rescaled with baseline ({bertscoreModelFor(targetLanguageOf(jobResults?.translation_config))})<br />n = {bertValues.length}
+                Rescaled with baseline (roberta-base)<br />n = {bertValues.length}
               </div>
             </div>
           </div>
