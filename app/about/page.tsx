@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import MetricGuideLink, { METRIC_EXPLAINERS, METRIC_GUIDE_NOTES } from "@/components/MetricGuide";
@@ -87,112 +87,15 @@ const LINK: React.CSSProperties = { color: "var(--accent-text)", fontWeight: 600
 // About Creator
 // ---------------------------------------------------------------------------
 
-/**
- * Shown in the "About Creator" section. `email` drives the "Contact me"
- * popup (shows the address with copy and open-in-mail-app actions); leave
- * it empty to hide the button.
- */
+/** Shown in the "About Creator" section. `email` drives the "Email me" link. */
 const CREATOR = {
   name: "Yasmine Abbey",
   credentials: "MD, MSc",
   initials: "YA",
-  tagline: ["Internal medicine", "inpatient tooling", "AI-assisted builds"],
-  /** Public contact address shown in the "Contact me" popup. Empty hides the button. */
   email: "yasmineabbey@gmail.com",
   website: "https://scopemd.net",
-  websiteLabel: "scopeMD",
-  formerly: "notomed.dev",
-  emailSubject: "MedTranslate question",
+  websiteLabel: "scopeMD.net",
 };
-
-/**
- * "Contact me" button that opens a small popup with the email address, a
- * copy button and an open-in-mail-app link, like the contact card on
- * scopeMD. Closes on Escape, on a click outside, or with the close button.
- */
-function ContactButton({ email, subject }: { email: string; subject: string }) {
-  const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    const onClick = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onClick);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onClick);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 2000);
-    return () => clearTimeout(t);
-  }, [copied]);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(email);
-      setCopied(true);
-    } catch {
-      // Clipboard blocked (http, permissions): select the text instead.
-      const el = wrapRef.current?.querySelector<HTMLElement>("[data-email]");
-      if (el) {
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        window.getSelection()?.removeAllRanges();
-        window.getSelection()?.addRange(range);
-      }
-    }
-  };
-
-  const mailto = `mailto:${email}?subject=${encodeURIComponent(subject)}`;
-
-  return (
-    <div ref={wrapRef} className="contact-wrap">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        style={{ fontFamily: "var(--font)", fontSize: 14, fontWeight: 600, padding: "10px 20px", borderRadius: "var(--radius-sm)", background: open ? "var(--accent-soft)" : "transparent", color: "var(--accent-text)", border: "1.5px solid var(--accent)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-        Contact me
-      </button>
-      {open && (
-        <div role="dialog" aria-label="Contact" className="contact-popup">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)" }}>Email</div>
-            <button type="button" onClick={() => setOpen(false)} aria-label="Close" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 18, lineHeight: 1, color: "var(--text-muted)", padding: 0 }}>&times;</button>
-          </div>
-          <div data-email style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", overflowWrap: "anywhere", marginBottom: 12, userSelect: "all" }}>{email}</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={copy}
-              style={{ fontFamily: "var(--font)", fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: "var(--radius-xs)", background: copied ? "var(--accent-soft)" : "var(--bg-inset)", color: copied ? "var(--accent-text)" : "var(--text-secondary)", border: "1px solid var(--border)", cursor: "pointer" }}
-            >
-              {copied ? "Copied!" : "Copy address"}
-            </button>
-            <a
-              href={mailto}
-              style={{ fontFamily: "var(--font)", fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: "var(--radius-xs)", background: "var(--accent)", color: "#fff", textDecoration: "none" }}
-            >
-              Open in mail app
-            </a>
-          </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>Subject will be prefilled: &ldquo;{subject}&rdquo;</div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Section navigation
@@ -467,31 +370,21 @@ export default function AboutPage() {
         </Card>
       </div>
 
-      {/* About Creator. Lifted above the sections that follow so the contact
-          popup is not painted under the next animated section. */}
-      <div id="creator" className="anim d5 about-section" style={{ marginBottom: 48, position: "relative", zIndex: 2 }}>
+      {/* About Creator */}
+      <div id="creator" className="anim d5 about-section" style={{ marginBottom: 48 }}>
         <SectionLabel>About Creator</SectionLabel>
         <Card>
           <div className="creator-card">
             <div className="creator-mark" aria-hidden="true">{CREATOR.initials}</div>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2 }}>
-                Hi, I&rsquo;m {CREATOR.name.split(" ")[0]} <span aria-hidden="true">&#128075;</span>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2 }}>
+                {CREATOR.name}, {CREATOR.credentials}
               </div>
-              <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 14 }}>
-                <strong style={{ color: "var(--text-secondary)" }}>{CREATOR.name}, {CREATOR.credentials}</strong>
-                {" "}&middot; {CREATOR.tagline.join(" \u00b7 ")}
+              <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 12 }}>
+                Physician builder &middot; creator of <a href={CREATOR.website} target="_blank" rel="noopener noreferrer" style={LINK}>{CREATOR.websiteLabel}</a>
               </div>
-              <p style={{ ...P, fontSize: 14 }}>
-                I am an Internal Medicine physician, recently graduated from Cedars-Sinai. Much of my daily work involved recurring, cognitively heavy tasks with few streamlined, web-based tools to lighten the load, so I started building my own and sharing them. That became{" "}
-                <a href={CREATOR.website} target="_blank" rel="noopener noreferrer" style={LINK}>{CREATOR.websiteLabel}</a>
-                {" "}(formerly {CREATOR.formerly}): a collection of physician-built tools meant to reduce cognitive load, standardize workflows, and make on-service life a little easier.
-              </p>
-              <p style={{ ...P, fontSize: 14 }}>
-                MedTranslate comes from the same place. Hospitals see patients who speak many languages, interpreters are not always available, and AI translation is tempting. Before anyone relies on it, its mistakes need to be counted. I am a largely self-taught developer, and this site was pieced together with determination and help from LLMs, so if you find it useful, please share it or tell me how to make it better.
-              </p>
               <p style={{ ...P, fontSize: 14, marginBottom: 16 }}>
-                Questions about the methods, the datasets, or the scores? Found a translation the scores got wrong? Want to run the study on your own corpus? Get in touch.
+                MedTranslate is an independent research project by a physician who builds clinical software. Questions about the methods, the datasets, or the scores? Found a translation the scores got wrong? Get in touch.
               </p>
               <div className="button-row">
                 <a
@@ -503,7 +396,13 @@ export default function AboutPage() {
                   Visit {CREATOR.websiteLabel}
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 </a>
-                {CREATOR.email && <ContactButton email={CREATOR.email} subject={CREATOR.emailSubject} />}
+                <a
+                  href={`mailto:${CREATOR.email}`}
+                  style={{ fontFamily: "var(--font)", fontSize: 14, fontWeight: 600, padding: "10px 20px", borderRadius: "var(--radius-sm)", background: "transparent", color: "var(--accent-text)", border: "1.5px solid var(--accent)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8 }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                  Email me
+                </a>
               </div>
             </div>
           </div>
