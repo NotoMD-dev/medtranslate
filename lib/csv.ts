@@ -1,5 +1,5 @@
 import type { TranslationPair, SentenceMetrics, ClinicalGrade, ReferenceFlag, RefusalOverride, HeadToHeadJudgment } from "./types";
-import { SOURCE_LANGUAGES } from "./types";
+import { LANGUAGES } from "./types";
 import { rowStatus as classifyRow } from "./metrics";
 
 // ---------------------------------------------------------------------------
@@ -23,35 +23,69 @@ function toCSVString(headers: string[], rows: string[][]): string {
 // CSV parsing
 // ---------------------------------------------------------------------------
 
+export interface DetectedColumns {
+  sourceColumn: string | null;
+  referenceColumn: string | null;
+  /** Language codes implied by the column names; null for generic columns. */
+  sourceLanguage: string | null;
+  targetLanguage: string | null;
+}
+
 /**
- * Detect which source language column exists in the headers.
- * Returns the matching column name, or null if none found.
+ * Work out the source and reference columns from a header row.
+ *
+ * The standard format names each column after its language:
+ * `<language>_source` holds the text to translate and `<language>_reference`
+ * the human translation it is scored against, e.g. `spanish_source` +
+ * `english_reference` (Spanish to English) or `english_source` +
+ * `spanish_reference` (English to Spanish). Generic `source_text` /
+ * `reference_text` columns are also accepted, in which case the direction is
+ * chosen on the Upload page. `english_reference` is still accepted as the
+ * reference column for files made for older versions.
  */
-export function detectSourceColumn(headers: string[]): string | null {
+export function detectColumns(headers: string[]): DetectedColumns {
   const lower = headers.map((h) => h.toLowerCase().trim());
-  for (const lang of SOURCE_LANGUAGES) {
-    if (lower.includes(lang.columnName)) return lang.columnName;
-  }
-  if (lower.includes("source_text")) return "source_text";
-  return null;
+  const has = (c: string) => lower.includes(c);
+  const srcLang = LANGUAGES.find((l) => has(`${l.name}_source`));
+  const refLang = LANGUAGES.find((l) => has(`${l.name}_reference`));
+  const sourceColumn = srcLang ? `${srcLang.name}_source` : has("source_text") ? "source_text" : null;
+  const referenceColumn = refLang ? `${refLang.name}_reference` : has("reference_text") ? "reference_text" : null;
+  return {
+    sourceColumn,
+    referenceColumn,
+    sourceLanguage: srcLang?.code ?? null,
+    targetLanguage: refLang?.code ?? null,
+  };
+}
+
+/** Header row of a CSV string (empty when the text has no rows). */
+export function csvHeaders(text: string): string[] {
+  const first = text.split("\n").find((l) => l.trim());
+  return first ? parseCSVLine(first).map((h) => h.trim()) : [];
 }
 
 /**
  * Parse a CSV string into TranslationPair objects.
  * Handles quoted fields with commas and newlines.
  */
-export function parseCSV(text: string, sourceColumn?: string): TranslationPair[] {
+export function parseCSV(
+  text: string,
+  columns?: { sourceColumn?: string | null; referenceColumn?: string | null },
+): TranslationPair[] {
   const lines = text.split("\n").filter((l) => l.trim());
   if (lines.length < 2) return [];
 
-  const headers = parseCSVLine(lines[0]);
-  const srcCol = sourceColumn || detectSourceColumn(headers) || "spanish_source";
+  const headers = parseCSVLine(lines[0]).map((h) => h.trim());
+  const detected = detectColumns(headers);
+  const srcCol = (columns?.sourceColumn && headers.includes(columns.sourceColumn) ? columns.sourceColumn : null) ?? detected.sourceColumn;
+  const refCol = (columns?.referenceColumn && headers.includes(columns.referenceColumn) ? columns.referenceColumn : null) ?? detected.referenceColumn;
 
-  const required = [srcCol, "english_reference"];
-  const missing = required.filter((col) => !headers.includes(col));
+  const missing: string[] = [];
+  if (!srcCol) missing.push('a source column such as "spanish_source" or "english_source"');
+  if (!refCol) missing.push('a reference column such as "english_reference" or "spanish_reference"');
   if (missing.length > 0) {
     throw new Error(
-      `Missing required column${missing.length > 1 ? "s" : ""}: ${missing.map((c) => `"${c}"`).join(", ")}. Found: ${headers.join(", ")}`,
+      `Missing ${missing.join(" and ")}. Name the columns after their languages so the app knows which way to translate. Found: ${headers.join(", ")}`,
     );
   }
 
@@ -63,15 +97,16 @@ export function parseCSV(text: string, sourceColumn?: string): TranslationPair[]
     const obj: Record<string, string> = {};
     headers.forEach((h, idx) => { obj[h] = values[idx] || ""; });
 
-    const sourceText = obj[srcCol] || "";
+    const sourceText = obj[srcCol!] || "";
     rows.push({
       pair_id: obj.pair_id || `row_${i}`,
       source: obj.source || "ClinSpEn_ClinicalCases",
       content_type: obj.content_type || "clinical_case_report",
-      english_reference: obj.english_reference || "",
+      english_reference: obj[refCol!] || "",
       source_text: sourceText,
       spanish_source: sourceText,
-      llm_english_translation: obj.llm_english_translation || "",
+      // A pre-filled translation (e.g. from an earlier export).
+      llm_english_translation: obj.llm_translation || obj.llm_english_translation || "",
     });
   }
 
@@ -177,8 +212,8 @@ export function exportResultsCSV(
   overrides?: Record<string, RefusalOverride>,
 ): string {
   const headers = [
-    "pair_id", "source", "content_type", "english_reference", "source_text",
-    "llm_english_translation", "meteor_score", "bertscore_f1",
+    "pair_id", "source", "content_type", "reference_translation", "source_text",
+    "llm_translation", "meteor_score", "bertscore_f1",
     "clinical_significance_grade", "reference_flag_issues", "reference_flag_notes",
     "status", "error", "format_warning", "reviewer_override_note",
   ];
@@ -216,8 +251,8 @@ export function exportReviewCSV(
   overrides?: Record<string, RefusalOverride>,
 ): string {
   const headers = [
-    "pair_id", "source", "content_type", "english_reference", "source_text",
-    "llm_english_translation", "meteor_score", "bertscore_f1",
+    "pair_id", "source", "content_type", "reference_translation", "source_text",
+    "llm_translation", "meteor_score", "bertscore_f1",
     "clinical_significance_grade", "reference_flag_issues", "reference_flag_notes",
     "status", "error", "format_warning", "reviewer_override_note",
   ];
@@ -263,7 +298,7 @@ export function exportHeadToHeadCSV(
   judgments?: Record<string, HeadToHeadJudgment>,
 ): string {
   const headers = [
-    "pair_id", "source", "source_text", "english_reference",
+    "pair_id", "source", "source_text", "reference_translation",
     "model_a", "translation_a", "meteor_a", "bertscore_a", "status_a",
     "model_b", "translation_b", "meteor_b", "bertscore_b", "status_b",
     "meteor_difference", "reviewer_preference", "reviewer_note",

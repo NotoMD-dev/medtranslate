@@ -1,15 +1,19 @@
 import type { SentenceMetrics, ClinicalGrade } from "@/lib/types";
 import GradeSelector from "./GradeSelector";
 import { explainRefusal, splitRefusalError } from "@/lib/metrics";
+import { languageLabel } from "@/lib/types";
 
 interface Props {
   sentence: SentenceMetrics;
   grade: ClinicalGrade | null;
   onGrade: (grade: ClinicalGrade) => void;
   onClose: () => void;
+  /** Target language code of the run (the reference and translation are in it). */
+  targetLanguage?: string;
 }
 
-export default function PairDetail({ sentence, grade, onGrade, onClose }: Props) {
+export default function PairDetail({ sentence, grade, onGrade, onClose, targetLanguage = "en" }: Props) {
+  const targetLabel = languageLabel(targetLanguage);
   return (
     <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
@@ -32,7 +36,7 @@ export default function PairDetail({ sentence, grade, onGrade, onClose }: Props)
           <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", maxHeight: 176, overflow: "auto" }}>{sentence.source_text || sentence.spanish_source}</div>
         </div>
         <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>English Reference (Gold Standard)</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>{targetLabel} Reference (Gold Standard)</div>
           <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", maxHeight: 176, overflow: "auto" }}>{sentence.english_reference}</div>
         </div>
         <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>

@@ -16,6 +16,7 @@ from typing import Optional
 
 from app.config import DATABASE_PATH
 from app.metrics import (
+    bertscore_model,
     compute_bertscore_batch,
     compute_corpus_bleu,
     compute_meteor,
@@ -494,17 +495,21 @@ def _meteor_with_cache(
     rows_subset: list[tuple[int, InputRow]],
     on_progress=None,
     progress_every: int = 25,
+    lang: str = "en",
 ) -> tuple[list[Optional[float]], int]:
     """Blocking. METEOR for each row, reading and filling the metric cache.
 
     Returns (scores, cache_hits). The key includes the NLTK version because
-    tokenizer and WordNet changes alter scores. *on_progress(batch)* is
+    tokenizer and WordNet changes alter scores, and the target language
+    (except English, whose keys predate language support) because it picks
+    the tokenizer, stemmer and synonym dictionary. *on_progress(batch)* is
     called every *progress_every* rows with a list of (row_index, score)
     pairs so the caller can show rows filling in as they are scored.
     """
     nltk_version = get_library_versions().get("nltk", "")
+    version = nltk_version if lang == "en" else f"{nltk_version}|{lang}"
     keys = [
-        _metric_key("meteor", nltk_version, row.llm_english_translation, row.english_reference)
+        _metric_key("meteor", version, row.llm_english_translation, row.english_reference)
         for _, row in rows_subset
     ]
     cached = _metric_cache_get_many(keys)
@@ -516,7 +521,7 @@ def _meteor_with_cache(
             value: Optional[float] = cached[key]
         else:
             try:
-                value = compute_meteor(row.llm_english_translation, row.english_reference)
+                value = compute_meteor(row.llm_english_translation, row.english_reference, lang)
             except Exception:
                 value = None
             if value is not None:
@@ -532,8 +537,13 @@ def _meteor_with_cache(
     return scores, len(cached)
 
 
-# BERTScore configuration baked into the cache key (see bertscore_worker.py).
-_BERTSCORE_CONFIG = "roberta-base|en|rescaled"
+def _bertscore_config(lang: str) -> str:
+    """BERTScore configuration baked into the cache key (see bertscore_worker.py).
+    The English value predates language support and is kept so existing
+    cached scores stay valid."""
+    if lang == "en":
+        return "roberta-base|en|rescaled"
+    return f"{bertscore_model(lang)}|{lang}"
 
 
 # ---------------------------------------------------------------------------
@@ -758,6 +768,9 @@ async def execute_job(job_id: str) -> None:
         max_tokens = job.model_config.max_tokens
         compute_bertscore = getattr(job.model_config, "compute_bertscore", False)
         metrics_only = getattr(job.model_config, "metrics_only", False)
+        # Translations and references are in the target language; it picks
+        # the tokenizer, stemmer, synonym dictionary and BERTScore model.
+        target_lang = getattr(job.model_config, "target_language", None) or "en"
         # Effort that translate_text() will actually apply for this model.
         # Recorded on the job (so results say how they were produced) and
         # folded into the translation-cache key.
@@ -1011,7 +1024,7 @@ async def execute_job(job_id: str) -> None:
             _db_save_status_throttled(job)
 
         meteor_scores, meteor_hits = await asyncio.to_thread(
-            _meteor_with_cache, successfully_translated, _on_meteor_progress,
+            _meteor_with_cache, successfully_translated, _on_meteor_progress, 25, target_lang,
         )
         if meteor_hits:
             logger.info("Job %s: METEOR cache hits for %d of %d rows", job_id, meteor_hits, len(meteor_scores))
@@ -1041,7 +1054,7 @@ async def execute_job(job_id: str) -> None:
         all_refs = [row.english_reference for _, row in successfully_translated] + [row.english_reference for _, row in refused]
 
         try:
-            overall_score, overall_sig = compute_corpus_bleu(all_hyps, all_refs)
+            overall_score, overall_sig = compute_corpus_bleu(all_hyps, all_refs, target_lang)
             overall_corpus = CorpusMetrics(
                 bleu_score=overall_score,
                 bleu_signature=overall_sig,
@@ -1066,7 +1079,7 @@ async def execute_job(job_id: str) -> None:
         for source_key, pairs in grouped_pairs.items():
             try:
                 hyps, refs = zip(*pairs)
-                src_score, src_sig = compute_corpus_bleu(list(hyps), list(refs))
+                src_score, src_sig = compute_corpus_bleu(list(hyps), list(refs), target_lang)
                 by_source[source_key] = CorpusMetrics(
                     bleu_score=src_score,
                     bleu_signature=src_sig,
@@ -1097,7 +1110,7 @@ async def execute_job(job_id: str) -> None:
             logger.info("Job %s: computing BERTScore (user opted in)", job_id)
             # Only rows without a cached score go to the (expensive) model.
             bert_keys = [
-                _metric_key("bertscore", _BERTSCORE_CONFIG, row.llm_english_translation, row.english_reference)
+                _metric_key("bertscore", _bertscore_config(target_lang), row.llm_english_translation, row.english_reference)
                 for _, row in successfully_translated
             ]
             bert_cached = await asyncio.to_thread(_metric_cache_get_many, bert_keys)
@@ -1140,6 +1153,7 @@ async def execute_job(job_id: str) -> None:
                         [successfully_translated[k][1].llm_english_translation for k in missing],
                         [successfully_translated[k][1].english_reference for k in missing],
                         _on_bert_progress,
+                        target_lang,
                     )
                 except Exception as exc:
                     logger.error("Job %s BERTScore batch failed: %s", job_id, exc)

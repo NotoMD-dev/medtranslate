@@ -19,8 +19,11 @@ from app.config import DATABASE_PATH
 
 logger = logging.getLogger(__name__)
 
-# Ensure required NLTK resources
-for resource in ("wordnet", "omw-1.4", "punkt_tab"):
+# Ensure required NLTK resources. omw-2.0 (Open Multilingual WordNet) is
+# what current NLTK releases read for non-English synonym lookups; omw-1.4
+# is kept for older releases. A missing download only disables synonym
+# matches for that language (see _MultilingualWordNet).
+for resource in ("wordnet", "omw-1.4", "omw-2.0", "punkt_tab"):
     try:
         nltk.data.find(
             f"corpora/{resource}"
@@ -28,7 +31,138 @@ for resource in ("wordnet", "omw-1.4", "punkt_tab"):
             else f"tokenizers/{resource}"
         )
     except LookupError:
-        nltk.download(resource, quiet=True)
+        try:
+            nltk.download(resource, quiet=True)
+        except Exception:  # pragma: no cover - network / packaging issues
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Language support for scoring
+# ---------------------------------------------------------------------------
+#
+# Every metric compares the model's translation with the human reference, so
+# both are in the job's *target* language, and that language decides how the
+# text is tokenized, stemmed and looked up for synonyms.
+
+# Languages written without spaces between words. They are scored on
+# characters: sacrebleu's "zh" / "char" tokenizers for BLEU, and one token per
+# character for METEOR (exact character matches only; no stemming or synonyms).
+_CHARACTER_LANGUAGES = {"zh", "ja", "ko"}
+
+# NLTK Snowball stemmer languages (used by METEOR for word-form matches).
+_SNOWBALL_LANGUAGES = {
+    "en": "english", "es": "spanish", "fr": "french", "pt": "portuguese",
+    "de": "german", "ru": "russian", "ar": "arabic",
+}
+
+# NLTK punkt_tab languages (word tokenization for METEOR).
+_PUNKT_LANGUAGES = {
+    "en": "english", "es": "spanish", "fr": "french", "pt": "portuguese",
+    "de": "german", "ru": "russian",
+}
+
+# Open Multilingual WordNet (omw-1.4) language codes, for METEOR synonym
+# matches. Languages missing here get exact and stem matches only.
+_OMW_LANGUAGES = {
+    "en": "eng", "es": "spa", "fr": "fra", "pt": "por", "ja": "jpn", "zh": "cmn", "ar": "arb",
+}
+
+
+def bleu_tokenizer(lang: str) -> str:
+    """sacrebleu tokenizer for the target language.
+
+    "zh" is sacrebleu's Chinese tokenizer. Japanese and Korean need the
+    optional MeCab packages; when those are missing the "char" tokenizer is
+    used so the score is still defined. Everything else uses the default
+    "13a" tokenizer.
+    """
+    if lang == "zh":
+        return "zh"
+    if lang in ("ja", "ko"):
+        name = "ja-mecab" if lang == "ja" else "ko-mecab"
+        try:
+            from sacrebleu.tokenizers import TOKENIZERS
+            TOKENIZERS[name]()
+            return name
+        except Exception:
+            return "char"
+    return "13a"
+
+
+def _meteor_tokenize(text: str, lang: str) -> list[str]:
+    if lang in _CHARACTER_LANGUAGES:
+        return [ch for ch in text if not ch.isspace()]
+    try:
+        return word_tokenize(text, language=_PUNKT_LANGUAGES.get(lang, "english"))
+    except LookupError:
+        return word_tokenize(text)
+
+
+class _IdentityStemmer:
+    def stem(self, word: str) -> str:
+        return word
+
+
+class _SynsetProxy:
+    """Presents a WordNet synset's lemmas in the target language, which is
+    what NLTK's METEOR reads when it looks for synonym matches."""
+
+    def __init__(self, synset, lang: str):
+        self._synset = synset
+        self._lang = lang
+
+    def lemmas(self):
+        try:
+            return self._synset.lemmas(lang=self._lang)
+        except Exception:
+            return []
+
+
+class _MultilingualWordNet:
+    """WordNet lookups routed through the Open Multilingual WordNet."""
+
+    def __init__(self, lang: str):
+        self._lang = lang
+
+    def synsets(self, word: str):
+        from nltk.corpus import wordnet
+        try:
+            return [_SynsetProxy(s, self._lang) for s in wordnet.synsets(word, lang=self._lang)]
+        except Exception:
+            return []
+
+
+class _NoWordNet:
+    def synsets(self, word: str):
+        return []
+
+
+def _meteor_resources(lang: str):
+    """(stemmer, wordnet) objects METEOR should use for the target language."""
+    if lang == "en":
+        from nltk.corpus import wordnet
+        from nltk.stem.porter import PorterStemmer
+        return PorterStemmer(), wordnet
+    if lang in _SNOWBALL_LANGUAGES:
+        from nltk.stem.snowball import SnowballStemmer
+        stemmer = SnowballStemmer(_SNOWBALL_LANGUAGES[lang])
+    else:
+        stemmer = _IdentityStemmer()
+    omw = _OMW_LANGUAGES.get(lang)
+    return stemmer, (_MultilingualWordNet(omw) if omw else _NoWordNet())
+
+
+def scoring_notes(lang: str) -> str:
+    """One line describing how the target language is scored, for the UI."""
+    parts = []
+    if lang in _CHARACTER_LANGUAGES:
+        parts.append("BLEU and METEOR scored on characters")
+        parts.append("no stemming or synonym matching")
+    else:
+        parts.append("stemming " + ("on" if lang in _SNOWBALL_LANGUAGES else "off"))
+        parts.append("synonyms " + ("on" if lang in _OMW_LANGUAGES else "off"))
+    return "; ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -38,10 +172,11 @@ for resource in ("wordnet", "omw-1.4", "punkt_tab"):
 def compute_corpus_bleu(
     hypotheses: list[str],
     references: list[str],
+    lang: str = "en",
 ) -> tuple[float, str]:
     if not hypotheses or not references:
         return 0.0, "N/A (no reference translations available)"
-    bleu = sacrebleu.corpus_bleu(hypotheses, [references])
+    bleu = sacrebleu.corpus_bleu(hypotheses, [references], tokenize=bleu_tokenizer(lang))
     return bleu.score, bleu.format()
 
 
@@ -49,14 +184,22 @@ def compute_corpus_bleu(
 # METEOR (canonical NLTK implementation)
 # ---------------------------------------------------------------------------
 
-def compute_meteor(candidate: str, reference: str) -> float:
+def compute_meteor(candidate: str, reference: str, lang: str = "en") -> float:
     candidate = (candidate or "").strip()
     reference = (reference or "").strip()
 
     if not candidate or not reference:
         return 0.0
 
-    return float(meteor_score([word_tokenize(reference)], word_tokenize(candidate)))
+    stemmer, wordnet = _meteor_resources(lang)
+    return float(
+        meteor_score(
+            [_meteor_tokenize(reference, lang)],
+            _meteor_tokenize(candidate, lang),
+            stemmer=stemmer,
+            wordnet=wordnet,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +214,7 @@ def _bertscore_subprocess(
     candidates: list[str],
     references: list[str],
     on_progress: "Optional[callable]" = None,
+    lang: str = "en",
 ) -> list[float]:
     """Run BERTScore in a subprocess so the ~400MB model is freed after completion.
 
@@ -87,6 +231,7 @@ def _bertscore_subprocess(
         "candidates": candidates,
         "references": references,
         "chunk_size": chunk_size,
+        "lang": lang,
     })
     # Keep the HuggingFace model cache on the persistent disk (next to the
     # SQLite file) so roberta-base is downloaded once per deployment rather
@@ -139,10 +284,16 @@ def _bertscore_subprocess(
     return f1_scores
 
 
+def bertscore_model(lang: str) -> str:
+    """Model BERTScore uses for the target language (see bertscore_worker.py)."""
+    return "roberta-base" if lang == "en" else "bert-base-multilingual-cased"
+
+
 def compute_bertscore_batch(
     candidates: list[str],
     references: list[str],
     on_progress: "Optional[callable]" = None,
+    lang: str = "en",
 ) -> list[float]:
     if not candidates:
         return []
@@ -152,7 +303,7 @@ def compute_bertscore_batch(
             f"BERTScore length mismatch: {len(candidates)} candidates vs {len(references)} references"
         )
 
-    return _bertscore_subprocess(candidates, references, on_progress)
+    return _bertscore_subprocess(candidates, references, on_progress, lang)
 
 
 # ---------------------------------------------------------------------------

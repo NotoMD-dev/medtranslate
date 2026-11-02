@@ -189,16 +189,18 @@ Defined in `medtranslate-backend/app/schemas.py`. These mirror the TypeScript in
 
 ### Input Dataset CSV
 
-Produced by `scripts/build_dataset.py`, manually prepared, or one of the bundled demo files in `public/demo/` (`medtranslate_demo_spanish.csv`, `medtranslate_demo_french.csv`; 15 synthetic rows each, `source = "Demo_Synthetic"`).
+Produced by `scripts/build_dataset.py`, manually prepared, or one of the bundled demo files in `public/demo/` (`medtranslate_demo_spanish.csv`, `medtranslate_demo_french.csv`, `medtranslate_demo_english_to_spanish.csv`; 15 synthetic rows each, `source = "Demo_Synthetic"`).
+
+The two text columns are named after their languages, and those names tell the app which way to translate: `spanish_source` + `english_reference` is Spanish into English; `english_source` + `spanish_reference` is English into Spanish. Supported language names: `english`, `spanish`, `french`, `korean`, `chinese`, `portuguese`, `german`, `arabic`, `japanese`, `russian`.
 
 | Column | Required | Type | Description |
 |---|---|---|---|
-| `<language>_source` | **Yes** | string | Source clinical text. The column name follows the selected source language: `spanish_source`, `french_source`, `korean_source`, `chinese_source`, `portuguese_source`, `german_source`, `arabic_source`, `japanese_source`, `russian_source`. A generic `source_text` column is also accepted. |
+| `<language>_source` | **Yes** | string | Clinical text to translate, e.g. `spanish_source` or `english_source`. A generic `source_text` column is also accepted (the direction is then chosen on the Upload page). |
+| `<language>_reference` | **Yes** | string | Human reference translation in the target language, e.g. `english_reference` or `spanish_reference`. A generic `reference_text` column is also accepted. |
 | `pair_id` | No | string | Unique row identifier (auto-generated if missing) |
 | `source` | No | string | Corpus origin (defaults to `"ClinSpEn_ClinicalCases"`) |
 | `content_type` | No | string | Document type (defaults to `"clinical_case_report"`) |
-| `english_reference` | No | string | Human reference translation (required for metrics) |
-| `llm_english_translation` | No | string | Pre-existing translation (for re-scoring) |
+| `llm_translation` (or `llm_english_translation`) | No | string | Pre-existing translation in the target language (for re-scoring) |
 | `error` | No | string | Carried over on metrics-only re-scores so a failed row keeps its status |
 | `error_kind` | No | string | `refusal`, `infrastructure`, or `excluded`, paired with `error` |
 

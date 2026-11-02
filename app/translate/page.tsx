@@ -5,7 +5,7 @@ import Header from "@/components/Header";
 import PairDetail from "@/components/PairDetail";
 import { pairsToCSVFile, sentenceMetricsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
 import { submitJob, pollUntilDone, fetchJobResults, fetchAllJobResultsPaginated, cancelJob } from "@/lib/api";
-import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS, resolveModelId, modelLabel as labelForModel } from "@/lib/types";
+import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS, resolveModelId, modelLabel as labelForModel, languageLabel } from "@/lib/types";
 import { countRun, isIncomplete, isRefused, applyRefusalOverrides, rowStatus, bleuBand, bandStyle, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
 import type { JobStatusResponse, JobResults, ClinicalGrade, SentenceMetrics, RefusalOverride } from "@/lib/types";
 import {
@@ -15,6 +15,8 @@ import {
   getSessionJobResultsAsync,
   getSessionGradesAsync,
   getSessionModel,
+  getSessionSourceLanguage,
+  getSessionTargetLanguage,
   setSessionModel,
   setSessionJobId,
   setSessionJobResultsAsync,
@@ -84,6 +86,17 @@ export default function TranslatePage() {
 
   const sessionModel = resolveModelId(getSessionModel());
   const modelLabel = labelForModel(sessionModel);
+  // Translation direction: from the finished run when there is one, else the
+  // Upload page's picks. Read in an effect so server and client render alike.
+  const [direction, setDirection] = useState<{ src: string; tgt: string }>({ src: "es", tgt: "en" });
+  useEffect(() => {
+    const cfg = jobResults?.translation_config;
+    setDirection({
+      src: cfg?.source_language || getSessionSourceLanguage() || "es",
+      tgt: cfg?.target_language || getSessionTargetLanguage() || "en",
+    });
+  }, [jobResults]);
+  const targetLabel = languageLabel(direction.tgt);
 
   // Restore persisted job results on mount
   useEffect(() => {
@@ -228,6 +241,8 @@ export default function TranslatePage() {
         temperature: 0,
         maxTokens: 1024,
         computeBertscore,
+        sourceLanguage: getSessionSourceLanguage(),
+        targetLanguage: getSessionTargetLanguage(),
       });
 
       setSessionJobId(job_id);
@@ -302,6 +317,7 @@ export default function TranslatePage() {
       const model = resolveModelId(getSessionModel());
       const { job_id } = await submitJob(sentenceMetricsToCSVFile(rows, "rescore.csv", true), {
         model, systemPrompt, temperature: 0, maxTokens: 1024, computeBertscore: withBert, metricsOnly: true,
+        sourceLanguage: getSessionSourceLanguage(), targetLanguage: getSessionTargetLanguage(),
       });
       setSessionJobId(job_id);
       setRowCount(rows.length);
@@ -385,6 +401,7 @@ export default function TranslatePage() {
 
       const { job_id } = await submitJob(sentenceMetricsToCSVFile(incomplete, "retry.csv", false), {
         model, systemPrompt, temperature: 0, maxTokens: 1024, computeBertscore: false,
+        sourceLanguage: getSessionSourceLanguage(), targetLanguage: getSessionTargetLanguage(),
       });
       setSessionJobId(job_id);
       setRowCount(incomplete.length);
@@ -476,6 +493,7 @@ export default function TranslatePage() {
         <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
           <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{rowCount}</strong> pairs
           {" "}&middot; Model: <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{modelLabel}</strong>
+          {" "}&middot; <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{languageLabel(direction.src)} &rarr; {targetLabel}</strong>
           {pageState === "complete" && (
             <>
               {" "}&middot; {completedCount} completed
@@ -697,7 +715,7 @@ export default function TranslatePage() {
             <table>
               <thead>
                 <tr>
-                  {["#", "Source", "Source Text (input)", "LLM English (output)", "METEOR", ...(hasBertscore ? ["BERTScore"] : []), "Status"].map((h) => (
+                  {["#", "Source", "Source Text (input)", `LLM ${targetLabel} (output)`, "METEOR", ...(hasBertscore ? ["BERTScore"] : []), "Status"].map((h) => (
                     <th key={h}>{h}</th>
                   ))}
                 </tr>
@@ -769,6 +787,7 @@ export default function TranslatePage() {
             grade={grades[sentences[selectedRow].pair_id] ?? null}
             onGrade={(grade) => handleGrade(sentences[selectedRow].pair_id, grade)}
             onClose={() => setSelectedRow(null)}
+            targetLanguage={direction.tgt}
           />
         </div>
       )}

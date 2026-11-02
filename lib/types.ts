@@ -110,6 +110,9 @@ export interface ModelConfig {
   max_tokens: number;
   /** Reasoning/thinking effort the backend applied, or null if not applicable. */
   reasoning_effort?: string | null;
+  /** Translation direction as language codes (see LANGUAGES). Older runs carry none and were Spanish to English. */
+  source_language?: string | null;
+  target_language?: string | null;
 }
 
 export interface JobResults {
@@ -206,6 +209,7 @@ export interface TranslationPair {
   pair_id: string;
   source: string;
   content_type: string;
+  /** Human reference translation in the target language. The field name predates support for targets other than English. */
   english_reference: string;
   source_text: string;
   /** @deprecated Kept for backward-compatible CSV export; mirrors source_text */
@@ -214,29 +218,69 @@ export interface TranslationPair {
 }
 
 // ---------------------------------------------------------------------------
-// Supported source languages
+// Supported languages
 // ---------------------------------------------------------------------------
 
-export interface SourceLanguageOption {
+export interface LanguageOption {
   code: string;
   label: string;
-  /** Column name expected in the CSV/XLSX (e.g. "spanish_source") */
-  columnName: string;
+  /** Lowercase name used in column names: "<name>_source" and "<name>_reference". */
+  name: string;
 }
 
-export const SOURCE_LANGUAGES: SourceLanguageOption[] = [
-  { code: "es", label: "Spanish", columnName: "spanish_source" },
-  { code: "fr", label: "French", columnName: "french_source" },
-  { code: "ko", label: "Korean", columnName: "korean_source" },
-  { code: "zh", label: "Chinese", columnName: "chinese_source" },
-  { code: "pt", label: "Portuguese", columnName: "portuguese_source" },
-  { code: "de", label: "German", columnName: "german_source" },
-  { code: "ar", label: "Arabic", columnName: "arabic_source" },
-  { code: "ja", label: "Japanese", columnName: "japanese_source" },
-  { code: "ru", label: "Russian", columnName: "russian_source" },
+/**
+ * Languages the app can translate between, in either direction. Keep in sync
+ * with LANGUAGES in medtranslate-backend/app/config.py.
+ */
+export const LANGUAGES: LanguageOption[] = [
+  { code: "en", label: "English", name: "english" },
+  { code: "es", label: "Spanish", name: "spanish" },
+  { code: "fr", label: "French", name: "french" },
+  { code: "ko", label: "Korean", name: "korean" },
+  { code: "zh", label: "Chinese", name: "chinese" },
+  { code: "pt", label: "Portuguese", name: "portuguese" },
+  { code: "de", label: "German", name: "german" },
+  { code: "ar", label: "Arabic", name: "arabic" },
+  { code: "ja", label: "Japanese", name: "japanese" },
+  { code: "ru", label: "Russian", name: "russian" },
 ];
 
-export const DEFAULT_SOURCE_LANGUAGE = SOURCE_LANGUAGES[0]; // Spanish
+export const DEFAULT_SOURCE_LANGUAGE = LANGUAGES[1]; // Spanish
+export const DEFAULT_TARGET_LANGUAGE = LANGUAGES[0]; // English
+
+export function languageByCode(code: string | null | undefined): LanguageOption | undefined {
+  return LANGUAGES.find((l) => l.code === code);
+}
+
+/** "es" -> "Spanish". Unknown codes are returned as-is so nothing renders blank. */
+export function languageLabel(code: string | null | undefined): string {
+  return languageByCode(code)?.label ?? (code || "");
+}
+
+/** Column that holds the text to translate for a source language ("spanish_source"). */
+export function sourceColumnFor(code: string): string {
+  return `${languageByCode(code)?.name ?? code}_source`;
+}
+
+/** Column that holds the human reference for a target language ("english_reference"). */
+export function referenceColumnFor(code: string): string {
+  return `${languageByCode(code)?.name ?? code}_reference`;
+}
+
+/** Source language of a run; older runs carry none and were Spanish to English. */
+export function sourceLanguageOf(config: ModelConfig | null | undefined): string {
+  return config?.source_language || DEFAULT_SOURCE_LANGUAGE.code;
+}
+
+/** Target language of a run; older runs carry none and were Spanish to English. */
+export function targetLanguageOf(config: ModelConfig | null | undefined): string {
+  return config?.target_language || DEFAULT_TARGET_LANGUAGE.code;
+}
+
+/** Model BERTScore uses for a target language. Keep in sync with bertscore_model() in the backend. */
+export function bertscoreModelFor(targetCode: string): string {
+  return targetCode === "en" ? "roberta-base" : "bert-base-multilingual-cased";
+}
 
 // ---------------------------------------------------------------------------
 // Supported LLM models
@@ -289,11 +333,13 @@ export function resolveModelId(id: string | undefined | null): string {
  * the reference, so a preamble or note counts as translation text and lowers
  * BLEU sharply while barely moving METEOR.
  */
-export function buildSystemPrompt(languageLabel: string): string {
-  return `You are a medical interpreter. Translate the following ${languageLabel} clinical text into English, preserving all medical terminology and clinical meaning. Output only the English translation, with no preamble, notes, quotation marks, or explanations.`;
+export function buildSystemPrompt(sourceCode: string, targetCode: string): string {
+  const src = languageLabel(sourceCode);
+  const tgt = languageLabel(targetCode);
+  return `You are a medical interpreter. Translate the following ${src} clinical text into ${tgt}, preserving all medical terminology and clinical meaning. Output only the ${tgt} translation, with no preamble, notes, quotation marks, or explanations.`;
 }
 
-export const DEFAULT_SYSTEM_PROMPT = buildSystemPrompt("Spanish");
+export const DEFAULT_SYSTEM_PROMPT = buildSystemPrompt(DEFAULT_SOURCE_LANGUAGE.code, DEFAULT_TARGET_LANGUAGE.code);
 
 export interface TranslationConfig {
   model: string;
@@ -301,6 +347,7 @@ export interface TranslationConfig {
   temperature: number;
   maxTokens: number;
   sourceLanguage?: string;
+  targetLanguage?: string;
 }
 
 export const DEFAULT_CONFIG: TranslationConfig = {

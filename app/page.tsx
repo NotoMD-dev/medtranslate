@@ -1,25 +1,29 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
-import { parseCSV, detectSourceColumn } from "@/lib/csv";
+import { parseCSV, detectColumns, csvHeaders } from "@/lib/csv";
+import type { DetectedColumns } from "@/lib/csv";
 import { parseFile } from "@/lib/api";
 import {
-  DEFAULT_SYSTEM_PROMPT,
-  SOURCE_LANGUAGES,
+  LANGUAGES,
   DEFAULT_SOURCE_LANGUAGE,
+  DEFAULT_TARGET_LANGUAGE,
   MODEL_OPTIONS,
   DEFAULT_MODEL_ID,
   resolveModelId,
   buildSystemPrompt,
+  languageLabel,
+  sourceColumnFor,
+  referenceColumnFor,
 } from "@/lib/types";
 import {
   clearSessionState,
   getSessionDataAsync,
   getSessionCsvFileName,
   getSessionSourceLanguage,
-  getSessionPrompt,
+  getSessionTargetLanguage,
   getSessionModel,
   setSessionDataAsync,
   setSessionPrompt,
@@ -29,11 +33,13 @@ import {
   setSessionCsvFileName,
   setSessionModel,
   setSessionSourceLanguage,
+  setSessionTargetLanguage,
 } from "@/lib/session";
 import type { TranslationPair } from "@/lib/types";
 
 interface DemoDataset {
-  code: string;
+  source: string;
+  target: string;
   label: string;
   path: string;
   fileName: string;
@@ -42,9 +48,19 @@ interface DemoDataset {
 
 /** Small synthetic datasets bundled in public/demo (no real patient data). */
 const DEMO_DATASETS: DemoDataset[] = [
-  { code: "es", label: "Spanish demo", path: "/demo/medtranslate_demo_spanish.csv", fileName: "medtranslate_demo_spanish.csv", rows: 15 },
-  { code: "fr", label: "French demo", path: "/demo/medtranslate_demo_french.csv", fileName: "medtranslate_demo_french.csv", rows: 15 },
+  { source: "es", target: "en", label: "Spanish \u2192 English demo", path: "/demo/medtranslate_demo_spanish.csv", fileName: "medtranslate_demo_spanish.csv", rows: 15 },
+  { source: "fr", target: "en", label: "French \u2192 English demo", path: "/demo/medtranslate_demo_french.csv", fileName: "medtranslate_demo_french.csv", rows: 15 },
+  { source: "en", target: "es", label: "English \u2192 Spanish demo", path: "/demo/medtranslate_demo_english_to_spanish.csv", fileName: "medtranslate_demo_english_to_spanish.csv", rows: 15 },
 ];
+
+const CODE: React.CSSProperties = {
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  fontSize: "0.92em",
+  color: "var(--text-secondary)",
+  background: "var(--bg-inset)",
+  padding: "1px 5px",
+  borderRadius: 4,
+};
 
 export default function UploadPage() {
   const router = useRouter();
@@ -55,9 +71,12 @@ export default function UploadPage() {
   const [rows, setRows] = useState<TranslationPair[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState(DEFAULT_SOURCE_LANGUAGE.code);
+  const [targetLanguage, setTargetLanguage] = useState(DEFAULT_TARGET_LANGUAGE.code);
+  // What the uploaded file's column names said about the direction, if anything.
+  const [detected, setDetected] = useState<DetectedColumns | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL_ID);
-  const currentLang = SOURCE_LANGUAGES.find((l) => l.code === sourceLanguage) || DEFAULT_SOURCE_LANGUAGE;
-  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
+  // The instruction is derived from the direction (it is read-only below).
+  const systemPrompt = useMemo(() => buildSystemPrompt(sourceLanguage, targetLanguage), [sourceLanguage, targetLanguage]);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [rowMode, setRowMode] = useState<"all" | "custom" | "range">("all");
@@ -76,13 +95,42 @@ export default function UploadPage() {
       if (savedFileName) setFileName(savedFileName);
       const savedLang = getSessionSourceLanguage();
       if (savedLang) setSourceLanguage(savedLang);
-      const savedPrompt = getSessionPrompt();
-      if (savedPrompt) setSystemPrompt(savedPrompt);
+      const savedTarget = getSessionTargetLanguage();
+      if (savedTarget) setTargetLanguage(savedTarget);
       // Ignore ids of models that are no longer offered (e.g. retired "gpt-4o").
       setSelectedModel(resolveModelId(getSessionModel()));
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Record a parsed file: keep the rows, and take the translation direction
+   * from the column names when they carry one (spanish_source +
+   * english_reference says Spanish to English). Generic columns leave the
+   * current picks alone.
+   */
+  const acceptParsed = useCallback(
+    (parsed: TranslationPair[], cols: DetectedColumns, name: string) => {
+      let src = cols.sourceLanguage ?? sourceLanguage;
+      let tgt = cols.targetLanguage ?? targetLanguage;
+      if (src === tgt) {
+        // Only one side came from the file and it collides with the other pick.
+        if (cols.sourceLanguage) tgt = src === "en" ? "es" : "en";
+        else src = tgt === "en" ? "es" : "en";
+      }
+      setDetected(cols);
+      setSourceLanguage(src);
+      setTargetLanguage(tgt);
+      setRows(parsed);
+      setFileName(name);
+      pendingSaveRef.current = setSessionDataAsync(parsed).catch(() => {});
+      setSessionPrompt(buildSystemPrompt(src, tgt));
+      setSessionCsvFileName(name);
+      setSessionSourceLanguage(src);
+      setSessionTargetLanguage(tgt);
+    },
+    [sourceLanguage, targetLanguage]
+  );
 
   const processFile = useCallback(
     (file: File) => {
@@ -98,14 +146,10 @@ export default function UploadPage() {
       setFileName(file.name);
 
       if (isXlsx) {
-        // Send XLSX to backend for safe parsing with openpyxl
-        parseFile(file, currentLang.columnName)
-          .then((parsed) => {
-            setRows(parsed);
-            pendingSaveRef.current = setSessionDataAsync(parsed).catch(() => {});
-            setSessionPrompt(systemPrompt);
-            setSessionCsvFileName(file.name);
-          })
+        // Send XLSX to backend for safe parsing with openpyxl. The backend
+        // reads the direction from the column names too.
+        parseFile(file)
+          .then(({ rows: parsed, columns }) => acceptParsed(parsed, columns, file.name))
           .catch((err) => {
             setError((err as Error).message);
           });
@@ -113,11 +157,10 @@ export default function UploadPage() {
         const reader = new FileReader();
         reader.onload = (ev) => {
           try {
-            const parsed = parseCSV(ev.target?.result as string, currentLang.columnName);
-            setRows(parsed);
-            pendingSaveRef.current = setSessionDataAsync(parsed).catch(() => {});
-            setSessionPrompt(systemPrompt);
-            setSessionCsvFileName(file.name);
+            const text = ev.target?.result as string;
+            const cols = detectColumns(csvHeaders(text));
+            const parsed = parseCSV(text, cols);
+            acceptParsed(parsed, cols, file.name);
           } catch (err) {
             setError((err as Error).message);
           }
@@ -125,7 +168,7 @@ export default function UploadPage() {
         reader.readAsText(file);
       }
     },
-    [systemPrompt, currentLang.columnName]
+    [acceptParsed]
   );
 
   // Load one of the bundled synthetic demo datasets (public/demo/*.csv) so a
@@ -133,29 +176,21 @@ export default function UploadPage() {
   const loadDemo = useCallback(
     async (demo: DemoDataset) => {
       setError(null);
-      setLoadingDemo(demo.code);
+      setLoadingDemo(demo.fileName);
       try {
         const resp = await fetch(demo.path);
         if (!resp.ok) throw new Error(`Could not load demo dataset (${resp.status})`);
         const text = await resp.text();
-        const lang = SOURCE_LANGUAGES.find((l) => l.code === demo.code) || DEFAULT_SOURCE_LANGUAGE;
-        const parsed = parseCSV(text, lang.columnName);
-        const prompt = buildSystemPrompt(lang.label);
-        setSourceLanguage(lang.code);
-        setSystemPrompt(prompt);
-        setRows(parsed);
-        setFileName(demo.fileName);
-        pendingSaveRef.current = setSessionDataAsync(parsed).catch(() => {});
-        setSessionPrompt(prompt);
-        setSessionCsvFileName(demo.fileName);
-        setSessionSourceLanguage(lang.code);
+        const cols = detectColumns(csvHeaders(text));
+        const parsed = parseCSV(text, cols);
+        acceptParsed(parsed, cols, demo.fileName);
       } catch (err) {
         setError((err as Error).message);
       } finally {
         setLoadingDemo(null);
       }
     },
-    []
+    [acceptParsed]
   );
 
   const handleUpload = useCallback(
@@ -185,8 +220,9 @@ export default function UploadPage() {
     setRangeStart("");
     setRangeEnd("");
     setSourceLanguage(DEFAULT_SOURCE_LANGUAGE.code);
+    setTargetLanguage(DEFAULT_TARGET_LANGUAGE.code);
+    setDetected(null);
     setSelectedModel(DEFAULT_MODEL_ID);
-    setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
     pendingSaveRef.current = null;
     clearSessionState();
     if (fileRef.current) {
@@ -229,6 +265,7 @@ export default function UploadPage() {
       setSessionRowLimit(dataToUse.length !== rows.length ? dataToUse.length : undefined);
       setSessionModel(selectedModel);
       setSessionSourceLanguage(sourceLanguage);
+      setSessionTargetLanguage(targetLanguage);
       // Clear stale results before navigation
       await setSessionJobResultsAsync(undefined);
       setSessionJobId(undefined);
@@ -237,7 +274,7 @@ export default function UploadPage() {
       // is still held in memory for the Translate page.
     }
     router.push("/translate");
-  }, [rowMode, customRowCount, rangeStart, rangeEnd, rows, systemPrompt, selectedModel, sourceLanguage, router]);
+  }, [rowMode, customRowCount, rangeStart, rangeEnd, rows, systemPrompt, selectedModel, sourceLanguage, targetLanguage, router]);
 
   const sources = [...new Set(rows.map((r) => r.source))].filter(Boolean);
   const hasRef = rows.some((r) => r.english_reference);
@@ -274,16 +311,13 @@ export default function UploadPage() {
         >
           Upload Dataset
         </h1>
-        <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
-          Import a CSV/XLSX with clinical translation pairs. Required columns:{" "}
-          <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
-            {currentLang.columnName}
-          </strong>
-          {" "}and{" "}
-          <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
-            english_reference
-          </strong>
-          .
+        <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0, lineHeight: 1.6 }}>
+          Import a CSV/XLSX with clinical translation pairs. Name the two text columns after their languages:{" "}
+          <code style={CODE}>&lt;language&gt;_source</code> for the text to translate and{" "}
+          <code style={CODE}>&lt;language&gt;_reference</code> for the human translation to score against.
+          For example <code style={CODE}>spanish_source</code> + <code style={CODE}>english_reference</code> translates Spanish into English, and{" "}
+          <code style={CODE}>english_source</code> + <code style={CODE}>spanish_reference</code> translates English into Spanish.
+          The app reads the direction from the column names.
         </p>
       </div>
 
@@ -333,7 +367,7 @@ export default function UploadPage() {
             </span>
             {DEMO_DATASETS.map((d) => (
               <button
-                key={d.code}
+                key={d.fileName}
                 onClick={() => loadDemo(d)}
                 disabled={loadingDemo !== null}
                 style={{
@@ -346,10 +380,10 @@ export default function UploadPage() {
                   background: "var(--accent-soft)",
                   color: "var(--accent-text)",
                   border: "1px solid var(--accent)",
-                  opacity: loadingDemo && loadingDemo !== d.code ? 0.6 : 1,
+                  opacity: loadingDemo && loadingDemo !== d.fileName ? 0.6 : 1,
                 }}
               >
-                {loadingDemo === d.code ? "Loading…" : `${d.label} (${d.rows} rows)`}
+                {loadingDemo === d.fileName ? "Loading…" : `${d.label} (${d.rows} rows)`}
               </button>
             ))}
             <a
@@ -620,7 +654,7 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Source Language selector */}
+      {/* Translation direction */}
       {rows.length > 0 && (
         <div className="anim d3" style={{ marginTop: 24 }}>
           <div
@@ -636,36 +670,72 @@ export default function UploadPage() {
               gap: 12,
             }}
           >
-            Source Language
+            Translation Direction
             <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
           </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {SOURCE_LANGUAGES.map((lang) => (
-              <button
-                key={lang.code}
-                onClick={() => {
-                  setSourceLanguage(lang.code);
-                  setSystemPrompt(buildSystemPrompt(lang.label));
-                }}
-                style={{
-                  padding: "10px 20px",
-                  borderRadius: "var(--radius-sm)",
-                  fontSize: 14,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  fontFamily: "var(--font)",
-                  transition: "all 0.2s",
-                  background: sourceLanguage === lang.code ? "var(--accent-soft)" : "transparent",
-                  border: `1.5px solid ${sourceLanguage === lang.code ? "var(--accent)" : "var(--border)"}`,
-                  color: sourceLanguage === lang.code ? "var(--accent-text)" : "var(--text-secondary)",
-                }}
-              >
-                {lang.label}
-              </button>
-            ))}
-          </div>
-          <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>
-            Your file must contain a <strong style={{ color: "var(--text-secondary)" }}>{currentLang.columnName}</strong> column and an <strong style={{ color: "var(--text-secondary)" }}>english_reference</strong> column.
+          {detected && detected.sourceLanguage && detected.targetLanguage ? (
+            <div style={{ marginBottom: 12, fontSize: 13, color: "var(--text-secondary)" }}>
+              Detected from the column names: <strong style={{ color: "var(--accent-text)" }}>{languageLabel(detected.sourceLanguage)} &rarr; {languageLabel(detected.targetLanguage)}</strong>
+              {" "}(<code style={CODE}>{detected.sourceColumn}</code> &rarr; <code style={CODE}>{detected.referenceColumn}</code>).
+            </div>
+          ) : (
+            <div style={{ marginBottom: 12, fontSize: 13, color: "var(--text-secondary)" }}>
+              The file uses generic column names
+              {detected?.sourceColumn && detected?.referenceColumn && (
+                <> (<code style={CODE}>{detected.sourceColumn}</code> &rarr; <code style={CODE}>{detected.referenceColumn}</code>)</>
+              )}
+              , so pick the direction here.
+            </div>
+          )}
+          {(["from", "into"] as const).map((side) => {
+            const value = side === "from" ? sourceLanguage : targetLanguage;
+            const other = side === "from" ? targetLanguage : sourceLanguage;
+            const setValue = side === "from" ? setSourceLanguage : setTargetLanguage;
+            return (
+              <div key={side} style={{ marginBottom: side === "from" ? 14 : 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8 }}>
+                  {side === "from" ? "Translate from" : "Translate into"}
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {LANGUAGES.map((lang) => {
+                    const active = value === lang.code;
+                    const blocked = other === lang.code;
+                    return (
+                      <button
+                        key={lang.code}
+                        onClick={() => !blocked && setValue(lang.code)}
+                        disabled={blocked}
+                        title={blocked ? `Already selected as the ${side === "from" ? "target" : "source"} language` : undefined}
+                        style={{
+                          padding: "8px 16px",
+                          borderRadius: "var(--radius-sm)",
+                          fontSize: 14,
+                          fontWeight: 500,
+                          cursor: blocked ? "not-allowed" : "pointer",
+                          fontFamily: "var(--font)",
+                          transition: "all 0.2s",
+                          opacity: blocked ? 0.35 : 1,
+                          background: active ? "var(--accent-soft)" : "transparent",
+                          border: `1.5px solid ${active ? "var(--accent)" : "var(--border)"}`,
+                          color: active ? "var(--accent-text)" : "var(--text-secondary)",
+                        }}
+                      >
+                        {lang.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          {detected && detected.sourceLanguage && detected.targetLanguage &&
+            (detected.sourceLanguage !== sourceLanguage || detected.targetLanguage !== targetLanguage) && (
+            <div style={{ marginTop: 10, padding: "10px 14px", background: "var(--warning-light)", border: "1px solid var(--warning-border)", borderRadius: "var(--radius-xs)", color: "var(--warning)", fontSize: 12, lineHeight: 1.5 }}>
+              The file&rsquo;s column names say {languageLabel(detected.sourceLanguage)} &rarr; {languageLabel(detected.targetLanguage)}. The model will be told to translate {languageLabel(sourceLanguage)} into {languageLabel(targetLanguage)} and the scores will be computed for {languageLabel(targetLanguage)}.
+            </div>
+          )}
+          <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
+            Translating <strong style={{ color: "var(--text-secondary)" }}>{languageLabel(sourceLanguage)}</strong> into <strong style={{ color: "var(--text-secondary)" }}>{languageLabel(targetLanguage)}</strong>: the expected columns are <code style={CODE}>{sourceColumnFor(sourceLanguage)}</code> and <code style={CODE}>{referenceColumnFor(targetLanguage)}</code>. Scores compare the model&rsquo;s {languageLabel(targetLanguage)} against the {languageLabel(targetLanguage)} reference.
           </div>
         </div>
       )}

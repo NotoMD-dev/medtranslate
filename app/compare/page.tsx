@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import MetricGuideLink from "@/components/MetricGuide";
-import { MODEL_OPTIONS, modelLabel } from "@/lib/types";
+import { MODEL_OPTIONS, modelLabel, languageLabel, targetLanguageOf, sourceLanguageOf, bertscoreModelFor } from "@/lib/types";
 import { summarizeMetric, countRun, isScored, applyRefusalOverrides, rowStatus, bandStyle, explainRefusal, splitRefusalError, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
 import { exportHeadToHeadCSV, downloadFile } from "@/lib/csv";
 import type { JobResults, RefusalOverride, HeadToHeadJudgment, SentenceMetrics } from "@/lib/types";
@@ -170,7 +170,7 @@ export default function ComparePage() {
     },
     {
       name: "BERTScore F1",
-      desc: "Semantic similarity (roberta-base, rescaled)",
+      desc: `Semantic similarity (${bertscoreModelFor(targetLanguageOf(comparisonData[modelA]?.translation_config))}, rescaled)`,
       valA: summaryA.bertMean,
       valB: summaryB.bertMean,
       format: (v: number | null) => v != null ? v.toFixed(3) : "--",
@@ -191,6 +191,13 @@ export default function ComparePage() {
   const smallSample =
     !!summaryA && !!summaryB &&
     Math.min(summaryA.scoredPairs, summaryB.scoredPairs) < SMALL_SAMPLE_THRESHOLD;
+  const directionOf = (id: string) => {
+    const cfg = comparisonData[id]?.translation_config;
+    return `${languageLabel(sourceLanguageOf(cfg))} \u2192 ${languageLabel(targetLanguageOf(cfg))}`;
+  };
+  const directionMismatch =
+    !!modelA && !!modelB && !!comparisonData[modelA] && !!comparisonData[modelB] &&
+    directionOf(modelA) !== directionOf(modelB);
 
   return (
     <div className="page-container">
@@ -290,6 +297,11 @@ export default function ComparePage() {
           )}
 
           {/* Fairness warnings */}
+          {directionMismatch && summaryA && summaryB && (
+            <div className="anim d2" style={{ marginBottom: 16, padding: 16, background: "var(--danger-light)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-sm)", color: "var(--danger)", fontSize: 13, lineHeight: 1.6 }}>
+              <strong>These runs translated in different directions, so the comparison is not fair.</strong> {summaryA.label} ran {directionOf(modelA)} and {summaryB.label} ran {directionOf(modelB)}.
+            </div>
+          )}
           {promptMismatch && summaryA && summaryB && (
             <div className="anim d2" style={{ marginBottom: 16, padding: 16, background: "var(--danger-light)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-sm)", color: "var(--danger)", fontSize: 13, lineHeight: 1.6 }}>
               <strong>These runs used different system prompts, so the comparison is not fair.</strong> Re-run {summaryA.label} or {summaryB.label} with the current prompt before reading the winner.
@@ -733,7 +745,7 @@ function SentenceDiffs({
             <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 16, minWidth: 0 }}>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 10 }}>Source text</div>
               <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{openDiff.a.source_text || openDiff.a.spanish_source}</div>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", margin: "16px 0 10px" }}>English reference</div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", margin: "16px 0 10px" }}>{languageLabel(targetLanguageOf(resultsA.translation_config))} reference</div>
               <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{openDiff.a.english_reference}</div>
             </div>
             <OutputPanel label={labelA} color={colorA} sentence={openDiff.a} />

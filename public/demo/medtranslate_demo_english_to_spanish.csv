@@ -1,0 +1,16 @@
+pair_id,source,content_type,english_source,spanish_reference
+demo_en_es_001,Demo_Synthetic,clinical_note,A 54-year-old patient with a history of hypertension presents with oppressive chest pain of two hours' duration.,Paciente de 54 años con antecedentes de hipertensión arterial que acude por dolor torácico opresivo de dos horas de evolución.
+demo_en_es_002,Demo_Synthetic,clinical_note,"Denies fever, cough, or shortness of breath in recent days.","Niega fiebre, tos o disnea en los últimos días."
+demo_en_es_003,Demo_Synthetic,medication_instruction,Take one 500 mg metformin tablet twice daily with meals.,Tomar un comprimido de metformina de 500 mg dos veces al día con las comidas.
+demo_en_es_004,Demo_Synthetic,clinical_note,"On physical examination, the abdomen is soft, non-distended, and non-tender to palpation.","A la exploración física se observa abdomen blando, depresible y no doloroso a la palpación."
+demo_en_es_005,Demo_Synthetic,discharge_instruction,"If you experience difficulty breathing or chest pain, go to the emergency department immediately.","Si presenta dificultad para respirar o dolor en el pecho, acuda inmediatamente a urgencias."
+demo_en_es_006,Demo_Synthetic,clinical_note,The patient is allergic to penicillin and reports a previous skin reaction.,La paciente es alérgica a la penicilina y refiere una reacción cutánea previa.
+demo_en_es_007,Demo_Synthetic,lab_result,Fasting blood glucose was 142 mg/dL and glycated hemoglobin was 7.8%.,"La glucemia en ayunas fue de 142 mg/dL y la hemoglobina glicosilada de 7,8 %."
+demo_en_es_008,Demo_Synthetic,clinical_note,Treatment was started with amoxicillin 875 mg every 12 hours for seven days.,Se inició tratamiento con amoxicilina 875 mg cada 12 horas durante siete días.
+demo_en_es_009,Demo_Synthetic,clinical_note,The electrocardiogram shows sinus rhythm with no acute repolarization abnormalities.,El electrocardiograma muestra ritmo sinusal sin alteraciones agudas de la repolarización.
+demo_en_es_010,Demo_Synthetic,discharge_instruction,"Do not drive or operate heavy machinery while taking this medication, as it may cause drowsiness.","No conduzca ni maneje maquinaria pesada mientras tome este medicamento, ya que puede causar somnolencia."
+demo_en_es_011,Demo_Synthetic,clinical_note,"A 7-year-old patient brought in by his mother for 24 hours of vomiting and diarrhea, with no signs of dehydration.","Paciente de 7 años traído por su madre por vómitos y diarrea de 24 horas de evolución, sin signos de deshidratación."
+demo_en_es_012,Demo_Synthetic,clinical_note,"Follow-up with your primary care physician in one week is recommended, with repeat blood work.",Se recomienda control con su médico de cabecera en una semana y repetir analítica de sangre.
+demo_en_es_013,Demo_Synthetic,medication_instruction,Stop taking ibuprofen if you notice blood in your stool or severe stomach pain.,Suspenda el ibuprofeno si nota sangre en las heces o dolor de estómago intenso.
+demo_en_es_014,Demo_Synthetic,clinical_note,The chest X-ray shows no infiltrates or pleural effusion.,La radiografía de tórax no muestra infiltrados ni derrame pleural.
+demo_en_es_015,Demo_Synthetic,clinical_note,A 68-year-old woman with type 2 diabetes and stage 3 chronic kidney disease.,Mujer de 68 años con diabetes tipo 2 e insuficiencia renal crónica en estadio 3.

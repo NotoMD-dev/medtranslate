@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import Header from "@/components/Header";
+import { languageLabel, targetLanguageOf } from "@/lib/types";
 import { CLINICAL_GRADES, REFERENCE_FLAG_REASONS } from "@/lib/types";
 import { exportReviewCSV, downloadFile } from "@/lib/csv";
 import { DEFAULT_REVIEW_THRESHOLD, isCompleted, isRefused, isExcluded, applyRefusalOverrides, explainRefusal, splitRefusalError } from "@/lib/metrics";
@@ -28,6 +29,8 @@ type ReviewView = "queue" | "table";
 
 export default function ReviewPage() {
   const [jobResults, setJobResults] = useState<JobResults | null>(null);
+  // Translations and references are in the run's target language.
+  const targetLabel = languageLabel(targetLanguageOf(jobResults?.translation_config));
   const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
   const [refFlags, setRefFlags] = useState<Record<string, ReferenceFlag>>({});
   const [threshold, setThreshold] = useState(DEFAULT_REVIEW_THRESHOLD);
@@ -394,7 +397,7 @@ export default function ReviewPage() {
                   <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", maxHeight: 256, overflow: "auto" }}>{currentPair.source_text || currentPair.spanish_source}</div>
                 </div>
                 <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>LLM English Translation</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>LLM {targetLabel} Translation</div>
                   {isExcluded(currentPair) ? (
                     <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--text-secondary)", padding: 12, background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-xs)" }}>
                       <strong>No translation. Refusal judged legitimate by a reviewer; excluded from all scores.</strong>
@@ -422,7 +425,7 @@ export default function ReviewPage() {
                   )}
                 </div>
                 <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>English Reference (Gold Standard)</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>{targetLabel} Reference (Gold Standard)</div>
                   <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", maxHeight: 256, overflow: "auto" }}>{currentPair.english_reference}</div>
                 </div>
               </div>
@@ -648,7 +651,7 @@ export default function ReviewPage() {
                   <th>Pair ID</th>
                   <th>Source</th>
                   <th>Source Text (input)</th>
-                  <th>LLM English (output)</th>
+                  <th>LLM {targetLabel} (output)</th>
                   <th>METEOR</th>
                   <th>Grade</th>
                   <th>Ref. Flag</th>
