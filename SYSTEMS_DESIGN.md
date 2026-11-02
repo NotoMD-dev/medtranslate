@@ -655,6 +655,7 @@ A reply with a `format_warning` shows a `⚠` glyph in `--warning` before the te
 - Model A is styled with the accent green; Model B with the UMass purple (`#7C3AED`).
 - Winner per metric: higher value wins; `|a − b| < 0.001` is a tie; a metric absent from both runs is "Not computed" (grey outline badge) and excluded from the win/tie tally.
 - `effort: <value>` is shown under each model name when `translation_config.reasoning_effort` is present.
+- **Largest METEOR score differences** (1.7.0): rows are clickable (`aria-expanded`); the open row is tinted `--accent-soft` and followed by a full-width detail row (`td.wrap`, `colSpan=6`) holding a `.pair-grid` with the source + reference panel and one `OutputPanel` per model (label in the model colour, METEOR/BERTScore, status pill, format-warning pill, the exact output or the failure reason). Below: "Which translation is actually better?" with three buttons (`<A> is better` in accent, `About equal`, `<B> is better` in purple; the active one gets a 1.5 px border in its colour), a Clear button once judged, and a note textarea saved on blur. Above the table: a Show 10 / 25 / all pill group, the reviewer tally ("Your verdicts: A n · B n · Equal n · k of N judged"), and "Export head-to-head CSV".
 
 ### About Page (`/about`)
 

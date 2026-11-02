@@ -1,13 +1,19 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import MetricGuideLink from "@/components/MetricGuide";
 import { MODEL_OPTIONS, modelLabel } from "@/lib/types";
-import { summarizeMetric, countRun, isScored, applyRefusalOverrides, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
-import type { JobResults, RefusalOverride } from "@/lib/types";
-import { getSessionComparisonResultsAsync, getSessionRefusalOverrides } from "@/lib/session";
+import { summarizeMetric, countRun, isScored, applyRefusalOverrides, rowStatus, bandStyle, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
+import { exportHeadToHeadCSV, downloadFile } from "@/lib/csv";
+import type { JobResults, RefusalOverride, HeadToHeadJudgment, SentenceMetrics } from "@/lib/types";
+import {
+  getSessionComparisonResultsAsync,
+  getSessionRefusalOverrides,
+  getSessionHeadToHeadJudgments,
+  setSessionHeadToHeadJudgments,
+} from "@/lib/session";
 
 interface ModelSummary {
   modelId: string;
@@ -89,10 +95,12 @@ export default function ComparePage() {
   const [modelA, setModelA] = useState<string>("");
   const [modelB, setModelB] = useState<string>("");
   const [overrides, setOverrides] = useState<Record<string, RefusalOverride>>({});
+  const [judgments, setJudgments] = useState<Record<string, HeadToHeadJudgment>>({});
   const router = useRouter();
 
   useEffect(() => {
     setOverrides(getSessionRefusalOverrides());
+    setJudgments(getSessionHeadToHeadJudgments());
     getSessionComparisonResultsAsync().then((saved) => {
       if (!saved) return;
       setComparisonData(saved);
@@ -437,8 +445,26 @@ export default function ComparePage() {
             <SentenceDiffs
               resultsA={comparisonData[modelA]}
               resultsB={comparisonData[modelB]}
+              modelA={modelA}
+              modelB={modelB}
               labelA={summaryA.label}
               labelB={summaryB.label}
+              overrides={overrides}
+              judgments={judgments}
+              onJudge={(pairId, preferred, note) => {
+                setJudgments((prev) => {
+                  const next = { ...prev, [pairId]: { preferred, note, models: [modelA, modelB] as [string, string], at: new Date().toISOString() } };
+                  setSessionHeadToHeadJudgments(next);
+                  return next;
+                });
+              }}
+              onClearJudgment={(pairId) => {
+                setJudgments((prev) => {
+                  const { [pairId]: _, ...rest } = prev;
+                  setSessionHeadToHeadJudgments(rest);
+                  return rest;
+                });
+              }}
             />
           )}
         </>
@@ -448,41 +474,150 @@ export default function ComparePage() {
 }
 
 // ---------------------------------------------------------------------------
-// Sub-component: show sentences with biggest METEOR score differences
+// Sub-component: sentences with the biggest METEOR score differences.
+// Clicking a row opens both models' exact outputs side by side; the reviewer
+// can record which translation is actually better.
 // ---------------------------------------------------------------------------
+
+const DIFF_LIMITS = [10, 25, 0] as const; // 0 = all
+
+function OutputPanel({
+  label,
+  color,
+  sentence,
+}: {
+  label: string;
+  color: string;
+  sentence: SentenceMetrics;
+}) {
+  const status = rowStatus(sentence);
+  const failed = status.key === "refused" || status.key === "excluded" || status.key === "incomplete";
+  return (
+    <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 16, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color }}>{label}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>METEOR {sentence.meteor != null ? sentence.meteor.toFixed(3) : "--"}</span>
+        {sentence.bertscore_f1 != null && (
+          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>BERTScore {sentence.bertscore_f1.toFixed(3)}</span>
+        )}
+        {status.key !== "completed" && (
+          <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600, ...bandStyle(status.tone) }}>{status.label}</span>
+        )}
+        {sentence.format_warning && (
+          <span title={sentence.format_warning} style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600, ...bandStyle("warning") }}>&#9888; {sentence.format_warning}</span>
+        )}
+      </div>
+      {failed ? (
+        <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--text-muted)", fontStyle: "italic" }}>
+          No translation. {sentence.error}
+        </div>
+      ) : (
+        <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+          {sentence.llm_english_translation}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function SentenceDiffs({
   resultsA,
   resultsB,
+  modelA,
+  modelB,
   labelA,
   labelB,
+  overrides,
+  judgments,
+  onJudge,
+  onClearJudgment,
 }: {
   resultsA: JobResults;
   resultsB: JobResults;
+  modelA: string;
+  modelB: string;
   labelA: string;
   labelB: string;
+  overrides: Record<string, RefusalOverride>;
+  judgments: Record<string, HeadToHeadJudgment>;
+  onJudge: (pairId: string, preferred: string, note: string) => void;
+  onClearJudgment: (pairId: string) => void;
 }) {
-  const diffs = useMemo(() => {
-    const mapA = new Map(resultsA.sentence_metrics.map((s) => [s.pair_id, s]));
-    const mapB = new Map(resultsB.sentence_metrics.map((s) => [s.pair_id, s]));
+  const [limit, setLimit] = useState<number>(DIFF_LIMITS[0]);
+  const [openPair, setOpenPair] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const detailRef = useRef<HTMLDivElement | null>(null);
 
-    const pairs: { pairId: string; meteorA: number; meteorB: number; diff: number }[] = [];
-    for (const [pairId, sA] of mapA) {
-      const sB = mapB.get(pairId);
-      if (sB && sA.meteor != null && sB.meteor != null) {
-        pairs.push({
-          pairId,
-          meteorA: sA.meteor,
-          meteorB: sB.meteor,
-          diff: Math.abs(sA.meteor - sB.meteor),
-        });
+  const allDiffs = useMemo(() => {
+    const rowsA = applyRefusalOverrides(resultsA.sentence_metrics, overrides);
+    const rowsB = applyRefusalOverrides(resultsB.sentence_metrics, overrides);
+    const mapB = new Map(rowsB.map((s) => [s.pair_id, s]));
+    const pairs: { pairId: string; a: SentenceMetrics; b: SentenceMetrics; meteorA: number; meteorB: number; diff: number }[] = [];
+    for (const a of rowsA) {
+      const b = mapB.get(a.pair_id);
+      if (b && a.meteor != null && b.meteor != null) {
+        pairs.push({ pairId: a.pair_id, a, b, meteorA: a.meteor, meteorB: b.meteor, diff: Math.abs(a.meteor - b.meteor) });
       }
     }
+    return pairs.sort((x, y) => y.diff - x.diff);
+  }, [resultsA, resultsB, overrides]);
 
-    return pairs.sort((a, b) => b.diff - a.diff).slice(0, 10);
-  }, [resultsA, resultsB]);
+  const diffs = limit > 0 ? allDiffs.slice(0, limit) : allDiffs;
+  const openDiff = openPair ? allDiffs.find((d) => d.pairId === openPair) ?? null : null;
+  const openJudgment = openPair ? judgments[openPair] : undefined;
 
-  if (diffs.length === 0) return null;
+  // Bring the detail card into view when a row far down the table is opened.
+  useEffect(() => {
+    if (openPair && detailRef.current) {
+      detailRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [openPair]);
+
+  // Reviewer preference tally over the rows currently shown
+  const tally = useMemo(() => {
+    let a = 0, b = 0, tie = 0;
+    for (const d of diffs) {
+      const j = judgments[d.pairId];
+      if (!j) continue;
+      if (j.preferred === "tie") tie += 1;
+      else if (j.preferred === modelA) a += 1;
+      else if (j.preferred === modelB) b += 1;
+    }
+    return { a, b, tie, judged: a + b + tie };
+  }, [diffs, judgments, modelA, modelB]);
+
+  useEffect(() => {
+    setNoteDraft(openPair ? judgments[openPair]?.note ?? "" : "");
+  }, [openPair, judgments]);
+
+  if (allDiffs.length === 0) return null;
+
+  const colorA = "var(--accent-text)";
+  const colorB = "#7C3AED";
+
+  const judgeButton = (pairId: string, value: string, text: string, color: string) => {
+    const active = judgments[pairId]?.preferred === value;
+    return (
+      <button
+        key={value}
+        onClick={() => onJudge(pairId, value, noteDraft)}
+        style={{
+          fontFamily: "var(--font)", fontSize: 13, fontWeight: 600, padding: "10px 16px",
+          borderRadius: "var(--radius-xs)", cursor: "pointer", minWidth: 0,
+          border: active ? `1.5px solid ${color}` : "1px solid var(--border)",
+          background: active ? "var(--bg-surface)" : "transparent",
+          color: active ? color : "var(--text-secondary)",
+        }}
+      >
+        {text}
+      </button>
+    );
+  };
+
+  const exportCSV = () => {
+    const csv = exportHeadToHeadCSV(diffs.map((d) => ({ pairId: d.pairId, a: d.a, b: d.b })), modelA, modelB, judgments);
+    downloadFile(csv, "medtranslate_head_to_head.csv");
+  };
 
   return (
     <div className="anim d4" style={{ marginBottom: 48 }}>
@@ -490,6 +625,87 @@ function SentenceDiffs({
         Largest METEOR Score Differences
         <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
       </div>
+
+      {/* Controls + reviewer tally */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12, fontSize: 13, color: "var(--text-muted)" }}>
+        <span>Show</span>
+        {DIFF_LIMITS.map((n) => (
+          <button
+            key={n}
+            onClick={() => setLimit(n)}
+            style={{ fontFamily: "var(--font)", fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 100, cursor: "pointer", border: limit === n ? "1px solid var(--accent)" : "1px solid var(--border)", background: limit === n ? "var(--accent-soft)" : "transparent", color: limit === n ? "var(--accent-text)" : "var(--text-secondary)" }}
+          >
+            {n === 0 ? `all ${allDiffs.length}` : n}
+          </button>
+        ))}
+        <span style={{ flex: 1 }} />
+        <span>
+          Your verdicts: <strong style={{ color: colorA }}>{labelA} {tally.a}</strong> &middot; <strong style={{ color: colorB }}>{labelB} {tally.b}</strong> &middot; Equal {tally.tie} &middot; {tally.judged} of {diffs.length} judged
+        </span>
+        <button
+          onClick={exportCSV}
+          style={{ fontFamily: "var(--font)", fontSize: 12, fontWeight: 500, padding: "6px 14px", borderRadius: "var(--radius-sm)", background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border)", cursor: "pointer" }}
+        >
+          Export head-to-head CSV
+        </button>
+      </div>
+      <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 12px" }}>
+        Click a row to read both outputs side by side and record which translation is actually better. Your verdict is a human judgment, independent of the automated scores, and is saved with the export.
+      </p>
+
+      {/* Detail card for the selected sentence. Rendered above the table (not
+          inside it) so it is full width on phones, where the table scrolls
+          sideways, and stays in view when "all" rows are shown. */}
+      {openDiff && (
+        <div ref={detailRef} style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 20, boxShadow: "var(--shadow)", marginBottom: 16, border: "1px solid var(--accent)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>{openDiff.pairId}</span>
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>METEOR difference {openDiff.diff.toFixed(3)}</span>
+            <span style={{ flex: 1 }} />
+            <button onClick={() => setOpenPair(null)} aria-label="Close" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 20, color: "var(--text-muted)", lineHeight: 1, padding: "0 4px" }}>&times;</button>
+          </div>
+          <div className="pair-grid" style={{ marginBottom: 16 }}>
+            <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 16, minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 10 }}>Source text</div>
+              <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{openDiff.a.source_text || openDiff.a.spanish_source}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", margin: "16px 0 10px" }}>English reference</div>
+              <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{openDiff.a.english_reference}</div>
+            </div>
+            <OutputPanel label={labelA} color={colorA} sentence={openDiff.a} />
+            <OutputPanel label={labelB} color={colorB} sentence={openDiff.b} />
+          </div>
+
+          <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
+              Which translation is actually better?
+            </div>
+            <div className="button-row" style={{ marginBottom: 10 }}>
+              {judgeButton(openDiff.pairId, modelA, `${labelA} is better`, colorA)}
+              {judgeButton(openDiff.pairId, "tie", "About equal", "var(--text-secondary)")}
+              {judgeButton(openDiff.pairId, modelB, `${labelB} is better`, colorB)}
+              {openJudgment && (
+                <button
+                  onClick={() => onClearJudgment(openDiff.pairId)}
+                  style={{ fontFamily: "var(--font)", fontSize: 12, fontWeight: 500, padding: "10px 14px", borderRadius: "var(--radius-xs)", background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", cursor: "pointer" }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <textarea
+              placeholder="Why? (optional: e.g. Opus dropped the negation; Sol expanded an abbreviation correctly)"
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              onBlur={() => { if (openJudgment && noteDraft !== openJudgment.note) onJudge(openDiff.pairId, openJudgment.preferred, noteDraft); }}
+              style={{ fontFamily: "var(--font)", fontSize: 12, width: "100%", padding: "8px 12px", borderRadius: "var(--radius-xs)", border: "1px solid var(--border)", background: "var(--bg-inset)", color: "var(--text-primary)", resize: "vertical", minHeight: 48, lineHeight: 1.5 }}
+            />
+            {!openJudgment && noteDraft && (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Pick a verdict above to save this note.</div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="table-scroll" style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)" }}>
         <table>
           <thead>
@@ -498,32 +714,40 @@ function SentenceDiffs({
               <th style={{ textAlign: "center" }}>{labelA} METEOR</th>
               <th style={{ textAlign: "center" }}>{labelB} METEOR</th>
               <th style={{ textAlign: "center" }}>Difference</th>
-              <th style={{ textAlign: "center" }}>Better</th>
+              <th style={{ textAlign: "center" }}>Better (score)</th>
+              <th style={{ textAlign: "center" }}>Your verdict</th>
             </tr>
           </thead>
           <tbody>
-            {diffs.map((d) => (
-              <tr key={d.pairId}>
-                <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{d.pairId}</td>
-                <td style={{ textAlign: "center", fontWeight: 600, color: d.meteorA > d.meteorB ? "var(--accent-text)" : "var(--text-primary)" }}>
-                  {d.meteorA.toFixed(3)}
-                </td>
-                <td style={{ textAlign: "center", fontWeight: 600, color: d.meteorB > d.meteorA ? "#7C3AED" : "var(--text-primary)" }}>
-                  {d.meteorB.toFixed(3)}
-                </td>
-                <td style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
-                  {d.diff.toFixed(3)}
-                </td>
-                <td style={{ textAlign: "center" }}>
-                  {d.meteorA > d.meteorB
-                    ? <span style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-text)" }}>{labelA}</span>
-                    : d.meteorB > d.meteorA
-                    ? <span style={{ fontSize: 11, fontWeight: 600, color: "#7C3AED" }}>{labelB}</span>
-                    : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Tie</span>
-                  }
-                </td>
-              </tr>
-            ))}
+            {diffs.map((d) => {
+              const open = openPair === d.pairId;
+              const j = judgments[d.pairId];
+              const verdict = !j ? null : j.preferred === "tie" ? "Equal" : j.preferred === modelA ? labelA : j.preferred === modelB ? labelB : j.preferred;
+              const verdictColor = !j ? "var(--text-muted)" : j.preferred === modelA ? colorA : j.preferred === modelB ? colorB : "var(--text-secondary)";
+              return (
+                  <tr
+                    key={d.pairId}
+                    onClick={() => setOpenPair(open ? null : d.pairId)}
+                    style={{ cursor: "pointer", background: open ? "var(--accent-soft)" : undefined }}
+                    aria-expanded={open}
+                  >
+                    <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                      <span style={{ marginRight: 8, color: "var(--text-muted)" }}>{open ? "\u25BE" : "\u25B8"}</span>{d.pairId}
+                    </td>
+                    <td style={{ textAlign: "center", fontWeight: 600, color: d.meteorA > d.meteorB ? colorA : "var(--text-primary)" }}>{d.meteorA.toFixed(3)}</td>
+                    <td style={{ textAlign: "center", fontWeight: 600, color: d.meteorB > d.meteorA ? colorB : "var(--text-primary)" }}>{d.meteorB.toFixed(3)}</td>
+                    <td style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>{d.diff.toFixed(3)}</td>
+                    <td style={{ textAlign: "center" }}>
+                      {d.meteorA > d.meteorB
+                        ? <span style={{ fontSize: 11, fontWeight: 600, color: colorA }}>{labelA}</span>
+                        : d.meteorB > d.meteorA
+                        ? <span style={{ fontSize: 11, fontWeight: 600, color: colorB }}>{labelB}</span>
+                        : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Tie</span>}
+                    </td>
+                    <td style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: verdictColor }}>{verdict ?? "\u2014"}</td>
+                  </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

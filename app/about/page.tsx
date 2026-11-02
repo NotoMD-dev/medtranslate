@@ -28,7 +28,7 @@ const STEPS = [
   },
   {
     title: "Compare",
-    text: "Run the same file through the second model (one click on the Compare page) and the two runs go head to head, metric by metric, with the sentences where they differed most.",
+    text: "Run the same file through the second model (one click on the Compare page) and the two runs go head to head, metric by metric, with the sentences where they differed most. Open any of those sentences to read both outputs side by side and record which one is actually better.",
   },
 ];
 

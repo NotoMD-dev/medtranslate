@@ -170,6 +170,10 @@ A pair enters the review queue when **all** of the following hold:
 
 Refused rows are listed first with a "Refused" badge and the provider's reason. Incomplete rows (infrastructure failures) never enter the queue; they are retried from the Translate page. Nothing else triggers review. BLEU is corpus-level and cannot flag a sentence; BERTScore is optional and is not consulted. The threshold is shared with the Metrics page's "Flagged for Review" count. The threshold is a triage heuristic: it concentrates physician time on the sentences most likely to differ from the reference, but a pair above the threshold can still contain a clinically significant error (a dropped negation moves METEOR very little). Reviewers may also use the "jump to pair" box to grade any flagged pair and the reference-flag control to mark a weak reference.
 
+### Head-to-Head Reviewer Verdicts
+
+The Compare page lets a reviewer open any sentence among the largest METEOR differences, read both models' raw outputs next to the source and reference, and record which output is actually better (or that they are about equal), with a note. This is a human preference judgment, independent of the automated metrics and of the clinical significance grade: it answers "which model translated this sentence better?" rather than "is this translation safe?". Verdicts are keyed by `pair_id`, store the model pair they were made on, and are exported with both outputs and scores (`medtranslate_head_to_head.csv`). Reported alongside the metrics, the tally of verdicts on the largest-gap sentences shows whether score gaps correspond to real quality differences or to wording and formatting.
+
 ### Review Workflow
 
 1. The **Review page** filters completed translation pairs to those with **METEOR < threshold** (default 0.4, configurable), which serves as a triage threshold for potentially problematic translations.

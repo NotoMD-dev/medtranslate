@@ -1,4 +1,4 @@
-import type { TranslationPair, SentenceMetrics, ClinicalGrade, ReferenceFlag, RefusalOverride } from "./types";
+import type { TranslationPair, SentenceMetrics, ClinicalGrade, ReferenceFlag, RefusalOverride, HeadToHeadJudgment } from "./types";
 import { SOURCE_LANGUAGES } from "./types";
 import { rowStatus as classifyRow } from "./metrics";
 
@@ -240,6 +240,48 @@ export function exportReviewCSV(
   });
 
   return [headers.join(","), ...rows.map((r) => r.map(escapeCSV).join(","))].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// CSV export — head-to-head sentence comparison
+// ---------------------------------------------------------------------------
+
+export interface HeadToHeadRow {
+  pairId: string;
+  a: SentenceMetrics;
+  b: SentenceMetrics;
+}
+
+/**
+ * Export the sentences compared on the Compare page with both models' exact
+ * outputs, their per-sentence scores, and the reviewer's preference.
+ */
+export function exportHeadToHeadCSV(
+  rows: HeadToHeadRow[],
+  modelA: string,
+  modelB: string,
+  judgments?: Record<string, HeadToHeadJudgment>,
+): string {
+  const headers = [
+    "pair_id", "source", "source_text", "english_reference",
+    "model_a", "translation_a", "meteor_a", "bertscore_a", "status_a",
+    "model_b", "translation_b", "meteor_b", "bertscore_b", "status_b",
+    "meteor_difference", "reviewer_preference", "reviewer_note",
+  ];
+  const fmt = (v: number | null | undefined) => (v != null ? v.toFixed(4) : "");
+  const out = rows.map(({ pairId, a, b }) => {
+    const j = judgments?.[pairId];
+    const diff = a.meteor != null && b.meteor != null ? (a.meteor - b.meteor).toFixed(4) : "";
+    return [
+      pairId, a.source, a.source_text || a.spanish_source, a.english_reference,
+      modelA, a.llm_english_translation, fmt(a.meteor), fmt(a.bertscore_f1), classifyRow(a).key,
+      modelB, b.llm_english_translation, fmt(b.meteor), fmt(b.bertscore_f1), classifyRow(b).key,
+      diff,
+      j ? (j.preferred === "tie" ? "tie" : j.preferred) : "",
+      j?.note ?? "",
+    ];
+  });
+  return toCSVString(headers, out);
 }
 
 // ---------------------------------------------------------------------------

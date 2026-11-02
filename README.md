@@ -16,6 +16,7 @@ MedTranslate is the research instrument for a study evaluating whether large lan
 - **Output-format warnings** — Replies that look wrapped (a preamble, a translator's note, quotation marks, markdown) are flagged, never modified, so a low BLEU can be traced to formatting rather than translation
 - **Light / Dark theme** — Toggle between calm academic light mode and dark mode
 - **Head-to-head comparison** — Run the same dataset through two models and compare them metric by metric; after one run, the Compare page offers a one-click run of the other model; the reasoning effort used for each run is recorded with its results
+- **Head-to-head sentence review** — On Compare, click any large-gap row to read both models' exact outputs beside the source and reference, record which is actually better, and export the verdicts
 - **Live progress** — The progress bar follows the backend phase (translating, METEOR, BLEU, BERTScore) with per-row counts, and the results table fills in translations and scores as they are computed
 - **Design system** — Token-based primitives (Card, Button, Badge, MetricValue, ProgressBar, GradeRow) for consistent UI
 - **Session persistence** — localStorage + IndexedDB for large datasets that survive page reloads

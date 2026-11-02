@@ -20,6 +20,12 @@ All notable changes to the MedTranslate project are documented in this file. The
 - Compare page: with one run saved, a "Compare against" block greys out the model already run and offers "Translate the same dataset with <other model>", which opens the Translate page with that model selected and starts the run (`/translate?model=<id>&autorun=1`); with two runs, any model not yet run is offered above the table
 - About page explains the flagship-versus-flagship choice and the one-click comparison
 
+### Added — Head-to-head sentence review on Compare
+
+- Clicking a row in "Largest METEOR score differences" opens the source text, the English reference, and both models' exact outputs side by side, with each output's METEOR/BERTScore, status (refused, excluded, incomplete) and any format warning, so a score gap can be traced to what the models actually wrote
+- Reviewers record which output is actually better ("<A> is better", "About equal", "<B> is better") with an optional note; verdicts are saved per `pair_id` (`medtranslate:headToHeadJudgments`) with the model pair and timestamp, tallied above the table, and can be cleared
+- "Show 10 / 25 / all" control for the differences table; "Export head-to-head CSV" writes both outputs, scores, statuses, the METEOR difference, and the reviewer's verdict and note
+
 ### Changed — Exports
 
 - Results and review CSVs gain a `reviewer_override_note` column; the Translate export applies reviewer overrides (status `excluded`) before writing. Both exports verified by a browser download test

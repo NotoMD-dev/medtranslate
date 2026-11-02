@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
   rowLimit: "medtranslate:rowLimit",
   reviewThreshold: "medtranslate:reviewThreshold",
   refusalOverrides: "medtranslate:refusalOverrides",
+  headToHead: "medtranslate:headToHeadJudgments",
   jobId: "medtranslate:jobId",
   jobResults: "medtranslate:jobResults",
   grades: "medtranslate:grades",
@@ -187,6 +188,18 @@ export function setSessionRefusalOverrides(
   overrides: Record<string, import("@/lib/types").RefusalOverride> | undefined,
 ) {
   writeJSON(STORAGE_KEYS.refusalOverrides, overrides && Object.keys(overrides).length > 0 ? overrides : undefined);
+}
+
+// Head-to-head reviewer judgments (pair_id -> which model's output is better).
+
+export function getSessionHeadToHeadJudgments(): Record<string, import("@/lib/types").HeadToHeadJudgment> {
+  return readJSON<Record<string, import("@/lib/types").HeadToHeadJudgment>>(STORAGE_KEYS.headToHead) ?? {};
+}
+
+export function setSessionHeadToHeadJudgments(
+  judgments: Record<string, import("@/lib/types").HeadToHeadJudgment> | undefined,
+) {
+  writeJSON(STORAGE_KEYS.headToHead, judgments && Object.keys(judgments).length > 0 ? judgments : undefined);
 }
 
 // Review threshold (METEOR below this is flagged). Shared by Review and Metrics.
