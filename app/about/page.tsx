@@ -88,17 +88,19 @@ const LINK: React.CSSProperties = { color: "var(--accent-text)", fontWeight: 600
 // ---------------------------------------------------------------------------
 
 /**
- * Shown in the "Creator and contact" section. Fill in `name` and `email` to
- * put a name on the card and enable the email button; both are left empty
- * here on purpose so no personal details are published by accident.
+ * Shown in the "Creator and contact" section. `email` is left empty on
+ * purpose so no address is published by accident; set it to enable the
+ * "Email me" button.
  */
 const CREATOR = {
-  /** Display name. Empty shows "the creator of ScopeMD". */
-  name: "",
+  name: "Yasmine Abbey",
+  credentials: "MD, MSc",
+  initials: "YA",
+  tagline: ["Internal medicine", "inpatient tooling", "AI-assisted builds"],
   /** Public contact address for the "Email me" button. Empty hides the button. */
   email: "",
   website: "https://scopemd.net",
-  websiteLabel: "ScopeMD.net",
+  websiteLabel: "scopeMD",
   formerly: "notomed.dev",
   emailSubject: "MedTranslate question",
 };
@@ -381,19 +383,22 @@ export default function AboutPage() {
         <SectionLabel>Creator and contact</SectionLabel>
         <Card>
           <div className="creator-card">
-            <div className="creator-mark" aria-hidden="true">
-              <span style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontWeight: 700 }}>Med</span>
-              <span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", display: "inline-block", margin: "0 1px 3px" }} />
-              <span style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic" }}>T</span>
-            </div>
+            <div className="creator-mark" aria-hidden="true">{CREATOR.initials}</div>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", marginBottom: 4 }}>
-                Built by {CREATOR.name || "the creator of ScopeMD"}
+              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2 }}>
+                Hi, I&rsquo;m {CREATOR.name.split(" ")[0]} <span aria-hidden="true">&#128075;</span>
               </div>
-              <p style={{ ...P, fontSize: 14, marginBottom: 8 }}>
-                MedTranslate is an independent research project from the maker of{" "}
+              <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 14 }}>
+                <strong style={{ color: "var(--text-secondary)" }}>{CREATOR.name}, {CREATOR.credentials}</strong>
+                {" "}&middot; {CREATOR.tagline.join(" \u00b7 ")}
+              </div>
+              <p style={{ ...P, fontSize: 14 }}>
+                I am an Internal Medicine physician, recently graduated from Cedars-Sinai. Much of my daily work involved recurring, cognitively heavy tasks with few streamlined, web-based tools to lighten the load, so I started building my own and sharing them. That became{" "}
                 <a href={CREATOR.website} target="_blank" rel="noopener noreferrer" style={LINK}>{CREATOR.websiteLabel}</a>
-                {" "}(formerly {CREATOR.formerly}), where you can find more clinical software and research tools.
+                {" "}(formerly {CREATOR.formerly}): a collection of physician-built tools meant to reduce cognitive load, standardize workflows, and make on-service life a little easier.
+              </p>
+              <p style={{ ...P, fontSize: 14 }}>
+                MedTranslate comes from the same place. Hospitals see patients who speak many languages, interpreters are not always available, and AI translation is tempting. Before anyone relies on it, its mistakes need to be counted. I am a largely self-taught developer, and this site was pieced together with determination and help from LLMs, so if you find it useful, please share it or tell me how to make it better.
               </p>
               <p style={{ ...P, fontSize: 14, marginBottom: 16 }}>
                 Questions about the methods, the datasets, or the scores? Found a translation the scores got wrong? Want to run the study on your own corpus? Get in touch.
