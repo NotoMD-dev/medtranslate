@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
-import { parseCSV, detectSourceColumn } from "@/lib/csv";
+import { parseCSV, detectSourceLanguage, csvHeaders } from "@/lib/csv";
 import { parseFile } from "@/lib/api";
 import {
   DEFAULT_SYSTEM_PROMPT,
@@ -46,6 +46,15 @@ const DEMO_DATASETS: DemoDataset[] = [
   { code: "fr", label: "French demo", path: "/demo/medtranslate_demo_french.csv", fileName: "medtranslate_demo_french.csv", rows: 15 },
 ];
 
+const CODE: React.CSSProperties = {
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  fontSize: "0.92em",
+  color: "var(--text-secondary)",
+  background: "var(--bg-inset)",
+  padding: "1px 5px",
+  borderRadius: 4,
+};
+
 export default function UploadPage() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -55,6 +64,9 @@ export default function UploadPage() {
   const [rows, setRows] = useState<TranslationPair[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState(DEFAULT_SOURCE_LANGUAGE.code);
+  // Language the uploaded file's source column named (null for a generic
+  // "source_text" column), so the page can say where the pick came from.
+  const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL_ID);
   const currentLang = SOURCE_LANGUAGES.find((l) => l.code === sourceLanguage) || DEFAULT_SOURCE_LANGUAGE;
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
@@ -97,14 +109,28 @@ export default function UploadPage() {
 
       setFileName(file.name);
 
+      // Keep the rows and, when the source column names a language
+      // ("spanish_source"), make that the source language.
+      const accept = (parsed: TranslationPair[], langCode: string | null) => {
+        const lang = SOURCE_LANGUAGES.find((l) => l.code === langCode);
+        const prompt = lang ? buildSystemPrompt(lang.label) : systemPrompt;
+        setDetectedLanguage(lang?.code ?? null);
+        if (lang) {
+          setSourceLanguage(lang.code);
+          setSystemPrompt(prompt);
+          setSessionSourceLanguage(lang.code);
+        }
+        setRows(parsed);
+        pendingSaveRef.current = setSessionDataAsync(parsed).catch(() => {});
+        setSessionPrompt(prompt);
+        setSessionCsvFileName(file.name);
+      };
+
       if (isXlsx) {
         // Send XLSX to backend for safe parsing with openpyxl
         parseFile(file, currentLang.columnName)
-          .then((parsed) => {
-            setRows(parsed);
-            pendingSaveRef.current = setSessionDataAsync(parsed).catch(() => {});
-            setSessionPrompt(systemPrompt);
-            setSessionCsvFileName(file.name);
+          .then(({ rows: parsed, sourceColumn }) => {
+            accept(parsed, SOURCE_LANGUAGES.find((l) => l.columnName === sourceColumn)?.code ?? null);
           })
           .catch((err) => {
             setError((err as Error).message);
@@ -113,11 +139,9 @@ export default function UploadPage() {
         const reader = new FileReader();
         reader.onload = (ev) => {
           try {
-            const parsed = parseCSV(ev.target?.result as string, currentLang.columnName);
-            setRows(parsed);
-            pendingSaveRef.current = setSessionDataAsync(parsed).catch(() => {});
-            setSessionPrompt(systemPrompt);
-            setSessionCsvFileName(file.name);
+            const text = ev.target?.result as string;
+            const parsed = parseCSV(text, currentLang.columnName);
+            accept(parsed, detectSourceLanguage(csvHeaders(text)));
           } catch (err) {
             setError((err as Error).message);
           }
@@ -141,6 +165,7 @@ export default function UploadPage() {
         const lang = SOURCE_LANGUAGES.find((l) => l.code === demo.code) || DEFAULT_SOURCE_LANGUAGE;
         const parsed = parseCSV(text, lang.columnName);
         const prompt = buildSystemPrompt(lang.label);
+        setDetectedLanguage(lang.code);
         setSourceLanguage(lang.code);
         setSystemPrompt(prompt);
         setRows(parsed);
@@ -185,6 +210,7 @@ export default function UploadPage() {
     setRangeStart("");
     setRangeEnd("");
     setSourceLanguage(DEFAULT_SOURCE_LANGUAGE.code);
+    setDetectedLanguage(null);
     setSelectedModel(DEFAULT_MODEL_ID);
     setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
     pendingSaveRef.current = null;
@@ -274,16 +300,10 @@ export default function UploadPage() {
         >
           Upload Dataset
         </h1>
-        <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
-          Import a CSV/XLSX with clinical translation pairs. Required columns:{" "}
-          <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
-            {currentLang.columnName}
-          </strong>
-          {" "}and{" "}
-          <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
-            english_reference
-          </strong>
-          .
+        <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0, lineHeight: 1.6 }}>
+          Import a CSV/XLSX with clinical translation pairs. Translation is always into English. Name the source column after its language, for example{" "}
+          <code style={CODE}>spanish_source</code>, <code style={CODE}>french_source</code> or <code style={CODE}>korean_source</code>, and put the human English translation in{" "}
+          <code style={CODE}>english_reference</code>. The app reads the source language from the column name.
         </p>
       </div>
 
@@ -639,6 +659,13 @@ export default function UploadPage() {
             Source Language
             <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
           </div>
+          <div style={{ marginBottom: 12, fontSize: 13, color: "var(--text-secondary)" }}>
+            {detectedLanguage ? (
+              <>Detected from the column name: <strong style={{ color: "var(--accent-text)" }}>{SOURCE_LANGUAGES.find((l) => l.code === detectedLanguage)?.label}</strong> (<code style={CODE}>{SOURCE_LANGUAGES.find((l) => l.code === detectedLanguage)?.columnName}</code>). Translating into English.</>
+            ) : (
+              <>The file uses a generic <code style={CODE}>source_text</code> column, so pick the source language here. Translating into English.</>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             {SOURCE_LANGUAGES.map((lang) => (
               <button
@@ -664,8 +691,13 @@ export default function UploadPage() {
               </button>
             ))}
           </div>
+          {detectedLanguage && detectedLanguage !== sourceLanguage && (
+            <div style={{ marginTop: 10, padding: "10px 14px", background: "var(--warning-light)", border: "1px solid var(--warning-border)", borderRadius: "var(--radius-xs)", color: "var(--warning)", fontSize: 12, lineHeight: 1.5 }}>
+              The file&rsquo;s column name says {SOURCE_LANGUAGES.find((l) => l.code === detectedLanguage)?.label}. The model will be told the text is {currentLang.label}.
+            </div>
+          )}
           <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>
-            Your file must contain a <strong style={{ color: "var(--text-secondary)" }}>{currentLang.columnName}</strong> column and an <strong style={{ color: "var(--text-secondary)" }}>english_reference</strong> column.
+            For {currentLang.label} the expected columns are <code style={CODE}>{currentLang.columnName}</code> and <code style={CODE}>english_reference</code>.
           </div>
         </div>
       )}

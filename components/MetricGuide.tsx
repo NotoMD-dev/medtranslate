@@ -14,15 +14,21 @@ export interface MetricExplainer {
   key: "bleu" | "meteor" | "bertscore";
   name: string;
   range: string;
-  oneLiner: string;
-  howItWorks: string;
-  /** The formula, kept to one line, plus a sentence naming each term. */
-  howCalculated: { formula: string; terms: string };
+  rangeNote?: string;
+  /** "Simple explanation". Also the one-liner on the About page. */
+  simple: string[];
+  example: { reference: string; translation: string; note: string };
+  howItWorks: string[];
+  /** "Think of it this way". */
   analogy: string;
-  strictness: string;
   /** Plain-language score bands, lowest first. */
   bands: { range: string; meaning: string }[];
-  gotcha: string;
+  bandsNote: string;
+  /** An extra question-and-answer block (the ± spread, why BERTScore is missing). */
+  extra?: { title: string; text: string[] };
+  goodToKnow: string[];
+  goodToKnowList?: string[];
+  technical: { formulas: string[]; terms: string[]; note?: string };
 }
 
 export const METRIC_EXPLAINERS: MetricExplainer[] = [
@@ -30,91 +36,303 @@ export const METRIC_EXPLAINERS: MetricExplainer[] = [
     key: "bleu",
     name: "SacreBLEU",
     range: "0 to 100",
-    oneLiner: "How many exact phrases the AI translation shares with the human translation.",
-    howItWorks:
-      "It chops both translations into short chunks of 1, 2, 3, and 4 words in a row, then counts how many of the AI's chunks appear word-for-word in the human version. It is worked out for the whole file at once, not sentence by sentence.",
-    howCalculated: {
-      formula: "BLEU = 100 \u00d7 BP \u00d7 (p\u2081 \u00d7 p\u2082 \u00d7 p\u2083 \u00d7 p\u2084)^(1/4)",
-      terms: "p\u2081 to p\u2084 are the fractions of the AI's 1-, 2-, 3-, and 4-word chunks that also appear in the human translation. BP is the brevity penalty: 1 when the AI output is at least as long as the human one, and less than 1 (exp(1 \u2212 reference length / AI length)) when it is shorter.",
-    },
-    analogy:
-      "Imagine laying two essays side by side and highlighting every phrase that appears in both. More highlighting means a higher score.",
-    strictness:
-      "Very strict. \"Doctor\" and \"physician\" count as a miss. Extra words that are not in the human version pull the score down hard, and so does a translation that is much shorter than the human one.",
-    bands: [
-      { range: "Under 20", meaning: "Little word-for-word overlap. Could be a real problem, or the AI just rephrased a lot." },
-      { range: "20 to 40", meaning: "Moderate overlap. Typical for good translations that use their own wording." },
-      { range: "Over 40", meaning: "Very close to the human wording. Professional human translators often land in the 40s to 60s." },
+    simple: [
+      "SacreBLEU looks for exact words and phrases that appear in both the AI translation and the reference English text.",
+      "More exact matches generally produce a higher score.",
     ],
-    gotcha:
-      "Because it is one number for the whole file, a small file (say 10 sentences) makes it jump around a lot. A score of 100 is not the goal; it would only mean the AI copied the human translation exactly.",
+    example: {
+      reference: "The patient has no fever.",
+      translation: "The patient does not have a fever.",
+      note: "These sentences communicate nearly the same information, but they do not use exactly the same words. SacreBLEU may therefore give the translation a lower score than a person might expect.",
+    },
+    howItWorks: [
+      "SacreBLEU divides both versions into groups of one, two, three, and four consecutive words. It then checks how many groups from the AI translation also appear in the reference.",
+      "It also lowers the score when the AI translation is much shorter than the reference.",
+      "SacreBLEU calculates one score for the entire file rather than a separate score for every sentence.",
+    ],
+    analogy:
+      "Imagine placing two documents side by side and highlighting every phrase that appears exactly the same in both. More highlighting generally means a higher SacreBLEU score.",
+    bands: [
+      { range: "Under 20", meaning: "Little exact overlap. The translation may have a problem, or it may simply use very different wording." },
+      { range: "20 to 40", meaning: "Moderate overlap. Much of the wording matches, but there are noticeable differences." },
+      { range: "Over 40", meaning: "Strong overlap with the reference wording." },
+    ],
+    bandsNote:
+      "These ranges are only rough guides. A score of 100 means the wording matched almost exactly. It does not prove that the translation is medically correct.",
+    goodToKnow: [
+      "SacreBLEU is strict about wording. For example, \"doctor\" and \"physician\" may not count as a match even though they usually mean the same thing.",
+      "Extra words can lower the score, as can a translation that is much shorter than the reference. Scores may also change substantially when the file contains only a small number of sentences.",
+    ],
+    technical: {
+      formulas: ["BLEU = 100 × BP × (p₁ × p₂ × p₃ × p₄)^(1/4)"],
+      terms: [
+        "p₁ through p₄ are the proportions of matching one-, two-, three-, and four-word groups.",
+        "BP is the brevity penalty. It equals 1 when the AI translation is at least as long as the reference and falls below 1 when the AI translation is shorter.",
+      ],
+    },
   },
   {
     key: "meteor",
     name: "METEOR",
     range: "0 to 1",
-    oneLiner: "Like BLEU, but forgiving about synonyms and word forms, and it checks word order too.",
-    howItWorks:
-      "It lines up words between the two translations. A match counts if the words are identical, if they share a root (\"treat\" and \"treated\"), or if they are synonyms in a dictionary (\"doctor\" and \"physician\"). It then asks: did the AI cover everything in the human version? It also takes a little off if the matching words are in a scrambled order. Each sentence gets its own score, and the app shows the average.",
-    howCalculated: {
-      formula: "METEOR = F \u00d7 (1 \u2212 0.5 \u00d7 (chunks / matched words)\u00b3), where F = 10PR / (R + 9P)",
-      terms: "P (precision) is the share of the AI's words that matched; R (recall) is the share of the human translation's words that matched. F weights recall nine times more than precision. \"Chunks\" counts how many runs of matched words are in the same order in both sentences, so a scrambled word order means more chunks and a bigger penalty.",
-    },
-    analogy:
-      "A teacher grading a summary who accepts \"big\" for \"large\" and cares most about whether you covered all the key points, not whether you used the exact same words. Covering more of the key points means a higher score.",
-    strictness:
-      "Medium. It cares much more about missing content than about extra words, so a translation that adds a note or an explanation loses less here than it does on BLEU.",
-    bands: [
-      { range: "Under 0.4", meaning: "Flagged for physician review in this app. Something may be missing or very differently worded." },
-      { range: "0.4 to 0.6", meaning: "Fair. Most of the meaning is there, but the wording differs a good deal." },
-      { range: "0.6 to 0.75", meaning: "Good. Covers the human version well with similar wording." },
-      { range: "Over 0.75", meaning: "Strong. Nearly the same content and wording." },
+    simple: [
+      "METEOR is more flexible than SacreBLEU. It can recognize some related words and word forms, and it also considers word order.",
     ],
-    gotcha:
-      "The ± number shown next to the average is the spread between sentences. A big spread means some sentences scored very well and others poorly.",
+    example: {
+      reference: "The physician treated the patient.",
+      translation: "The doctor provided treatment to the patient.",
+      note: "SacreBLEU may lower the score because several words are different. METEOR may recognize that \"physician\" and \"doctor,\" as well as \"treated\" and \"treatment,\" are related.",
+    },
+    howItWorks: [
+      "METEOR lines up words in the AI translation with words in the reference. A match may be recognized when the words are identical, when they share a root, such as \"treat\" and \"treated,\" or when they are recognized as synonyms, such as \"doctor\" and \"physician.\"",
+      "METEOR also checks whether the matching words appear in a similar order. Scrambled word order lowers the score.",
+      "The app calculates a score for each sentence and then displays the average.",
+    ],
+    analogy:
+      "Imagine a teacher grading a summary. The teacher accepts \"large\" in place of \"big\" and cares more about whether the important information is included than whether every word is identical.",
+    bands: [
+      { range: "Under 0.40", meaning: "Flagged for physician review. Information may be missing or expressed very differently." },
+      { range: "0.40 to 0.60", meaning: "Fair similarity, with noticeable differences." },
+      { range: "0.60 to 0.75", meaning: "Good similarity. Most of the reference content is represented." },
+      { range: "Over 0.75", meaning: "Strong similarity in content and wording." },
+    ],
+    bandsNote:
+      "These ranges help organize the results, but they do not determine whether a translation is medically safe.",
+    extra: {
+      title: "What does the ± number mean?",
+      text: [
+        "The ± value shows how much the sentence scores vary.",
+        "A small value means most sentences received similar scores. A large value means some sentences scored much better than others. A good average can therefore hide one or more poorly translated sentences.",
+      ],
+    },
+    goodToKnow: [
+      "METEOR usually cares more about missing information than additional wording. A translation that adds an explanation may therefore lose less on METEOR than it does on SacreBLEU.",
+    ],
+    technical: {
+      formulas: [
+        "METEOR = F × [1 − 0.5 × (chunks ÷ matched words)³]",
+        "F = 10PR ÷ (R + 9P)",
+      ],
+      terms: [
+        "P, or precision: The proportion of words in the AI translation that matched the reference.",
+        "R, or recall: The proportion of words in the reference that were represented in the AI translation.",
+        "Chunks: Groups of matching words that appear in the same order.",
+      ],
+      note: "The formula places more weight on including the content of the reference than on avoiding additional words.",
+    },
   },
   {
     key: "bertscore",
     name: "BERTScore F1",
-    range: "0 to 1 (rescaled, can dip slightly below 0)",
-    oneLiner: "Compares meaning instead of words, using an AI language model.",
-    howItWorks:
-      "Each word is turned into a point in \"meaning space\" by a language model (roberta-base), and the score measures how close the AI translation's words are to the human translation's words in that space. \"The patient has no fever\" and \"Fever is absent\" score high even though almost no words match.",
-    howCalculated: {
-      formula: "F1 = 2PR / (P + R), then rescaled as (F1 \u2212 b) / (1 \u2212 b)",
-      terms: "Every word in each sentence becomes a vector from the roberta-base model. R (recall) is the average, over the human translation's words, of each word's best cosine similarity to any AI word; P (precision) is the same in the other direction. b is a baseline similarity measured on random sentence pairs, so 0 means \"no better than random\" and 1 means identical.",
-    },
-    analogy:
-      "Asking a bilingual friend \"do these two sentences mean the same thing?\" rather than counting matching words. The closer the two meanings, the higher the score.",
-    strictness:
-      "Loose on wording, strict on meaning. Rescaling makes 0 mean \"about as similar as two random sentences\" and 1 mean \"identical.\"",
-    bands: [
-      { range: "Under 0.5", meaning: "The meaning has drifted. Worth a close look." },
-      { range: "0.5 to 0.8", meaning: "Similar meaning with noticeable differences." },
-      { range: "Over 0.8", meaning: "Nearly the same meaning." },
+    range: "0 to 1 after rescaling",
+    rangeNote: "Typical displayed range. A rescaled score can occasionally fall slightly below 0.",
+    simple: [
+      "BERTScore looks for similarities in context and meaning rather than requiring the same words.",
     ],
-    gotcha:
-      "It is off by default because it needs a large model to run. Turn on \"Include BERTScore\" on the Translate page before running a job. When it was not computed, the app shows \"--\" and leaves it out of the head-to-head tally.",
+    example: {
+      reference: "The patient has no fever.",
+      translation: "Fever is absent.",
+      note: "Very few words match exactly, but the sentences communicate a similar idea. BERTScore may therefore rate them as highly similar.",
+    },
+    howItWorks: [
+      "BERTScore uses an English-language AI model to represent each word, or part of a word, based on its context. It then estimates how closely the AI translation and the reference English text align.",
+      "MedTranslate currently uses the roberta-base language model for this comparison.",
+    ],
+    analogy:
+      "Instead of asking, \"Did these sentences use the same words?\" BERTScore asks, \"Do these sentences appear to communicate the same idea?\"",
+    bands: [
+      { range: "Under 0.50", meaning: "Substantial differences may be present. Review closely." },
+      { range: "0.50 to 0.80", meaning: "The sentences appear similar but contain noticeable differences." },
+      { range: "Over 0.80", meaning: "Strong contextual similarity." },
+    ],
+    bandsNote:
+      "These ranges are rough guides. A high BERTScore does not prove that every clinical detail is correct.",
+    extra: {
+      title: "Why is BERTScore sometimes missing?",
+      text: [
+        "BERTScore requires a larger language model and is turned off by default. Select Include BERTScore on the Translate page before starting a job.",
+        "If BERTScore was not calculated, the app displays \"--\" and does not include it in the head-to-head tally.",
+      ],
+    },
+    goodToKnow: [
+      "BERTScore can miss small but dangerous differences. For example:",
+    ],
+    goodToKnowList: [
+      "\"The patient has a fever\" versus \"The patient has no fever.\"",
+      "\"Give 5 mg\" versus \"Give 50 mg.\"",
+      "\"Left-sided weakness\" versus \"right-sided weakness.\"",
+      "\"Take once daily\" versus \"take twice daily.\"",
+    ],
+    technical: {
+      formulas: [
+        "F1 = 2PR ÷ (P + R)",
+        "Rescaled F1 = (F1 − b) ÷ (1 − b)",
+      ],
+      terms: [
+        "P, or precision: How closely the AI translation aligns with the reference.",
+        "R, or recall: How closely the reference is represented by the AI translation.",
+        "b: A baseline measured using unrelated sentence pairs.",
+      ],
+      note: "After rescaling, a score near 0 means the sentences are no more similar than the baseline comparison. A score near 1 indicates very strong similarity.",
+    },
   },
 ];
 
 export const METRIC_GUIDE_NOTES = {
-  sharedIdea:
-    "All three scores compare the AI's English translation against a human English translation of the same sentence (the \"reference\"). Higher is always better. None of them can tell whether the translation is medically safe; that is what the physician review step is for.",
-  whyTheyDisagree: [
-    "BLEU is strict about exact words, METEOR forgives synonyms, and BERTScore only cares about meaning. So the same translation can look bad on BLEU and fine on the other two.",
-    "Low BLEU but decent METEOR and BERTScore usually means the AI rephrased, expanded abbreviations, or added extra words such as a note. That is not necessarily wrong.",
-    "Low scores on all three usually mean a real translation problem, or a human reference that is itself loose or incomplete.",
+  intro: {
+    scope:
+      "MedTranslate evaluates clinical translations from supported source languages into English. Translation from English into other languages is not currently supported.",
+    uses:
+      "The app uses three scores, SacreBLEU, METEOR, and BERTScore, to compare the AI-generated English translation with a reference English version of the same text.",
+    referenceMayBe: [
+      "The original English text from a bilingual dataset, or",
+      "An English translation written or reviewed by a person.",
+    ],
+    eachLooks: [
+      "SacreBLEU: Does the AI use the same English words and phrases as the reference?",
+      "METEOR: Does it use the same or similar words, word forms, and word order?",
+      "BERTScore: Do the two English versions appear to communicate similar meaning?",
+    ],
+    caution:
+      "A higher score means a closer match according to that metric. However, no score can prove that a translation is medically correct or safe. Important differences involving negation, medication doses, dates, numbers, or laterality may be missed. That is why physician review remains necessary.",
+    rangesNote:
+      "The score ranges below are rough guides used by this application. They are not universal grades, and results may vary depending on the dataset and its size.",
+  },
+  whyDisagree: {
+    lead: "Each score asks a different question:",
+    bullets: [
+      "SacreBLEU: Are the exact words and phrases similar?",
+      "METEOR: Are the words, word forms, synonyms, and word order similar?",
+      "BERTScore: Does the language appear to communicate similar meaning?",
+    ],
+    after: [
+      "The same translation can therefore receive a low SacreBLEU score but higher METEOR and BERTScore results. This often happens when the AI rephrases a sentence, expands an abbreviation, or adds explanatory wording.",
+      "Low results across all three metrics may indicate a translation problem. They may also occur when the reference English text is unusually brief, loosely written, or incomplete.",
+      "No single score should be interpreted by itself.",
+    ],
+  },
+  whatTheyMiss: {
+    lead: "All three scores measure overall similarity. They may not give enough weight to one small but medically important difference. Examples include:",
+    examples: [
+      "Adding or removing the word \"no.\"",
+      "Changing 5 mg to 50 mg.",
+      "Changing \"left\" to \"right.\"",
+      "Changing \"allergic\" to \"not allergic.\"",
+      "Changing a medication frequency or date.",
+      "Leaving out an important diagnosis, symptom, or instruction.",
+    ],
+    forThisReason: [
+      "Translations below the app's METEOR threshold are flagged for physician review.",
+      "Individual sentence results should be reviewed, not only the overall average.",
+      "A high score should never be treated as proof that a translation is medically correct or safe.",
+    ],
+  },
+  headToHead: [
+    "On the Compare page, the model with the higher score wins that metric.",
+    "A difference smaller than 0.001 is treated as a tie. If a metric was not calculated for either model, that metric is left out of the tally.",
+    "The head-to-head result shows which AI translation matched the reference English text more closely according to these automated measures. It does not determine which translation is clinically safest.",
   ],
-  whatTheyMiss:
-    "A single changed word can be dangerous (\"no fever\" vs \"fever\", \"5 mg\" vs \"50 mg\") yet barely move any of these scores. That is why pairs below the METEOR threshold go to a physician, and why a high score is never proof of safety.",
-  headToHead:
-    "On the Compare page, the model with the higher number wins that metric. Differences under 0.001 count as a tie. A metric that was not computed for either run is left out of the tally.",
 };
 
 // ---------------------------------------------------------------------------
 // Modal
 // ---------------------------------------------------------------------------
+
+const H3: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: "var(--text-primary)", margin: "14px 0 4px" };
+const PARA: React.CSSProperties = { margin: "0 0 8px", color: "var(--text-secondary)" };
+const LIST: React.CSSProperties = { margin: "0 0 8px", paddingLeft: 20, color: "var(--text-secondary)" };
+const MONO: React.CSSProperties = {
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  fontSize: 13, color: "var(--text-primary)", overflowWrap: "anywhere",
+};
+
+function Bullets({ items, style }: { items: string[]; style?: React.CSSProperties }) {
+  return (
+    <ul style={{ ...LIST, ...style }}>
+      {items.map((t) => <li key={t} style={{ marginBottom: 3 }}>{t}</li>)}
+    </ul>
+  );
+}
+
+function ExampleBox({ example }: { example: MetricExplainer["example"] }) {
+  const label: React.CSSProperties = { fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 2 };
+  const text: React.CSSProperties = { fontSize: 14, color: "var(--text-primary)", fontStyle: "italic" };
+  return (
+    <div style={{ margin: "0 0 8px", padding: "10px 12px", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-xs)" }}>
+      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", marginBottom: 8 }}>
+        <div>
+          <div style={label}>Reference</div>
+          <div style={text}>{example.reference}</div>
+        </div>
+        <div>
+          <div style={label}>AI translation</div>
+          <div style={text}>{example.translation}</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55 }}>{example.note}</div>
+    </div>
+  );
+}
+
+function MetricSection({ m }: { m: MetricExplainer }) {
+  return (
+    <section style={{ marginBottom: 24, padding: 18, background: "var(--bg-inset)", borderRadius: "var(--radius-sm)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
+        <span style={{ fontSize: 16, fontWeight: 700 }}>{m.name}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)" }}>Score range: {m.range}</span>
+      </div>
+      {m.rangeNote && <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>{m.rangeNote}</div>}
+
+      <div style={{ ...H3, marginTop: 8 }}>Simple explanation</div>
+      {m.simple.map((t) => <p key={t} style={PARA}>{t}</p>)}
+
+      <div style={H3}>Example</div>
+      <ExampleBox example={m.example} />
+
+      <div style={H3}>How does it work?</div>
+      {m.howItWorks.map((t) => <p key={t} style={PARA}>{t}</p>)}
+
+      <div style={H3}>Think of it this way</div>
+      <p style={PARA}>{m.analogy}</p>
+
+      <div style={H3}>How should I interpret the score?</div>
+      <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 8, fontSize: 13 }}>
+        <tbody>
+          {m.bands.map((b) => (
+            <tr key={b.range}>
+              <td style={{ padding: "5px 8px 5px 0", fontWeight: 600, whiteSpace: "nowrap", verticalAlign: "top", width: 110, borderBottom: "1px solid var(--border-subtle)" }}>{b.range}</td>
+              <td style={{ padding: "5px 0", color: "var(--text-secondary)", borderBottom: "1px solid var(--border-subtle)" }}>{b.meaning}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p style={{ ...PARA, fontSize: 13 }}>{m.bandsNote}</p>
+
+      {m.extra && (
+        <>
+          <div style={H3}>{m.extra.title}</div>
+          {m.extra.text.map((t) => <p key={t} style={PARA}>{t}</p>)}
+        </>
+      )}
+
+      <div style={H3}>Good to know</div>
+      {m.goodToKnow.map((t) => <p key={t} style={PARA}>{t}</p>)}
+      {m.goodToKnowList && (
+        <>
+          <Bullets items={m.goodToKnowList} />
+          <p style={PARA}>These sentence pairs are very similar overall, but their differences could be clinically important.</p>
+        </>
+      )}
+
+      <div style={H3}>Technical details</div>
+      <div style={{ padding: "10px 12px", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-xs)" }}>
+        {m.technical.formulas.map((f) => <div key={f} style={{ ...MONO, marginBottom: 4 }}>{f}</div>)}
+        <Bullets items={m.technical.terms} style={{ fontSize: 12, margin: "6px 0 0" }} />
+        {m.technical.note && <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 6 }}>{m.technical.note}</div>}
+      </div>
+    </section>
+  );
+}
 
 function MetricGuideModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
@@ -124,6 +342,9 @@ function MetricGuideModal({ onClose }: { onClose: () => void }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const n = METRIC_GUIDE_NOTES;
+  const sectionTitle: React.CSSProperties = { fontSize: 15, fontWeight: 700, marginBottom: 6 };
 
   return (
     <>
@@ -161,52 +382,35 @@ function MetricGuideModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div style={{ overflowY: "auto", padding: "20px 28px 28px", fontSize: 14, lineHeight: 1.65 }}>
-          <p style={{ margin: "0 0 20px", color: "var(--text-secondary)" }}>{METRIC_GUIDE_NOTES.sharedIdea}</p>
+          <p style={PARA}>{n.intro.scope}</p>
+          <p style={PARA}>{n.intro.uses}</p>
+          <p style={{ ...PARA, marginBottom: 2 }}>The reference English text may be:</p>
+          <Bullets items={n.intro.referenceMayBe} />
+          <p style={{ ...PARA, marginBottom: 2 }}>Each score looks at the translation differently:</p>
+          <Bullets items={n.intro.eachLooks} />
+          <p style={PARA}>{n.intro.caution}</p>
+          <p style={{ ...PARA, marginBottom: 20 }}>{n.intro.rangesNote}</p>
 
-          {METRIC_EXPLAINERS.map((m) => (
-            <section key={m.key} style={{ marginBottom: 24, padding: 18, background: "var(--bg-inset)", borderRadius: "var(--radius-sm)" }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
-                <span style={{ fontSize: 16, fontWeight: 700 }}>{m.name}</span>
-                <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)" }}>Score: {m.range}</span>
-              </div>
-              <p style={{ margin: "0 0 10px", fontWeight: 600, color: "var(--text-primary)" }}>{m.oneLiner}</p>
-              <p style={{ margin: "0 0 8px", color: "var(--text-secondary)" }}><strong>How it works.</strong> {m.howItWorks}</p>
-              <div style={{ margin: "0 0 10px", padding: "10px 12px", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-xs)" }}>
-                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 4 }}>How it is calculated</div>
-                <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 13, color: "var(--text-primary)", overflowWrap: "anywhere", marginBottom: 4 }}>{m.howCalculated.formula}</div>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55 }}>{m.howCalculated.terms}</div>
-              </div>
-              <p style={{ margin: "0 0 8px", color: "var(--text-secondary)" }}><strong>Think of it as.</strong> {m.analogy}</p>
-              <p style={{ margin: "0 0 10px", color: "var(--text-secondary)" }}><strong>How strict is it?</strong> {m.strictness}</p>
-              <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 10, fontSize: 13 }}>
-                <tbody>
-                  {m.bands.map((b) => (
-                    <tr key={b.range}>
-                      <td style={{ padding: "5px 8px 5px 0", fontWeight: 600, whiteSpace: "nowrap", verticalAlign: "top", width: 110, borderBottom: "1px solid var(--border-subtle)", fontSize: 13 }}>{b.range}</td>
-                      <td style={{ padding: "5px 0", color: "var(--text-secondary)", borderBottom: "1px solid var(--border-subtle)", fontSize: 13 }}>{b.meaning}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }}><strong>Good to know.</strong> {m.gotcha}</p>
-            </section>
-          ))}
+          {METRIC_EXPLAINERS.map((m) => <MetricSection key={m.key} m={m} />)}
 
           <section style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Why do the scores disagree with each other?</div>
-            <ul style={{ margin: 0, paddingLeft: 20, color: "var(--text-secondary)" }}>
-              {METRIC_GUIDE_NOTES.whyTheyDisagree.map((t) => <li key={t} style={{ marginBottom: 4 }}>{t}</li>)}
-            </ul>
+            <div style={sectionTitle}>Why might the scores disagree?</div>
+            <p style={{ ...PARA, marginBottom: 2 }}>{n.whyDisagree.lead}</p>
+            <Bullets items={n.whyDisagree.bullets} />
+            {n.whyDisagree.after.map((t) => <p key={t} style={PARA}>{t}</p>)}
           </section>
 
           <section style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>What the scores cannot see</div>
-            <p style={{ margin: 0, color: "var(--text-secondary)" }}>{METRIC_GUIDE_NOTES.whatTheyMiss}</p>
+            <div style={sectionTitle}>What can these scores miss?</div>
+            <p style={{ ...PARA, marginBottom: 2 }}>{n.whatTheyMiss.lead}</p>
+            <Bullets items={n.whatTheyMiss.examples} />
+            <p style={{ ...PARA, marginBottom: 2 }}>For this reason:</p>
+            <Bullets items={n.whatTheyMiss.forThisReason} />
           </section>
 
           <section>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>How the head-to-head winner is picked</div>
-            <p style={{ margin: 0, color: "var(--text-secondary)" }}>{METRIC_GUIDE_NOTES.headToHead}</p>
+            <div style={sectionTitle}>How is the head-to-head winner selected?</div>
+            {n.headToHead.map((t) => <p key={t} style={PARA}>{t}</p>)}
           </section>
         </div>
       </div>
