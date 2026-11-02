@@ -34,6 +34,12 @@ See [PERFORMANCE_AND_RELIABILITY.md](PERFORMANCE_AND_RELIABILITY.md) for the rea
 
 - `medtranslate-backend/source/` (a committed virtualenv, 749 files) and `medtranslate-backend/worker.py` (placeholder)
 
+### Fixed (post-merge, mobile)
+
+- Upload page: a long file name (e.g. the demo CSV) could not shrink, pushing "Remove file" off the card on phones. The card now wraps, the name breaks anywhere, and the button never leaves the card
+- Navigation: six tabs wrapped onto two lines on phones; the nav is now one horizontally scrollable row under 480 px
+- Upload page: "Rows to analyze" and other choice buttons stack vertically under 480 px instead of squeezing labels into three lines
+
 ---
 
 ## [1.5.0] - 2026-11-02

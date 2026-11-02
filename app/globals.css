@@ -131,9 +131,22 @@ table tbody tr:hover td {
   flex-wrap: wrap;
 }
 
+.site-nav a {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 @media (max-width: 480px) {
+  /* One scrollable row on phones instead of wrapping onto two lines */
   .site-nav {
-    gap: 16px;
+    gap: 20px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .site-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .brand-tagline {
@@ -381,4 +394,27 @@ table tbody tr:hover td {
 
 .metrics-grid-2 {
   overflow-wrap: anywhere;
+}
+
+/* Upload page: file name card. The name may shrink and wrap; the Remove
+   button never leaves the card. */
+.file-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Rows / language / model choice buttons: side by side on wide screens,
+   stacked on phones so labels never squeeze into three lines. */
+.choice-row {
+  display: flex;
+  gap: 12px;
+}
+
+@media (max-width: 480px) {
+  .choice-row {
+    flex-direction: column;
+  }
 }
