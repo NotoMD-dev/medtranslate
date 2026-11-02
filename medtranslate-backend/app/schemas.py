@@ -27,7 +27,10 @@ class JobStatus(str, Enum):
 class ModelConfig(BaseModel):
     model: str = "gpt-5.6-sol"
     system_prompt: Optional[str] = None
-    temperature: float = 0.0
+    # Temperature actually sent to the provider. ``None`` means the parameter
+    # was not sent because the model rejects it (GPT-5.x reasoning models and
+    # current Claude models); such runs are not deterministic.
+    temperature: Optional[float] = 0.0
     max_tokens: int = 1024
     compute_bertscore: bool = False  # opt-in: avoids ~400MB torch load
     metrics_only: bool = False  # skip translation, only compute metrics (e.g. BERTScore)

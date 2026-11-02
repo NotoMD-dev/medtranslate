@@ -56,7 +56,8 @@ export interface LibraryVersions {
 export interface ModelConfig {
   model: string;
   system_prompt: string | null;
-  temperature: number;
+  /** Temperature actually sent to the provider, or null if the model rejects it (not sent). */
+  temperature: number | null;
   max_tokens: number;
   /** Reasoning/thinking effort the backend applied, or null if not applicable. */
   reasoning_effort?: string | null;

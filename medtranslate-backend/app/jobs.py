@@ -346,7 +346,7 @@ def _db_cleanup_old_jobs(days: int = 7) -> int:
 def _cache_key(
     model: str,
     system_prompt: str,
-    temperature: float,
+    temperature: Optional[float],
     source_text: str,
     reasoning_effort: Optional[str] = None,
 ) -> str:
@@ -375,9 +375,14 @@ def _cache_get(key: str) -> Optional[str]:
         return None
 
 
-def _cache_set(key: str, translation: str, temperature: float) -> None:
-    """Store a translation in the cache. Only caches deterministic (temperature=0) outputs."""
-    if temperature != 0.0:
+def _cache_set(key: str, translation: str, temperature: Optional[float]) -> None:
+    """Store a translation in the cache.
+
+    Caches when sampling was pinned to temperature 0 or when the model takes
+    no temperature at all (``None``). A non-zero temperature is deliberately
+    random and is never cached.
+    """
+    if temperature is not None and temperature != 0.0:
         return
     if not _ensure_db():
         return
@@ -665,7 +670,7 @@ async def execute_job(job_id: str) -> None:
                             temperature=temperature,
                             max_tokens=max_tokens,
                         )
-                        # Write to cache (only for deterministic temperature=0)
+                        # Write to cache (temperature 0, or model takes none)
                         try:
                             ck = _cache_key(model, system_prompt, temperature, text, reasoning_effort)
                             await asyncio.to_thread(_cache_set, ck, translation, temperature)

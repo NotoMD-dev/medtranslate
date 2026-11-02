@@ -26,7 +26,7 @@ Submit a CSV or XLSX file and model configuration to start a translation + metri
 | `file` | file (CSV/XLSX) | Yes | — | CSV or XLSX file with at least a `spanish_source` column |
 | `model` | string | No | `"gpt-5.6-sol"` | Model identifier (`gpt-5.6-sol` or `claude-sonnet-5-5`) |
 | `system_prompt` | string | No | *(medical interpreter prompt)* | System prompt for the LLM |
-| `temperature` | float | No | `0.0` | Sampling temperature |
+| `temperature` | float | No | `0.0` | Accepted for compatibility but overridden: the backend sends `0.0` to models that accept temperature and omits it for models that reject it (see `translation_config.temperature` in results) |
 | `max_tokens` | int | No | `1024` | Maximum tokens in the LLM response |
 | `compute_bertscore` | boolean | No | `false` | Whether to compute BERTScore (requires ~400MB torch) |
 
@@ -148,12 +148,14 @@ Retrieve complete results after a job finishes.
   "translation_config": {
     "model": "gpt-5.6-sol",
     "system_prompt": "You are a medical interpreter...",
-    "temperature": 0.0,
+    "temperature": null,
     "max_tokens": 1024,
     "reasoning_effort": "medium"
   }
 }
 ```
+
+`temperature` is the value actually sent to the provider: `0.0` for older OpenAI chat models, `null` for GPT-5.x reasoning models and current Claude models, which reject the parameter. A `null` run is not guaranteed to be deterministic.
 
 `reasoning_effort` is the thinking/reasoning effort the backend actually applied to the run (`OPENAI_REASONING_EFFORT` for GPT-5.x reasoning models, `ANTHROPIC_EFFORT` for Claude 4.6+ models). It is `null` for models that take no effort setting.
 

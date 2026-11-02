@@ -93,6 +93,19 @@ def _anthropic_supports_effort(model: str) -> bool:
     return bool(_ANTHROPIC_EFFORT_MODELS.match(model.lower()))
 
 
+def effective_temperature(model: str, requested: float) -> Optional[float]:
+    """Return the temperature that will actually be sent for *model*.
+
+    ``None`` means the parameter is not sent at all: GPT-5.x/GPT-6/o-series
+    reasoning models and current Claude models reject it on presence. Only
+    older OpenAI chat models receive the requested value. Recording this on
+    the job keeps ``translation_config`` honest about what the provider saw.
+    """
+    if _is_anthropic_model(model):
+        return None
+    return requested if _supports_temperature(model) else None
+
+
 def effective_reasoning_effort(model: str) -> Optional[str]:
     """Return the effort setting that will be sent for *model*, or None.
 
@@ -125,10 +138,13 @@ async def translate_text(
     *,
     model: str = DEFAULT_MODEL,
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-    temperature: float = DEFAULT_TEMPERATURE,
+    temperature: Optional[float] = DEFAULT_TEMPERATURE,
     max_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> str:
     """Translate a single clinical text to English via OpenAI or Anthropic.
+
+    ``temperature`` is only forwarded to models that accept it (see
+    :func:`effective_temperature`); ``None`` means "do not send".
 
     Retries on transient errors (rate-limit, server errors) with
     exponential back-off.
@@ -160,7 +176,7 @@ async def _translate_openai(
     *,
     model: str,
     system_prompt: str,
-    temperature: float,
+    temperature: Optional[float],
     max_tokens: int,
 ) -> str:
     client = _get_openai_client()
@@ -177,7 +193,7 @@ async def _translate_openai(
         request_kwargs["max_completion_tokens"] = max_tokens + headroom
     else:
         request_kwargs["max_tokens"] = max_tokens
-        request_kwargs["temperature"] = temperature
+        request_kwargs["temperature"] = DEFAULT_TEMPERATURE if temperature is None else temperature
 
     for attempt in range(1, TRANSLATE_MAX_RETRIES + 1):
         try:
@@ -261,7 +277,7 @@ async def _translate_anthropic(
     *,
     model: str,
     system_prompt: str,
-    temperature: float,  # noqa: ARG001 - see note below
+    temperature: Optional[float],  # noqa: ARG001 - see note below
     max_tokens: int,
 ) -> str:
     client = _get_anthropic_client()

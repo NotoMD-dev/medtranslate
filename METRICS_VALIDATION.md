@@ -27,7 +27,7 @@ Only **completed** rows are scored: rows with a non-empty LLM translation and a 
 - Each unique source text in a job is translated once and the result is fanned out to duplicate rows.
 - The backend keeps a SQLite translation cache keyed on `(model, system_prompt, temperature, reasoning_effort, source_text)`. A re-run with identical settings returns cached text without calling the provider, so identical output across re-runs is not evidence of model determinism.
 - The reasoning/thinking effort applied (`OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT`, default `medium` for both) is recorded as `translation_config.reasoning_effort` in the results.
-- Temperature is **not** sent to GPT-5.x reasoning models or Claude 4.6+ models; both families reject the parameter. The `temperature: 0.0` in `translation_config` is kept for the cache key and for any older model that still accepts it. Reasoning models are not guaranteed to be deterministic.
+- Temperature is **not** sent to GPT-5.x reasoning models or Claude 4.6+ models; both families reject the parameter. `translation_config.temperature` records what was actually sent: `0.0` for older OpenAI chat models, `null` for the current models. Runs with `null` are not guaranteed to be deterministic; identical text across re-runs comes from the cache, not the model.
 - The system prompt asks the model to translate but does not instruct it to return only the translation. A model that adds a preamble ("Here is the translation:") or a trailing note lowers BLEU sharply (precision-based) while lowering METEOR only modestly (recall-weighted). Inspect raw outputs in the Review panel before attributing a BLEU gap to translation quality.
 
 ---

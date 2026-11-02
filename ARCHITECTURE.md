@@ -257,7 +257,7 @@ Each unique source text is translated once per job (identical rows share one API
 
 ### Reasoning Effort Is Recorded
 
-The effort actually sent to the provider (`OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT`, both `medium` by default) is stored on the job as `translation_config.reasoning_effort`, returned with results, and shown on the Compare page. Temperature is not sent to either current model family (both reject it); the `temperature: 0.0` in the config is retained for the cache key and for older models.
+The effort actually sent to the provider (`OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT`, both `medium` by default) is stored on the job as `translation_config.reasoning_effort`, returned with results, and shown on the Compare page. Temperature is handled the same way: `translation_config.temperature` is `0.0` only when it was actually sent (older OpenAI chat models) and `null` when the model rejects it (GPT-5.x reasoning models, current Claude models). The backend never claims deterministic decoding for a model that did not receive a temperature.
 
 ### Client-Side Clinical Grading
 

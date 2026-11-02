@@ -67,7 +67,7 @@ The `POST /v1/jobs` endpoint accepts both CSV and XLSX files via multipart form 
 
 ### Translation Settings Recorded With Results
 
-`GET /v1/jobs/{id}/results` returns `translation_config` with the model, system prompt, `temperature`, `max_tokens`, and `reasoning_effort`. `reasoning_effort` is the value of `OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT` that was in force when the job ran (`null` for models that take no effort setting). Temperature is not forwarded to current GPT-5.x or Claude models; both reject it.
+`GET /v1/jobs/{id}/results` returns `translation_config` with the model, system prompt, `temperature`, `max_tokens`, and `reasoning_effort`. `reasoning_effort` is the value of `OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT` that was in force when the job ran (`null` for models that take no effort setting). `temperature` is the value actually sent: `0.0` for older OpenAI chat models, `null` for current GPT-5.x and Claude models, which reject the parameter. A `null` run is not guaranteed to be deterministic; the translation cache, not the model, is what makes re-runs identical.
 
 ### Translation Cache
 

@@ -85,12 +85,15 @@ Translation configuration used for a job.
 interface ModelConfig {
   model: string;
   system_prompt: string;
-  temperature: number;
+  /** Temperature actually sent to the provider, or null if the model rejects it (not sent). */
+  temperature: number | null;
   max_tokens: number;
   /** Reasoning/thinking effort the backend applied, or null if the model takes none. */
   reasoning_effort?: string | null;
 }
 ```
+
+`temperature` is `0.0` only for models that accept the parameter (older OpenAI chat models). GPT-5.x reasoning models and current Claude models reject it, so for them the backend sends nothing and records `null`; those runs are not guaranteed to be deterministic.
 
 `reasoning_effort` is set by the backend at job creation from `OPENAI_REASONING_EFFORT` (GPT-5.x reasoning models) or `ANTHROPIC_EFFORT` (Claude 4.6+). It is part of the translation-cache key and is displayed on the Compare page.
 
