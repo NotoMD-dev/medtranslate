@@ -32,7 +32,7 @@ DEFAULT_MAX_TOKENS: int = 1024
 
 # Reasoning / thinking effort for models that support it.
 #   OpenAI (GPT-5.x / GPT-6 / o-series): none | low | medium | high | xhigh | max
-#   Anthropic (Claude Sonnet 5.5 and other 4.6+ models): low | medium | high | xhigh | max
+#   Anthropic (Claude Opus 5.5 and other 4.6+ models): low | medium | high | xhigh | max
 OPENAI_REASONING_EFFORT: str = os.environ.get("OPENAI_REASONING_EFFORT", "medium")
 ANTHROPIC_EFFORT: str = os.environ.get("ANTHROPIC_EFFORT", "medium")
 

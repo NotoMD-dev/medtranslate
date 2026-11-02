@@ -6,7 +6,7 @@ MedTranslate is the research instrument for a study evaluating whether large lan
 
 ## Features
 
-- **Batch translation** — Upload CSV/XLSX datasets of up to thousands of rows; translations run server-side via OpenAI GPT-5.6 Sol or Anthropic Claude Sonnet 5.5
+- **Batch translation** — Upload CSV/XLSX datasets of up to thousands of rows; translations run server-side via OpenAI GPT-5.6 Sol or Anthropic Claude Opus 5.5 (each provider's flagship, both at medium reasoning effort)
 - **Demo datasets** — Built-in synthetic Spanish and French sample files (15 rows each, no real patient data) loadable with one click from the Upload page; see [`public/demo/`](public/demo/README.md)
 - **Plain-language metric guide** — A "What do these scores mean?" modal on the Metrics and Compare pages explains SacreBLEU, METEOR, and BERTScore for non-specialists
 - **About page** — Explains the study's purpose, how a run works end to end, which models and reasoning effort are used, and how to read the scores and clinical grades
@@ -15,7 +15,8 @@ MedTranslate is the research instrument for a study evaluating whether large lan
 - **Failure accounting** — Every failed row keeps its exact error. Refusals (model declined or returned nothing) count against the model; infrastructure failures (rate limit, connection, server, config) are kept out of the scores and can be retried in one click
 - **Output-format warnings** — Replies that look wrapped (a preamble, a translator's note, quotation marks, markdown) are flagged, never modified, so a low BLEU can be traced to formatting rather than translation
 - **Light / Dark theme** — Toggle between calm academic light mode and dark mode
-- **Head-to-head comparison** — Run the same dataset through two models and compare them metric by metric; the reasoning effort used for each run is recorded with its results
+- **Head-to-head comparison** — Run the same dataset through two models and compare them metric by metric; after one run, the Compare page offers a one-click run of the other model; the reasoning effort used for each run is recorded with its results
+- **Live progress** — The progress bar follows the backend phase (translating, METEOR, BLEU, BERTScore) with per-row counts, and the results table fills in translations and scores as they are computed
 - **Design system** — Token-based primitives (Card, Button, Badge, MetricValue, ProgressBar, GradeRow) for consistent UI
 - **Session persistence** — localStorage + IndexedDB for large datasets that survive page reloads
 - **Job cancellation** — Abort running translation jobs mid-flight
@@ -229,7 +230,7 @@ This tool supports a corpus-based evaluation study using 6,876 sentence-aligned 
 |---|---|---|
 | `OPENAI_API_KEY` | Yes | OpenAI API key (never exposed to frontend) |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins |
-| `ANTHROPIC_API_KEY` | For Claude | Anthropic API key (required to run Claude Sonnet 5.5) |
+| `ANTHROPIC_API_KEY` | For Claude | Anthropic API key (required to run Claude Opus 5.5) |
 | `DEFAULT_MODEL` | No | Default model (defaults to `gpt-5.6-sol`) |
 | `OPENAI_REASONING_EFFORT` | No | Reasoning effort for GPT-5.x/GPT-6 models: `none`, `low`, `medium` (default), `high`, `xhigh`, `max` |
 | `ANTHROPIC_EFFORT` | No | Thinking effort for Claude: `low`, `medium` (default), `high`, `xhigh`, `max` |
@@ -257,7 +258,7 @@ This tool supports a corpus-based evaluation study using 6,876 sentence-aligned 
 | Icons | Lucide React |
 | Storage | localStorage + IndexedDB |
 | Backend | FastAPI, Python 3.11+ |
-| Translation | OpenAI Python SDK (GPT-5.6 Sol) and Anthropic Python SDK (Claude Sonnet 5.5) |
+| Translation | OpenAI Python SDK (GPT-5.6 Sol) and Anthropic Python SDK (Claude Opus 5.5) |
 | Metrics | sacrebleu, NLTK, bert-score, PyTorch |
 | Deployment | Vercel (frontend) + Render (backend) |
 

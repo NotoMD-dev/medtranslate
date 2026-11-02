@@ -80,7 +80,7 @@ def main():
     parser = argparse.ArgumentParser(description="Batch translate medical text")
     parser.add_argument("--input", required=True, help="Input CSV path")
     parser.add_argument("--output", required=True, help="Output CSV path")
-    parser.add_argument("--model", default="gpt-5.6-sol", help="Model name (e.g. gpt-5.6-sol, claude-sonnet-5-5)")
+    parser.add_argument("--model", default="gpt-5.6-sol", help="Model name (e.g. gpt-5.6-sol, claude-opus-5-5)")
     parser.add_argument(
         "--api", choices=["openai", "anthropic"], default="openai",
         help="API provider"

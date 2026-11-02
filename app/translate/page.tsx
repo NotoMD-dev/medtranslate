@@ -4,8 +4,8 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import Header from "@/components/Header";
 import PairDetail from "@/components/PairDetail";
 import { pairsToCSVFile, sentenceMetricsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
-import { submitJob, pollUntilDone, fetchJobResults, cancelJob } from "@/lib/api";
-import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS, resolveModelId } from "@/lib/types";
+import { submitJob, pollUntilDone, fetchJobResults, fetchAllJobResultsPaginated, cancelJob } from "@/lib/api";
+import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS, resolveModelId, modelLabel as labelForModel } from "@/lib/types";
 import { countRun, isIncomplete, isRefused, applyRefusalOverrides, rowStatus, bleuBand, bandStyle, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
 import type { JobStatusResponse, JobResults, ClinicalGrade, SentenceMetrics, RefusalOverride } from "@/lib/types";
 import {
@@ -15,6 +15,7 @@ import {
   getSessionJobResultsAsync,
   getSessionGradesAsync,
   getSessionModel,
+  setSessionModel,
   setSessionJobId,
   setSessionJobResultsAsync,
   setSessionGradesAsync,
@@ -25,8 +26,43 @@ import {
 
 type PageState = "idle" | "submitting" | "running" | "complete" | "failed";
 
-/** Throttle partial-result fetches to avoid request pileup. */
-const PARTIAL_FETCH_INTERVAL_MS = 6000;
+/**
+ * How often the table is refreshed from the backend while a job runs. Small
+ * jobs refresh often (one request each); large ones less often, because each
+ * refresh re-fetches every row so scores can fill in as they are computed.
+ */
+const REFRESH_INTERVAL_SMALL_MS = 3000;
+const REFRESH_INTERVAL_LARGE_MS = 8000;
+const LARGE_JOB_ROWS = 1500;
+
+/** Progress-bar label and percentage for the backend's current phase. */
+function describeProgress(
+  status: JobStatusResponse | null,
+  submitting: boolean,
+): { label: string; pct: number | null } {
+  if (!status) return { label: submitting ? "Submitting job\u2026" : "Starting\u2026", pct: null };
+  const total = status.total || 0;
+  switch (status.phase) {
+    case "queued":
+      return { label: "Waiting for a worker\u2026", pct: null };
+    case "translating":
+      return { label: `Translating ${status.translated} of ${total}`, pct: total ? (status.translated / total) * 100 : null };
+    case "meteor": {
+      const scorable = Math.max(0, total - (status.incomplete_rows ?? 0));
+      return { label: `Scoring METEOR ${status.scored} of ${scorable}`, pct: scorable ? (status.scored / scorable) * 100 : null };
+    }
+    case "bleu":
+      return { label: "Computing corpus BLEU\u2026", pct: null };
+    case "bertscore":
+      return status.bertscore_total > 0
+        ? { label: `Computing BERTScore ${status.bertscore_completed} of ${status.bertscore_total}`, pct: (status.bertscore_completed / status.bertscore_total) * 100 }
+        : { label: "Loading the BERTScore model\u2026", pct: null };
+    case "complete":
+      return { label: "Finishing\u2026", pct: 100 };
+    default:
+      return { label: `${status.translated} of ${total} translated`, pct: total ? (status.translated / total) * 100 : null };
+  }
+}
 
 export default function TranslatePage() {
   const [pageState, setPageState] = useState<PageState>("idle");
@@ -42,13 +78,24 @@ export default function TranslatePage() {
   const abortRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const lastPartialFetchRef = useRef(0);
-  const lastOffsetRef = useRef(0);
+  // Set from ?autorun=1 (used by the Compare page's "translate with the other
+  // model" button); consumed once the dataset is restored.
+  const autorunRef = useRef(false);
 
   const sessionModel = resolveModelId(getSessionModel());
-  const modelLabel = MODEL_OPTIONS.find((m) => m.id === sessionModel)?.label || sessionModel;
+  const modelLabel = labelForModel(sessionModel);
 
   // Restore persisted job results on mount
   useEffect(() => {
+    // ?model=<id>&autorun=1 lets the Compare page start a run for the other
+    // model in one click. The parameters are consumed and removed.
+    if (typeof window !== "undefined" && window.location.search) {
+      const params = new URLSearchParams(window.location.search);
+      const wanted = params.get("model");
+      if (wanted && MODEL_OPTIONS.some((m) => m.id === wanted)) setSessionModel(wanted);
+      if (params.get("autorun") === "1") autorunRef.current = true;
+      if (wanted || params.get("autorun")) window.history.replaceState(null, "", "/translate");
+    }
     setOverrides(getSessionRefusalOverrides());
     getSessionGradesAsync().then((persisted) => {
       if (persisted) setGrades(persisted);
@@ -90,6 +137,11 @@ export default function TranslatePage() {
    * Fetches partial results at most once per PARTIAL_FETCH_INTERVAL_MS
    * to prevent request pileup on slow backends.
    */
+  /**
+   * Poll status callback shared by every job flow. Besides the counters, it
+   * periodically re-fetches the whole result set so translations, METEOR and
+   * BERTScore values appear in the table as the backend fills them in.
+   */
   const makeStatusCallback = useCallback(
     (jobId: string) =>
       async (status: JobStatusResponse) => {
@@ -98,30 +150,15 @@ export default function TranslatePage() {
         setRowCount(status.total);
 
         const now = Date.now();
-        if (now - lastPartialFetchRef.current < PARTIAL_FETCH_INTERVAL_MS) return;
+        const interval = status.total > LARGE_JOB_ROWS ? REFRESH_INTERVAL_LARGE_MS : REFRESH_INTERVAL_SMALL_MS;
+        if (now - lastPartialFetchRef.current < interval) return;
         lastPartialFetchRef.current = now;
 
         try {
-          const partial = await fetchJobResults(jobId, lastOffsetRef.current, 500);
-          if (partial?.sentence_metrics.length > 0) {
-            if (lastOffsetRef.current === 0) {
-              setJobResults(partial);
-            } else {
-              // Merge new results with existing ones
-              setJobResults((prev) => {
-                if (!prev) return partial;
-                return {
-                  ...partial,
-                  sentence_metrics: [
-                    ...prev.sentence_metrics,
-                    ...partial.sentence_metrics,
-                  ],
-                  offset: 0,
-                };
-              });
-            }
-            lastOffsetRef.current += partial.sentence_metrics.length;
-          }
+          const partial = status.total > LARGE_JOB_ROWS
+            ? await fetchAllJobResultsPaginated(jobId)
+            : await fetchJobResults(jobId);
+          if (partial?.sentence_metrics.length > 0) setJobResults(partial);
         } catch {
           // Partial results not yet available — ignore
         }
@@ -177,7 +214,6 @@ export default function TranslatePage() {
     preRunResultsRef.current = null;
     abortRef.current = false;
     lastPartialFetchRef.current = 0;
-    lastOffsetRef.current = 0;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -229,6 +265,15 @@ export default function TranslatePage() {
     }
   }, [computeBertscore, makeStatusCallback]);
 
+  // Start automatically when arriving from the Compare page's one-click
+  // "translate with the other model" button, once the dataset is restored.
+  useEffect(() => {
+    if (!autorunRef.current || restoringSession || rowCount === 0) return;
+    if (pageState === "running" || pageState === "submitting") return;
+    autorunRef.current = false;
+    handleRun();
+  }, [restoringSession, rowCount, pageState, handleRun]);
+
   // -------------------------------------------------------------------------
   // Shared job helpers. BERTScore-only, retry, and reviewer-override flows
   // all end in the same "re-score everything in metrics-only mode" step; the
@@ -242,7 +287,6 @@ export default function TranslatePage() {
     setJobStatus(null);
     abortRef.current = false;
     lastPartialFetchRef.current = 0;
-    lastOffsetRef.current = 0;
     const controller = new AbortController();
     abortControllerRef.current = controller;
     return controller;
@@ -262,14 +306,9 @@ export default function TranslatePage() {
       setSessionJobId(job_id);
       setRowCount(rows.length);
       setPageState("running");
-      return pollUntilDone(
-        job_id,
-        async (status) => { if (!abortRef.current) setJobStatus(status); },
-        2000,
-        signal,
-      );
+      return pollUntilDone(job_id, makeStatusCallback(job_id), 2000, signal);
     },
-    [],
+    [makeStatusCallback],
   );
 
   /** Persist a finished result set everywhere the other pages read it. */
@@ -350,12 +389,7 @@ export default function TranslatePage() {
       setSessionJobId(job_id);
       setRowCount(incomplete.length);
       setPageState("running");
-      const retried = await pollUntilDone(
-        job_id,
-        async (status) => { if (!abortRef.current) setJobStatus(status); },
-        2000,
-        controller.signal,
-      );
+      const retried = await pollUntilDone(job_id, makeStatusCallback(job_id), 2000, controller.signal);
 
       const fresh = new Map(retried.sentence_metrics.map((s) => [s.pair_id, s]));
       const merged = prev.sentence_metrics.map((s) => (fresh.has(s.pair_id) ? { ...s, ...fresh.get(s.pair_id)! } : s));
@@ -382,7 +416,7 @@ export default function TranslatePage() {
       preRunResultsRef.current = null;
       setPageState("complete");
     }
-  }, [jobResults, overrides, beginRun, runMetricsOnly, commitResults]);
+  }, [jobResults, overrides, beginRun, runMetricsOnly, commitResults, makeStatusCallback]);
 
   const handleAbort = useCallback(async () => {
     abortRef.current = true;
@@ -410,9 +444,10 @@ export default function TranslatePage() {
 
   const handleExport = useCallback(() => {
     if (!jobResults) return;
-    const csv = exportResultsCSV(jobResults.sentence_metrics, grades);
+    const rows = applyRefusalOverrides(jobResults.sentence_metrics, overrides);
+    const csv = exportResultsCSV(rows, grades, undefined, overrides);
     downloadFile(csv, "medtranslate_results.csv");
-  }, [jobResults, grades]);
+  }, [jobResults, grades, overrides]);
 
   const rawSentences = jobResults?.sentence_metrics ?? [];
   // Reviewer refusal overrides are applied for display. The stored results
@@ -422,14 +457,7 @@ export default function TranslatePage() {
   const counts = countRun(sentences);
   const completedCount = counts.completed;
 
-  const progressPct = jobStatus && jobStatus.total > 0
-    ? (jobStatus.translated / jobStatus.total) * 100
-    : 0;
-
-  const bertscorePct = jobStatus && jobStatus.bertscore_total > 0
-    ? (jobStatus.bertscore_completed / jobStatus.bertscore_total) * 100
-    : 0;
-  const isBertscorePhase = !!jobStatus && jobStatus.bertscore_total > 0;
+  const progress = describeProgress(jobStatus, pageState === "submitting");
 
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
   const idle = pageState !== "running" && pageState !== "submitting";
@@ -585,35 +613,29 @@ export default function TranslatePage() {
         </button>
       </div>
 
-      {/* Progress Bar */}
+      {/* Progress: one bar that follows the backend's phase */}
       {(pageState === "running" || pageState === "submitting") && (
         <div className="anim d2" style={{ marginBottom: 24 }}>
-          {!isBertscorePhase && (
-            <>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
-                <span>{jobStatus ? `${jobStatus.translated} of ${jobStatus.total}` : "Submitting job..."}</span>
-                <span>{progressPct.toFixed(1)}%</span>
-              </div>
-              <div style={{ height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
-                <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${progressPct}%` }} />
-              </div>
-              {jobStatus && jobStatus.scored > 0 && (
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{jobStatus.scored} metrics computed</div>
-              )}
-            </>
-          )}
-          {/* BERTScore Progress Bar */}
-          {jobStatus && jobStatus.bertscore_total > 0 && (
-            <div style={{ marginTop: isBertscorePhase ? 0 : 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
-                <span>BERTScore: {jobStatus.bertscore_completed} of {jobStatus.bertscore_total}</span>
-                <span>{bertscorePct.toFixed(1)}%</span>
-              </div>
-              <div style={{ height: 4, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}>
-                <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.6s ease", width: `${bertscorePct}%` }} />
-              </div>
-            </div>
-          )}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
+            <span>{progress.label}</span>
+            <span>{progress.pct != null ? `${Math.min(100, progress.pct).toFixed(0)}%` : ""}</span>
+          </div>
+          <div
+            className={progress.pct == null ? "progress-indeterminate" : undefined}
+            style={{ height: 6, background: "var(--border)", borderRadius: 100, overflow: "hidden" }}
+            role="progressbar"
+            aria-valuenow={progress.pct != null ? Math.round(progress.pct) : undefined}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={progress.label}
+          >
+            {progress.pct != null && (
+              <div className="progress-shimmer" style={{ height: "100%", borderRadius: 100, transition: "width 0.4s ease", width: `${Math.min(100, progress.pct)}%` }} />
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+            Rows fill in below as each sentence finishes. Keep this tab open: a job with no one watching it is stopped after 5 minutes.
+          </div>
         </div>
       )}
 

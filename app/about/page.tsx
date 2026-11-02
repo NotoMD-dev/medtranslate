@@ -28,7 +28,7 @@ const STEPS = [
   },
   {
     title: "Compare",
-    text: "Run the same file through a second model and the Compare page puts the two runs head to head, metric by metric, with the sentences where they differed most.",
+    text: "Run the same file through the second model (one click on the Compare page) and the two runs go head to head, metric by metric, with the sentences where they differed most.",
   },
 ];
 
@@ -171,6 +171,9 @@ export default function AboutPage() {
           </table>
           </div>
         </Card>
+        <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 12, lineHeight: 1.6 }}>
+          <strong style={{ color: "var(--text-secondary)" }}>Why these two.</strong> Each is its provider&rsquo;s flagship model, so the study compares flagship against flagship at the same effort. A smaller model such as Claude Sonnet is cheaper and still good, but it would not answer the question the study asks. More models and per-run effort settings are planned.
+        </p>
         <div style={{ marginTop: 16, display: "grid", gap: 16 }} className="metrics-grid-2">
           <Card style={{ padding: 24 }}>
             <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 10 }}>What &ldquo;effort&rdquo; means</div>

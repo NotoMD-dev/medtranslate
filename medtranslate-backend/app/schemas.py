@@ -51,6 +51,9 @@ class JobCreated(BaseModel):
 class JobStatusResponse(BaseModel):
     job_id: str
     status: JobStatus
+    # What the job is doing right now, for the progress bar:
+    # queued | translating | meteor | bleu | bertscore | complete | failed | cancelled
+    phase: str = "queued"
     total: int = 0
     translated: int = 0
     scored: int = 0

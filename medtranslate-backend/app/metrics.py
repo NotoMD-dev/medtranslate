@@ -76,7 +76,8 @@ def _bertscore_subprocess(
 
     The worker processes inputs in chunks and writes JSON-line progress
     messages to stdout, allowing the caller to track completion via the
-    optional *on_progress(completed, total)* callback.
+    optional *on_progress(completed, total, chunk_scores)* callback, where
+    *chunk_scores* holds the F1 values of the chunk just finished.
     """
     # Keep chunks reasonably small so progress updates are meaningful on large jobs
     # even when BERTSCORE_CHUNK_SIZE is set too high in the environment.
@@ -127,7 +128,7 @@ def _bertscore_subprocess(
         except json.JSONDecodeError:
             continue
         if msg.get("type") == "progress" and on_progress:
-            on_progress(msg["completed"], msg["total"])
+            on_progress(msg["completed"], msg["total"], msg.get("scores"))
         elif msg.get("type") == "done":
             f1_scores = msg["f1_scores"]
 

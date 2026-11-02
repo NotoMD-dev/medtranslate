@@ -362,12 +362,13 @@ export default function UploadPage() {
           </div>
           </>
         ) : (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="file-card">
+            <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
               <div
                 style={{
                   width: 40,
                   height: 40,
+                  flexShrink: 0,
                   borderRadius: "var(--radius-xs)",
                   display: "flex",
                   alignItems: "center",
@@ -382,8 +383,8 @@ export default function UploadPage() {
                   ? "XL"
                   : "CSV"}
               </div>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", overflowWrap: "anywhere" }}>
                   {fileName}
                 </div>
                 <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
@@ -394,6 +395,8 @@ export default function UploadPage() {
             <button
               onClick={handleDelete}
               style={{
+                flexShrink: 0,
+                whiteSpace: "nowrap",
                 padding: "8px 16px",
                 borderRadius: "var(--radius-xs)",
                 fontSize: 13,
@@ -489,7 +492,7 @@ export default function UploadPage() {
             Rows to Analyze
             <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
           </div>
-          <div style={{ display: "flex", gap: 12 }}>
+          <div className="choice-row">
             <button
               onClick={() => setRowMode("all")}
               style={{

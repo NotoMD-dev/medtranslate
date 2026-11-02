@@ -4,6 +4,28 @@ All notable changes to the MedTranslate project are documented in this file. The
 
 ---
 
+## [1.7.0] - 2026-11-02
+
+### Fixed — Progress that actually moves
+
+- **Stale-job race** in `jobs._get_job()`: a status poll arriving while the worker picked up the job replaced the live in-memory job with its SQLite copy, freezing every later poll at 0 until completion (the "0 % then 100 %" symptom). The reader now never overwrites a job that is executing on this instance
+- Translations and failures are written to their rows as each sentence finishes (not per 200-row chunk); `translated`, `refused_rows`, `incomplete_rows` update per sentence; chunk size default lowered to 50 so Stop responds faster
+- METEOR fills rows and `scored` every 25 rows; the BERTScore subprocess streams each chunk's F1 values so rows fill during BERTScore; cached BERTScore values appear immediately
+- `JobStatusResponse.phase` (`queued`, `translating`, `meteor`, `bleu`, `bertscore`, `complete`, `failed`, `cancelled`); SQLite progress writes throttled to every 2 s (`STATUS_PERSIST_INTERVAL`)
+- Translate page: one phase-aware progress bar with per-phase labels and an indeterminate state for BLEU and model loading; the table is re-fetched every 3 s (8 s above 1,500 rows) so translations and scores appear per row; same during BERTScore-only, retry and override re-scores
+
+### Changed — Models
+
+- **Claude Opus 5.5 replaces Claude Sonnet 5.5** as the comparison model: both offered models are now their provider's flagship, at medium effort. Saved runs keyed `claude-sonnet-5-5` still display with a "(retired)" label
+- Compare page: with one run saved, a "Compare against" block greys out the model already run and offers "Translate the same dataset with <other model>", which opens the Translate page with that model selected and starts the run (`/translate?model=<id>&autorun=1`); with two runs, any model not yet run is offered above the table
+- About page explains the flagship-versus-flagship choice and the one-click comparison
+
+### Changed — Exports
+
+- Results and review CSVs gain a `reviewer_override_note` column; the Translate export applies reviewer overrides (status `excluded`) before writing. Both exports verified by a browser download test
+
+---
+
 ## [1.6.0] - 2026-11-02
 
 See [PERFORMANCE_AND_RELIABILITY.md](PERFORMANCE_AND_RELIABILITY.md) for the reasoning behind each change and measured effects.
@@ -33,6 +55,12 @@ See [PERFORMANCE_AND_RELIABILITY.md](PERFORMANCE_AND_RELIABILITY.md) for the rea
 ### Removed
 
 - `medtranslate-backend/source/` (a committed virtualenv, 749 files) and `medtranslate-backend/worker.py` (placeholder)
+
+### Fixed (post-merge, mobile)
+
+- Upload page: a long file name (e.g. the demo CSV) could not shrink, pushing "Remove file" off the card on phones. The card now wraps, the name breaks anywhere, and the button never leaves the card
+- Navigation: six tabs wrapped onto two lines on phones; the nav is now one horizontally scrollable row under 480 px
+- Upload page: "Rows to analyze" and other choice buttons stack vertically under 480 px instead of squeezing labels into three lines
 
 ---
 

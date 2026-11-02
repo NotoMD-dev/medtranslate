@@ -95,14 +95,16 @@ queued → running → complete
                  → cancelled (via POST /cancel)
 ```
 
+`GET /v1/jobs/{id}` also reports `phase` (`queued`, `translating`, `meteor`, `bleu`, `bertscore`, `complete`, `failed`, `cancelled`) with per-row counters (`translated`, `scored`, `bertscore_completed`/`bertscore_total`). Rows are written to the job the moment each sentence is translated or scored, so `GET /v1/jobs/{id}/results` during a run returns a partially filled table.
+
 ## Environment Variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `OPENAI_API_KEY` | Yes | — | OpenAI API key for translations |
 | `CORS_ORIGINS` | No | `http://localhost:3000` | Comma-separated allowed origins |
-| `ANTHROPIC_API_KEY` | For Claude | — | Anthropic API key (required to run Claude Sonnet 5.5) |
-| `DEFAULT_MODEL` | No | `gpt-5.6-sol` | Default model (`gpt-5.6-sol` or `claude-sonnet-5-5`) |
+| `ANTHROPIC_API_KEY` | For Claude | — | Anthropic API key (required to run Claude Opus 5.5) |
+| `DEFAULT_MODEL` | No | `gpt-5.6-sol` | Default model (`gpt-5.6-sol` or `claude-opus-5-5`) |
 | `OPENAI_REASONING_EFFORT` | No | `medium` | `reasoning_effort` for GPT-5.x/GPT-6 models (`none`, `low`, `medium`, `high`, `xhigh`, `max`) |
 | `ANTHROPIC_EFFORT` | No | `medium` | `output_config.effort` for Claude 4.6+ models (`low`, `medium`, `high`, `xhigh`, `max`) |
 | `REASONING_HEADROOM_TOKENS` | No | `4096` | Extra output tokens reserved for reasoning on top of `max_tokens` |
@@ -112,6 +114,8 @@ queued → running → complete
 | `BERTSCORE_CHUNK_SIZE` | No | `256` | Rows per BERTScore progress chunk (clamped to 32–512) |
 | `HF_HOME` | No | `<db dir>/hf-cache` | HuggingFace model cache for the BERTScore subprocess; put it on the persistent disk |
 | `JOB_IDLE_TIMEOUT` | No | `300` | Seconds without a client poll before a running job is auto-cancelled (API spend protection) |
+| `TRANSLATION_CHUNK_SIZE` | No | `50` | Unique texts per translation chunk (cancellation and cache-write granularity; rows update per sentence regardless) |
+| `STATUS_PERSIST_INTERVAL` | No | `2.0` | Minimum seconds between progress writes to SQLite |
 
 ## Metrics
 

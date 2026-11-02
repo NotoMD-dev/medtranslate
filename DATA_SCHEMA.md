@@ -133,6 +133,7 @@ Status polling response.
 interface JobStatusResponse {
   job_id: string;
   status: JobStatus;
+  phase?: string;             // queued | translating | meteor | bleu | bertscore | complete | failed | cancelled
   total: number;
   translated: number;
   scored: number;

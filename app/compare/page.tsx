@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import MetricGuideLink from "@/components/MetricGuide";
-import { MODEL_OPTIONS } from "@/lib/types";
+import { MODEL_OPTIONS, modelLabel } from "@/lib/types";
 import { summarizeMetric, countRun, isScored, applyRefusalOverrides, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
 import type { JobResults, RefusalOverride } from "@/lib/types";
 import { getSessionComparisonResultsAsync, getSessionRefusalOverrides } from "@/lib/session";
@@ -27,7 +28,7 @@ interface ModelSummary {
 }
 
 function getModelLabel(modelId: string): string {
-  return MODEL_OPTIONS.find((m) => m.id === modelId)?.label || modelId;
+  return modelLabel(modelId);
 }
 
 function summarize(results: JobResults, overrides: Record<string, RefusalOverride>): ModelSummary {
@@ -88,6 +89,7 @@ export default function ComparePage() {
   const [modelA, setModelA] = useState<string>("");
   const [modelB, setModelB] = useState<string>("");
   const [overrides, setOverrides] = useState<Record<string, RefusalOverride>>({});
+  const router = useRouter();
 
   useEffect(() => {
     setOverrides(getSessionRefusalOverrides());
@@ -101,6 +103,24 @@ export default function ComparePage() {
   }, []);
 
   const availableModels = Object.keys(comparisonData);
+  // Models offered in the app that have no saved run yet: one click starts a
+  // run of the same dataset and prompt with that model on the Translate page.
+  const missingModels = MODEL_OPTIONS.filter((m) => !availableModels.includes(m.id));
+  const startRunWith = (modelId: string) =>
+    router.push(`/translate?model=${encodeURIComponent(modelId)}&autorun=1`);
+  const runWithButton = (m: { id: string; label: string }) => (
+    <button
+      key={m.id}
+      onClick={() => startRunWith(m.id)}
+      style={{
+        fontFamily: "var(--font)", fontSize: 14, fontWeight: 600, padding: "10px 20px",
+        borderRadius: "var(--radius-sm)", background: "var(--accent)", color: "#fff",
+        border: "none", cursor: "pointer",
+      }}
+    >
+      Translate the same dataset with {m.label}
+    </button>
+  );
 
   const summaryA = useMemo(
     () => (modelA && comparisonData[modelA] ? summarize(comparisonData[modelA], overrides) : null),
@@ -189,6 +209,25 @@ export default function ComparePage() {
             You have <strong>{availableModels.length}</strong> model run{availableModels.length !== 1 ? "s" : ""} so far
             {availableModels.length > 0 && `: ${availableModels.map(getModelLabel).join(", ")}`}.
           </p>
+          {availableModels.length === 1 && missingModels.length > 0 && (
+            <div style={{ marginTop: 28 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>
+                Compare against
+              </div>
+              <div className="button-row" style={{ justifyContent: "center", alignItems: "center" }}>
+                <span
+                  title="Already run on this dataset"
+                  style={{ padding: "10px 20px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", background: "var(--bg-inset)", color: "var(--text-muted)", fontSize: 14, fontWeight: 500 }}
+                >
+                  {getModelLabel(availableModels[0])} &middot; done
+                </span>
+                {missingModels.map(runWithButton)}
+              </div>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 12, maxWidth: 480, marginLeft: "auto", marginRight: "auto" }}>
+                Starts the run on the Translate page with the same dataset and prompt. Come back here when it finishes.
+              </p>
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -234,6 +273,13 @@ export default function ComparePage() {
               </select>
             </div>
           </div>
+
+          {missingModels.length > 0 && (
+            <div className="anim d2" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 13, color: "var(--text-muted)" }}>
+              <span>Not run yet on this dataset:</span>
+              {missingModels.map(runWithButton)}
+            </div>
+          )}
 
           {/* Fairness warnings */}
           {promptMismatch && summaryA && summaryB && (

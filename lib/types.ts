@@ -11,6 +11,8 @@ export interface JobCreated {
 export interface JobStatusResponse {
   job_id: string;
   status: JobStatus;
+  /** queued | translating | meteor | bleu | bertscore | complete | failed | cancelled */
+  phase?: string;
   total: number;
   translated: number;
   scored: number;
@@ -232,10 +234,25 @@ export interface ModelOption {
   provider: "openai" | "anthropic";
 }
 
+/**
+ * The two models under study. Both are their provider's flagship, so the
+ * comparison is like for like; both run at medium reasoning effort by default
+ * (see OPENAI_REASONING_EFFORT / ANTHROPIC_EFFORT on the backend).
+ */
 export const MODEL_OPTIONS: ModelOption[] = [
   { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "openai" },
-  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", provider: "anthropic" },
+  { id: "claude-opus-5-5", label: "Claude Opus 5.5", provider: "anthropic" },
 ];
+
+/** Labels for model ids that older saved runs may still carry. */
+export const LEGACY_MODEL_LABELS: Record<string, string> = {
+  "claude-sonnet-5-5": "Claude Sonnet 5.5 (retired)",
+  "gpt-4o": "GPT-4o (retired)",
+};
+
+export function modelLabel(id: string): string {
+  return MODEL_OPTIONS.find((m) => m.id === id)?.label ?? LEGACY_MODEL_LABELS[id] ?? id;
+}
 
 export const DEFAULT_MODEL_ID = MODEL_OPTIONS[0].id;
 
