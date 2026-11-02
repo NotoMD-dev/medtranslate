@@ -515,7 +515,7 @@ export default function AboutPage() {
         <Card style={{ borderLeft: "4px solid var(--warning)" }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>Not a clinical tool</div>
           <p style={{ ...P, marginBottom: 0, fontSize: 14 }}>
-            MedTranslate measures how well AI models translate. It is not itself a translation service for patient care, and a high score here is never proof that a translation is safe to act on.
+            MedTranslate is a research tool for comparing AI-generated translations with reference English text. SacreBLEU, METEOR, and BERTScore measure different aspects of translation similarity. MedTranslate is designed to study whether these scores, alone or together, correspond with clinician assessments of translation accuracy and safety. Until that relationship is validated, the scores should not be used on their own to guide patient care.
           </p>
         </Card>
       </div>
