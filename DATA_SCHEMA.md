@@ -235,6 +235,8 @@ Exported from the frontend after a job completes.
 
 `medtranslate:reviewThreshold` (number, 0–1) stores the METEOR review threshold set on the Review page; the Metrics page reads it for its "Flagged for Review" count. Absent means the default `0.4`.
 
+`medtranslate:headToHeadJudgments` (`Record<pair_id, { preferred: model_id | "tie"; note: string; models: [id, id]; at: string }>`) stores the reviewer's verdict on which model's output is better for sentences opened on the Compare page. Exported by "Export head-to-head CSV" (`reviewer_preference`, `reviewer_note`).
+
 `medtranslate:refusalOverrides` (`Record<pair_id, { note: string; at: string }>`) stores reviewer decisions that a refusal was legitimate. Every page applies it with `applyRefusalOverrides()` before computing counts and averages; the Translate page's "Apply reviewer overrides & re-score" sends the rows with `error_kind=excluded` so the backend's corpus BLEU drops them too.
 
 Session state is persisted in the browser's `localStorage` via `lib/session.ts`.

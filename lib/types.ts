@@ -39,6 +39,20 @@ export interface JobStatusResponse {
 export type ErrorKind = "refusal" | "infrastructure" | "excluded";
 
 /**
+ * Reviewer's head-to-head preference for one sentence: which model's output
+ * is actually the better translation, regardless of the automated scores.
+ * `preferred` is a model id or "tie". Keyed by pair_id in session storage.
+ */
+export interface HeadToHeadJudgment {
+  preferred: string;
+  note: string;
+  /** The two model ids that were compared when the judgment was made. */
+  models: [string, string];
+  /** ISO timestamp of the decision. */
+  at: string;
+}
+
+/**
  * Reviewer decision that a refusal was legitimate (e.g. the source text is
  * not translatable or not clinical). Keyed by pair_id in session storage and
  * applied to every model's run for that pair, since it is a property of the
