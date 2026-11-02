@@ -58,6 +58,8 @@ export interface ModelConfig {
   system_prompt: string | null;
   temperature: number;
   max_tokens: number;
+  /** Reasoning/thinking effort the backend applied, or null if not applicable. */
+  reasoning_effort?: string | null;
 }
 
 export interface JobResults {

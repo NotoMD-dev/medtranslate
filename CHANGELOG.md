@@ -4,6 +4,21 @@ All notable changes to the MedTranslate project are documented in this file. The
 
 ---
 
+## [1.4.0] - 2026-11-02
+
+### Added — Onboarding and Explanations
+
+- **Plain-language metric guide** (`components/MetricGuide.tsx`): a "What do these scores mean?" link on the Metrics and Compare pages opens a modal explaining SacreBLEU, METEOR, and BERTScore in everyday language, with score bands, why the metrics disagree, and what they cannot detect
+- **About page** (`/about`): purpose of the study, the five-step run pipeline, the models in use with their reasoning effort settings, the system prompt, the physician grading scale, data sources, and a "not a clinical tool" caveat
+- **Demo datasets** (`public/demo/`): synthetic Spanish and French CSVs (15 rows each) with one-click "Try a demo" buttons on the Upload page and a download link to show the expected format
+- **Reasoning effort recorded per job**: the backend now stores the effort applied to a run in `ModelConfig.reasoning_effort` (returned as `translation_config.reasoning_effort`), and the Compare page shows it under each model name
+
+### Fixed
+
+- **Compare tally**: a metric that was not computed for either run (typically BERTScore) was counted as a "tie"; it is now shown as "Not computed" and left out of the win/tie counts, with a hint on how to enable it
+
+---
+
 ## [1.3.0] - 2026-02-25
 
 ### Added — Systems Design Documentation

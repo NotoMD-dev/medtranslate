@@ -93,6 +93,17 @@ def _anthropic_supports_effort(model: str) -> bool:
     return bool(_ANTHROPIC_EFFORT_MODELS.match(model.lower()))
 
 
+def effective_reasoning_effort(model: str) -> Optional[str]:
+    """Return the effort setting that will be sent for *model*, or None.
+
+    Mirrors the branching in the provider-specific translate functions so the
+    value recorded on a job matches what the request actually used.
+    """
+    if _is_anthropic_model(model):
+        return ANTHROPIC_EFFORT if _anthropic_supports_effort(model) else None
+    return OPENAI_REASONING_EFFORT if _is_openai_reasoning_model(model) else None
+
+
 def _anthropic_text(response) -> str:
     """Concatenate the text blocks of a Messages API response.
 

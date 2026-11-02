@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from app.config import CORS_ORIGINS, DEFAULT_MODEL, DEFAULT_SYSTEM_PROMPT, SOURCE_LANGUAGE_COLUMNS
 from app.jobs import InputRow, cancel_job, create_job, execute_job, get_job_results, get_job_status, _db_cleanup_old_jobs
 from app.schemas import JobCreated, JobResults, JobStatusResponse, ModelConfig
+from app.translate import effective_reasoning_effort
 
 logging.basicConfig(
     level=logging.INFO,
@@ -286,6 +287,7 @@ async def submit_job(
         max_tokens=max_tokens,
         compute_bertscore=compute_bertscore,
         metrics_only=metrics_only,
+        reasoning_effort=effective_reasoning_effort(model),
     )
 
     job_id = await create_job(rows, config)

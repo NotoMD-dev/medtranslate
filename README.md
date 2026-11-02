@@ -7,9 +7,13 @@ MedTranslate is the research instrument for a study evaluating whether large lan
 ## Features
 
 - **Batch translation** — Upload CSV/XLSX datasets of up to thousands of rows; translations run server-side via OpenAI GPT-5.6 Sol or Anthropic Claude Sonnet 5.5
+- **Demo datasets** — Built-in synthetic Spanish and French sample files (15 rows each, no real patient data) loadable with one click from the Upload page; see [`public/demo/`](public/demo/README.md)
+- **Plain-language metric guide** — A "What do these scores mean?" modal on the Metrics and Compare pages explains SacreBLEU, METEOR, and BERTScore for non-specialists
+- **About page** — Explains the study's purpose, how a run works end to end, which models and reasoning effort are used, and how to read the scores and clinical grades
 - **Publication-grade metrics** — Corpus BLEU (sacrebleu), sentence-level METEOR (NLTK with WordNet + stemming), BERTScore F1 (bert-score with rescaled baselines)
 - **Clinical significance grading** — Physician review workflow with a 0–3 severity scale for flagged translations (METEOR < threshold)
 - **Light / Dark theme** — Toggle between calm academic light mode and dark mode
+- **Head-to-head comparison** — Run the same dataset through two models and compare them metric by metric; the reasoning effort used for each run is recorded with its results
 - **Design system** — Token-based primitives (Card, Button, Badge, MetricValue, ProgressBar, GradeRow) for consistent UI
 - **Session persistence** — localStorage + IndexedDB for large datasets that survive page reloads
 - **Job cancellation** — Abort running translation jobs mid-flight
@@ -26,19 +30,21 @@ All translation and metric computation occurs server-side. The frontend never ca
 
 ```
 medtranslate/
-├── app/                          # Next.js pages (Upload, Translate, Review, Metrics)
+├── app/                          # Next.js pages (Upload, Translate, Review, Metrics, Compare, About)
 │   ├── layout.tsx                # Root layout with metadata and fonts
 │   ├── globals.css               # Global styles, animations, CSS variables
-│   ├── page.tsx                  # Upload page
+│   ├── page.tsx                  # Upload page (with demo dataset loader)
 │   ├── translate/page.tsx        # Translation job page
 │   ├── review/page.tsx           # Clinical review page
-│   └── metrics/page.tsx          # Aggregate metrics dashboard
+│   ├── metrics/page.tsx          # Aggregate metrics dashboard
+│   ├── compare/page.tsx          # Head-to-head model comparison
+│   └── about/page.tsx            # Purpose, pipeline, models, and score guide
 ├── components/                   # Shared React components
 │   ├── Header.tsx                # Navigation bar with theme toggle
+│   ├── MetricGuide.tsx           # "What do these scores mean?" modal + explainer text
 │   ├── PairDetail.tsx            # Three-column translation detail panel
-│   ├── GradeSelector.tsx         # Clinical grade buttons (0–3)
-│   ├── MetricsCard.tsx           # Metric value display card
-│   └── StatusPill.tsx            # Row status badge
+│   └── GradeSelector.tsx         # Clinical grade buttons (0–3)
+├── public/demo/                  # Synthetic Spanish/French demo CSVs
 ├── src/design-system/            # Design tokens and UI primitives
 │   ├── tokens.css                # CSS custom properties (light defaults)
 │   ├── theme.css                 # Dark mode overrides + animations
@@ -126,7 +132,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and upload your CSV dataset.
+Open [http://localhost:3000](http://localhost:3000) and upload your CSV dataset, or click one of the **demo dataset** buttons on the Upload page to try the pipeline with a bundled synthetic file.
 
 ### 5. (Optional) Docker for backend
 
