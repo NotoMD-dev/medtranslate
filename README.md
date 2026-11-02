@@ -34,7 +34,7 @@ All translation and metric computation occurs server-side. The frontend never ca
 
 ```
 medtranslate/
-├── app/                          # Next.js pages (Upload, Translate, Review, Metrics, Compare, About)
+├── app/                          # Next.js pages (Upload, Translate, Metrics, Compare, Physician Review, About)
 │   ├── layout.tsx                # Root layout with metadata and fonts
 │   ├── globals.css               # Global styles, animations, CSS variables
 │   ├── page.tsx                  # Upload page (with demo dataset loader)
@@ -197,16 +197,16 @@ Physician-adjudicated grading of translation discrepancies:
 | 2 | Moderate error | Potential for confusion, unlikely to change clinical management |
 | 3 | Clinically significant | Could alter diagnosis, treatment, or disposition |
 
-Translations with METEOR below the review threshold (default 0.4, set on the Review page and shared with the Metrics page) are flagged for physician review. Rows the model refused to translate are scored 0 and placed at the top of the queue. Rows that failed for infrastructure reasons are not scored and are retried from the Translate page.
+Translations with METEOR below the review threshold (default 0.4, set on the Physician Review page and shared with the Metrics page) are flagged for physician review. Rows the model refused to translate are scored 0 and placed at the top of the queue. Rows that failed for infrastructure reasons are not scored and are retried from the Translate page.
 
 ## How Failures Are Handled
 
 | Outcome | Example causes | Scored? | Where it shows |
 |---|---|---|---|
 | **Completed** | Model returned text | Yes | Everywhere |
-| **Refused** | Content filter, explicit decline, empty reply | **Yes, as 0** (METEOR 0, BERTScore 0, empty BLEU hypothesis) | Top of Review queue; "Refused" counts on Translate, Metrics, Compare |
+| **Refused** | Content filter, explicit decline, empty reply | **Yes, as 0** (METEOR 0, BERTScore 0, empty BLEU hypothesis) | Top of Physician Review queue; "Refused" counts on Translate, Metrics, Compare |
 | **Incomplete** | Rate limit exhausted, connection/server error, output limit reached before any text | No | "Incomplete" counts; "Retry incomplete rows" on Translate |
-| **Excluded** | A reviewer judged the refusal legitimate | No | "Excluded by reviewer" counts; set and undone on the Review page; "Apply reviewer overrides & re-score" on Translate updates corpus BLEU |
+| **Excluded** | A reviewer judged the refusal legitimate | No | "Excluded by reviewer" counts; set and undone on the Physician Review page; "Apply reviewer overrides & re-score" on Translate updates corpus BLEU |
 
 The exact provider message is kept on every failed row (`error`) and the class is recorded in `error_kind`. Rows whose reply looks wrapped carry a `format_warning`; the text is scored exactly as returned.
 

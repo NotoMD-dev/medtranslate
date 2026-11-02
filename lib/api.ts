@@ -86,10 +86,16 @@ function sleep(ms: number): Promise<void> {
 // POST /v1/parse — parse CSV or XLSX on the backend, return normalized rows
 // ---------------------------------------------------------------------------
 
+export interface ParsedFile {
+  rows: import("./types").TranslationPair[];
+  /** Column the backend read the source text from ("spanish_source", "source_text", ...). */
+  sourceColumn: string | null;
+}
+
 export async function parseFile(
   file: File,
   sourceColumn?: string,
-): Promise<import("./types").TranslationPair[]> {
+): Promise<ParsedFile> {
   const form = new FormData();
   form.append("file", file);
   if (sourceColumn) form.append("source_column", sourceColumn);
@@ -104,8 +110,8 @@ export async function parseFile(
     throw new Error(detail.detail || `Backend error: ${resp.status}`);
   }
 
-  const data: { rows: import("./types").TranslationPair[] } = await resp.json();
-  return data.rows;
+  const data: { rows: import("./types").TranslationPair[]; source_column?: string } = await resp.json();
+  return { rows: data.rows, sourceColumn: data.source_column || null };
 }
 
 // ---------------------------------------------------------------------------

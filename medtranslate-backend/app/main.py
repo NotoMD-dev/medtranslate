@@ -217,6 +217,9 @@ class ParsedRow(BaseModel):
 
 class ParseResponse(BaseModel):
     rows: list[ParsedRow]
+    # Which column held the source text ("spanish_source", "source_text", ...),
+    # so the Upload page can set the source language from the file.
+    source_column: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +244,7 @@ async def parse_file(
     input_rows = _raw_rows_to_input(raw_rows, detected_col)
 
     return ParseResponse(
+        source_column=detected_col,
         rows=[
             ParsedRow(
                 pair_id=r.pair_id,

@@ -1,5 +1,6 @@
 import type { SentenceMetrics, ClinicalGrade } from "@/lib/types";
 import GradeSelector from "./GradeSelector";
+import { explainRefusal, splitRefusalError } from "@/lib/metrics";
 
 interface Props {
   sentence: SentenceMetrics;
@@ -68,7 +69,15 @@ export default function PairDetail({ sentence, grade, onGrade, onClose }: Props)
 
       {sentence.error && (
         <div style={{ marginTop: 12, padding: 12, background: sentence.error_kind === "refusal" ? "var(--danger-light)" : "var(--warning-light)", border: `1px solid ${sentence.error_kind === "refusal" ? "var(--danger-border)" : "var(--warning-border)"}`, borderRadius: "var(--radius-xs)", color: sentence.error_kind === "refusal" ? "var(--danger)" : "var(--warning)", fontSize: 12 }}>
-          <strong>{sentence.error_kind === "refusal" ? "Refused (scored as 0):" : "Incomplete (not scored):"}</strong> {sentence.error}
+          <strong>{sentence.error_kind === "refusal" ? "Refused (scored as 0):" : "Incomplete (not scored):"}</strong> {splitRefusalError(sentence.error).reason}
+          {sentence.error_kind === "refusal" && splitRefusalError(sentence.error).providerExplanation && (
+            <div style={{ marginTop: 6, color: "var(--text-primary)" }}>
+              <strong>What the provider said:</strong> &ldquo;{splitRefusalError(sentence.error).providerExplanation}&rdquo;
+            </div>
+          )}
+          {sentence.error_kind === "refusal" && explainRefusal(sentence.error) && (
+            <div style={{ marginTop: 6, color: "var(--text-secondary)" }}>{explainRefusal(sentence.error)}</div>
+          )}
         </div>
       )}
     </div>

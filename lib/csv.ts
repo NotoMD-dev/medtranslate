@@ -37,22 +37,46 @@ export function detectSourceColumn(headers: string[]): string | null {
 }
 
 /**
+ * The source language a header row implies: "spanish_source" means Spanish.
+ * Null when the file uses the generic "source_text" column (the language is
+ * then chosen on the Upload page) or has no source column at all.
+ */
+export function detectSourceLanguage(headers: string[]): string | null {
+  const col = detectSourceColumn(headers);
+  return SOURCE_LANGUAGES.find((l) => l.columnName === col)?.code ?? null;
+}
+
+/** Header row of a CSV string (empty when the text has no rows). */
+export function csvHeaders(text: string): string[] {
+  const first = text.split("\n").find((l) => l.trim());
+  return first ? parseCSVLine(first).map((h) => h.trim()) : [];
+}
+
+/**
  * Parse a CSV string into TranslationPair objects.
  * Handles quoted fields with commas and newlines.
+ *
+ * The source column is read from the header row: a `<language>_source`
+ * column names the source language, and `source_text` is the generic
+ * fallback. The `sourceColumn` argument is only used when the file has no
+ * recognisable source column.
  */
 export function parseCSV(text: string, sourceColumn?: string): TranslationPair[] {
   const lines = text.split("\n").filter((l) => l.trim());
   if (lines.length < 2) return [];
 
-  const headers = parseCSVLine(lines[0]);
-  const srcCol = sourceColumn || detectSourceColumn(headers) || "spanish_source";
+  const headers = parseCSVLine(lines[0]).map((h) => h.trim());
+  const srcCol = detectSourceColumn(headers) || sourceColumn || "spanish_source";
 
-  const required = [srcCol, "english_reference"];
-  const missing = required.filter((col) => !headers.includes(col));
+  const missing: string[] = [];
+  if (!headers.includes(srcCol)) {
+    missing.push(`a source column named after the source language (for example "spanish_source" or "french_source")`);
+  }
+  if (!headers.includes("english_reference")) {
+    missing.push(`an "english_reference" column with the human English translation`);
+  }
   if (missing.length > 0) {
-    throw new Error(
-      `Missing required column${missing.length > 1 ? "s" : ""}: ${missing.map((c) => `"${c}"`).join(", ")}. Found: ${headers.join(", ")}`,
-    );
+    throw new Error(`Missing ${missing.join(" and ")}. Found: ${headers.join(", ")}`);
   }
 
   const rows: TranslationPair[] = [];

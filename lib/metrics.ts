@@ -113,14 +113,52 @@ export function countRun(sentences: SentenceMetrics[]): RunCounts {
 }
 
 /** Group failed rows by error message, most frequent first. */
-export function failureReasons(sentences: SentenceMetrics[]): { reason: string; kind: string; count: number }[] {
-  const map = new Map<string, { reason: string; kind: string; count: number }>();
+/**
+ * Separates the stable refusal reason from the provider's free-text
+ * explanation inside a stored error message. Mirrored in the backend
+ * (medtranslate-backend/app/translate.py).
+ */
+const PROVIDER_EXPLANATION_MARK = ". Provider explanation: ";
+
+/**
+ * Split a stored error message into the reason (stable across rows, used
+ * for grouping) and the provider's own explanation of the refusal, when the
+ * API returned one. Older rows have no explanation.
+ */
+export function splitRefusalError(error: string | null | undefined): { reason: string; providerExplanation: string | null } {
+  if (!error) return { reason: "", providerExplanation: null };
+  const i = error.indexOf(PROVIDER_EXPLANATION_MARK);
+  if (i === -1) return { reason: error, providerExplanation: null };
+  const explanation = error.slice(i + PROVIDER_EXPLANATION_MARK.length).trim();
+  return { reason: error.slice(0, i), providerExplanation: explanation || null };
+}
+
+export interface FailureReason {
+  reason: string;
+  kind: string;
+  count: number;
+  /** Distinct provider explanations seen for this reason (at most a few). */
+  providerExplanations: string[];
+}
+
+const MAX_EXPLANATIONS_PER_REASON = 3;
+
+export function failureReasons(sentences: SentenceMetrics[]): FailureReason[] {
+  const map = new Map<string, FailureReason>();
   for (const s of sentences) {
     if (!s.error) continue;
     const kind = isRefused(s) ? "refusal" : isExcluded(s) ? "excluded" : "infrastructure";
-    const key = `${kind}|${s.error}`;
-    const entry = map.get(key) ?? { reason: s.error, kind, count: 0 };
+    const { reason, providerExplanation } = splitRefusalError(s.error);
+    const key = `${kind}|${reason}`;
+    const entry = map.get(key) ?? { reason, kind, count: 0, providerExplanations: [] };
     entry.count += 1;
+    if (
+      providerExplanation &&
+      entry.providerExplanations.length < MAX_EXPLANATIONS_PER_REASON &&
+      !entry.providerExplanations.includes(providerExplanation)
+    ) {
+      entry.providerExplanations.push(providerExplanation);
+    }
     map.set(key, entry);
   }
   return [...map.values()].sort((a, b) => b.count - a.count);
@@ -173,4 +211,49 @@ export function bandStyle(tone: Tone): { background: string; color: string; bord
     color: `var(--${tone})`,
     border: `1px solid var(--${tone}-border)`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Plain-language explanation of a refusal
+// ---------------------------------------------------------------------------
+
+/**
+ * What each provider safety-classifier category means. The backend stores
+ * the raw category code from the API (e.g. "category: bio") in the row's
+ * error message; this maps it to words a reviewer can act on.
+ */
+const REFUSAL_CATEGORY_NOTES: Record<string, string> = {
+  bio: "biology or biosecurity content (for example pathogens, viruses, genome sequences, or laboratory methods)",
+  cyber: "cybersecurity content (for example malware or hacking techniques)",
+  reasoning_extraction: "an attempt to extract the model's hidden reasoning",
+  frontier_llm: "an attempt to use the model to build or improve another AI model",
+  general_harms: "generally harmful content",
+};
+
+const REFUSAL_FOOTER =
+  "The sentence still counts as a failed translation (scored 0) unless a reviewer marks the refusal legitimate on the Physician Review page.";
+
+/**
+ * Turn a stored refusal error message into a sentence or two that explains
+ * why there is no translation. Returns null when the message is not a
+ * refusal this helper recognises.
+ */
+export function explainRefusal(error: string | null | undefined): string | null {
+  if (!error) return null;
+  const categoryMatch = /category:\s*([a-z_]+)/i.exec(error);
+  if (categoryMatch) {
+    const code = categoryMatch[1].toLowerCase();
+    const what = REFUSAL_CATEGORY_NOTES[code];
+    if (what) {
+      return `The provider's automated safety filter classified this sentence as ${what} and blocked the reply before the model wrote a translation. "${code}" is the filter's label, not a judgment about the text's accuracy. Clinical and research text about infections, viruses, or sequencing can trip this filter even when nothing in it is harmful. ${REFUSAL_FOOTER}`;
+    }
+    return `The provider's automated safety filter blocked the reply before the model wrote a translation ("${code}" is the filter's label). ${REFUSAL_FOOTER}`;
+  }
+  if (/content filter/i.test(error)) {
+    return `The provider's automated content filter blocked the reply before the model wrote a translation. ${REFUSAL_FOOTER}`;
+  }
+  if (/empty reply/i.test(error)) {
+    return `The model answered but the reply contained no text, so there is nothing to score. ${REFUSAL_FOOTER}`;
+  }
+  return null;
 }

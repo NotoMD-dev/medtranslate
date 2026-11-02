@@ -7,9 +7,9 @@ import { useTheme } from "@/src/design-system";
 const NAV_ITEMS = [
   { href: "/", label: "Upload" },
   { href: "/translate", label: "Translate" },
-  { href: "/review", label: "Review" },
   { href: "/metrics", label: "Metrics" },
   { href: "/compare", label: "Compare" },
+  { href: "/review", label: "Physician Review" },
   { href: "/about", label: "About" },
 ];
 
@@ -78,7 +78,7 @@ export default function Header() {
               marginTop: 3,
             }}
           >
-            Clinical Translation Platform
+            Clinical Translation Research Platform
           </span>
         </Link>
 

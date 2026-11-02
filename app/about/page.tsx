@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import MetricGuideLink, { METRIC_EXPLAINERS, METRIC_GUIDE_NOTES } from "@/components/MetricGuide";
@@ -23,7 +24,7 @@ const STEPS = [
     text: "Three automated scores compare the AI translation with the human one: SacreBLEU (exact wording), METEOR (forgiving wording plus word order), and optionally BERTScore (meaning). These run on the server with standard research libraries so results can be cited.",
   },
   {
-    title: "Review",
+    title: "Physician Review",
     text: "Sentences that score poorly on METEOR (below 0.4 by default) are flagged, and any sentence the model refused to translate goes to the top of the queue. A physician reads the original, the human translation, and the AI translation side by side and grades how serious any error is, from 0 (no error) to 3 (could change care).",
   },
   {
@@ -79,7 +80,149 @@ function Card({ children, style }: { children: React.ReactNode; style?: React.CS
   );
 }
 
+function SubHeading({ id, children }: { id: string; children: React.ReactNode }) {
+  return (
+    <h3 id={id} className="about-section" style={{ fontSize: 17, fontWeight: 700, color: "var(--text-primary)", margin: "0 0 12px", letterSpacing: "-0.01em" }}>
+      {children}
+    </h3>
+  );
+}
+
 const P: React.CSSProperties = { fontSize: 15, lineHeight: 1.7, color: "var(--text-secondary)", margin: "0 0 12px" };
+const LINK: React.CSSProperties = { color: "var(--accent-text)", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 3 };
+
+// ---------------------------------------------------------------------------
+// About the Creator
+// ---------------------------------------------------------------------------
+
+/** Shown in the "About the Creator" section. `email` drives the "Email me" link. */
+const CREATOR = {
+  name: "Yasmine Abbey",
+  credentials: "MD, MSc",
+  initials: "YA",
+  email: "yasmineabbey@gmail.com",
+  website: "https://scopemd.net",
+  websiteLabel: "scopeMD.net",
+};
+
+// ---------------------------------------------------------------------------
+// Section navigation
+// ---------------------------------------------------------------------------
+
+const SECTIONS = [
+  { id: "purpose", label: "Purpose", children: [] },
+  { id: "limitations", label: "Research Use and Limitations", children: [] },
+  { id: "how-it-works", label: "How MedTranslate Works", children: [] },
+  {
+    id: "study-setup",
+    label: "Study Setup",
+    children: [
+      { id: "datasets", label: "Datasets" },
+      { id: "models", label: "Models and Settings" },
+      { id: "prompt", label: "Standard Translation Prompt" },
+    ],
+  },
+  {
+    id: "evaluation",
+    label: "How Results Are Evaluated",
+    children: [
+      { id: "scores", label: "Automated Scores" },
+      { id: "review-scale", label: "Physician Review Scale" },
+    ],
+  },
+  { id: "creator", label: "About the Creator", children: [] },
+] as const;
+
+type SectionId = (typeof SECTIONS)[number]["id"];
+
+/**
+ * Sticky list of links to each section. The current section is tracked
+ * with an IntersectionObserver so the highlight follows the reader as
+ * they scroll; clicking a link scrolls smoothly and updates the hash.
+ */
+function SectionNav() {
+  const [active, setActive] = useState<SectionId>(SECTIONS[0].id);
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const visible = new Map<SectionId, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const id = e.target.id as SectionId;
+          if (e.isIntersecting) visible.set(id, e.intersectionRatio);
+          else visible.delete(id);
+        }
+        // Highlight the topmost visible section (sections are observed in
+        // page order, so the first id in SECTIONS that is visible wins).
+        const first = SECTIONS.find((sec) => visible.has(sec.id));
+        if (first) setActive(first.id);
+      },
+      { rootMargin: "-20% 0px -60% 0px", threshold: [0, 0.1, 0.5, 1] },
+    );
+    for (const sec of SECTIONS) {
+      const el = document.getElementById(sec.id);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, []);
+
+  // On narrow screens the links are a horizontally scrolling row; keep the
+  // active one in view as the reader scrolls the page.
+  useEffect(() => {
+    const nav = document.querySelector<HTMLElement>(".about-nav");
+    const link = nav?.querySelector<HTMLElement>("a.active");
+    if (!nav || !link || nav.scrollWidth <= nav.clientWidth) return;
+    const left = link.offsetLeft - (nav.clientWidth - link.offsetWidth) / 2;
+    nav.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
+  }, [active]);
+
+  const go = (id: SectionId) => (e: React.MouseEvent<HTMLAnchorElement>) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    e.preventDefault();
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.history.replaceState(null, "", `#${id}`);
+    setActive(id);
+  };
+
+  return (
+    <aside className="about-sidebar" aria-label="On this page">
+      <div className="about-sidebar-title">On this page</div>
+      <nav className="about-nav">
+        {SECTIONS.map((sec) => (
+          <div key={sec.id} className="about-nav-group">
+            <a
+              href={`#${sec.id}`}
+              onClick={go(sec.id)}
+              className={active === sec.id ? "active" : undefined}
+              aria-current={active === sec.id ? "location" : undefined}
+            >
+              {sec.label}
+            </a>
+            {sec.children.map((sub) => (
+              <a
+                key={sub.id}
+                href={`#${sub.id}`}
+                className="sub"
+                onClick={(e) => {
+                  const el = document.getElementById(sub.id);
+                  if (!el) return;
+                  e.preventDefault();
+                  el.scrollIntoView({ behavior: "smooth", block: "start" });
+                  window.history.replaceState(null, "", `#${sub.id}`);
+                  setActive(sec.id);
+                }}
+              >
+                {sub.label}
+              </a>
+            ))}
+          </div>
+        ))}
+      </nav>
+    </aside>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -95,16 +238,20 @@ export default function AboutPage() {
           About MedTranslate
         </h1>
         <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
-          What this tool is for, how a run works, which AI models it uses, and how to read the numbers.
+          Why MedTranslate exists, how it works, what it tests, and how its results are evaluated.
         </p>
       </div>
 
-      {/* Purpose */}
-      <div className="anim d1" style={{ marginBottom: 48 }}>
+      <div className="about-layout">
+      <SectionNav />
+      <div className="about-content">
+
+      {/* 1. Purpose */}
+      <div id="purpose" className="anim d1 about-section" style={{ marginBottom: 48 }}>
         <SectionLabel>Purpose</SectionLabel>
         <Card>
           <p style={P}>
-            MedTranslate is a research instrument. It exists to answer one question: <strong style={{ color: "var(--text-primary)" }}>can a large language model translate medical text into English accurately enough to be safe?</strong>
+            <strong style={{ color: "var(--text-primary)" }}>MedTranslate studies how accurately AI models translate medical text into English and whether automated translation scores correspond with physician assessments of clinical accuracy and safety.</strong>
           </p>
           <p style={P}>
             Hospitals see patients who speak many languages, and professional interpreters are not always available. AI translation is fast and cheap, but a single wrong word in a clinical note (a dropped &ldquo;no,&rdquo; a wrong dose, a swapped left and right) can change a diagnosis or a treatment. Before anyone relies on these models, their mistakes need to be counted and classified.
@@ -115,9 +262,20 @@ export default function AboutPage() {
         </Card>
       </div>
 
-      {/* How it works */}
-      <div className="anim d2" style={{ marginBottom: 48 }}>
-        <SectionLabel>How a run works</SectionLabel>
+      {/* 2. Research use and limitations */}
+      <div id="limitations" className="anim d2 about-section" style={{ marginBottom: 48 }}>
+        <SectionLabel>Research Use and Limitations</SectionLabel>
+        <Card style={{ borderLeft: "4px solid var(--warning)", background: "var(--warning-light)" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>Not a clinical tool</div>
+          <p style={{ ...P, marginBottom: 0, fontSize: 14 }}>
+            MedTranslate is a research tool for comparing AI-generated translations with reference English text. SacreBLEU, METEOR, and BERTScore measure different aspects of translation similarity. MedTranslate is designed to study whether these scores, alone or together, correspond with clinician assessments of translation accuracy and safety. Until that relationship is validated, the scores should not be used on their own to guide patient care.
+          </p>
+        </Card>
+      </div>
+
+      {/* 3. How MedTranslate works */}
+      <div id="how-it-works" className="anim d3 about-section" style={{ marginBottom: 48 }}>
+        <SectionLabel>How MedTranslate Works</SectionLabel>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           {STEPS.map((s, i) => (
             <div key={s.title} style={{ display: "flex", gap: 20, padding: "22px 32px", borderBottom: i < STEPS.length - 1 ? "1px solid var(--border-subtle)" : "none" }}>
@@ -141,9 +299,24 @@ export default function AboutPage() {
         </p>
       </div>
 
-      {/* Models */}
-      <div className="anim d3" style={{ marginBottom: 48 }}>
-        <SectionLabel>Models and effort</SectionLabel>
+      {/* 4. Study setup */}
+      <div id="study-setup" className="anim d4 about-section" style={{ marginBottom: 48 }}>
+        <SectionLabel>Study Setup</SectionLabel>
+
+        <SubHeading id="datasets">Datasets</SubHeading>
+        <Card>
+          <p style={P}>
+            MedTranslate is a research platform designed to make it easier to evaluate and analyze AI-generated translations of clinical text. It brings reference-based scoring metrics, side-by-side model comparison, and physician review of clinically meaningful errors into a single, accessible workflow. While other tools offer automated translation scoring or broader clinical AI evaluation, MedTranslate focuses specifically on studying how automated translation scores correspond with physician assessments of clinical accuracy and safety. To date, the platform has been developed and evaluated using two Spanish&ndash;English clinical datasets: <a href="https://zenodo.org/records/7711516" target="_blank" rel="noopener noreferrer" style={LINK}>ClinSpEn</a>, which contains professionally translated COVID-19 clinical case reports, and the <a href="https://aclanthology.org/W15-3816/" target="_blank" rel="noopener noreferrer" style={LINK}>UMass EHR corpus</a>, which contains de-identified clinical notes. Both provide aligned Spanish and English clinical text. In this evaluation, the Spanish text is translated into English by each LLM, and the resulting translation is compared with the corresponding original English text using the scoring metrics described on this page.
+          </p>
+          <p style={P}>
+            You can also evaluate translations using your own dataset. The uploaded file must include a column containing the source-language text&mdash;for example, <code>spanish_source</code> or <code>french_source</code>&mdash;and an <code>english_reference</code> column containing the corresponding human-translated English text. The tool supports Spanish, French, Korean, Chinese, Portuguese, German, Arabic, Japanese, and Russian.
+          </p>
+          <p style={{ ...P, marginBottom: 0 }}>
+            To try MedTranslate without providing your own dataset, the <Link href="/" style={LINK}>Upload page</Link> includes small synthetic Spanish and French demonstration files. These files contain no real patient data.
+          </p>
+        </Card>
+
+        <SubHeading id="models">Models and Settings</SubHeading>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <div className="table-scroll">
           <table>
@@ -174,30 +347,33 @@ export default function AboutPage() {
         <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 12, lineHeight: 1.6 }}>
           <strong style={{ color: "var(--text-secondary)" }}>Why these two.</strong> Each is its provider&rsquo;s flagship model, so the study compares flagship against flagship at the same effort. A smaller model such as Claude Sonnet is cheaper and still good, but it would not answer the question the study asks. More models and per-run effort settings are planned.
         </p>
-        <div style={{ marginTop: 16, display: "grid", gap: 16 }} className="metrics-grid-2">
+        <div style={{ marginTop: 16 }}>
           <Card style={{ padding: 24 }}>
             <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 10 }}>What &ldquo;effort&rdquo; means</div>
             <p style={{ ...P, fontSize: 14, marginBottom: 0 }}>
               Both model families can &ldquo;think&rdquo; before they answer. Effort sets how much. Low effort is faster and cheaper; high effort lets the model reason longer, which can help with tricky sentences but costs more and takes longer. Both models run at <strong style={{ color: "var(--text-primary)" }}>medium</strong> unless the server operator changes the environment variables above. The effort used for a run is saved with its results and shown on the Compare page.
             </p>
           </Card>
-          <Card style={{ padding: 24 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 10 }}>The instruction each model gets</div>
+        </div>
+
+        <SubHeading id="prompt">Standard Translation Prompt</SubHeading>
+        <Card style={{ padding: 24, marginBottom: 0 }}>
             <div style={{ fontSize: 13, lineHeight: 1.65, color: "var(--text-secondary)", background: "var(--bg-inset)", border: "1px solid var(--border)", borderRadius: "var(--radius-xs)", padding: 14, fontStyle: "italic" }}>
               &ldquo;{DEFAULT_SYSTEM_PROMPT}&rdquo;
             </div>
             <p style={{ ...P, fontSize: 13, color: "var(--text-muted)", margin: "10px 0 0" }}>
               The language name changes with the source language you pick. The same instruction goes to every model so the comparison is fair. Each sentence is sent on its own, with no other context.
             </p>
-          </Card>
-        </div>
+        </Card>
       </div>
 
-      {/* Scores */}
-      <div className="anim d4" style={{ marginBottom: 48 }}>
-        <SectionLabel>Reading the scores</SectionLabel>
+      {/* 5. How results are evaluated */}
+      <div id="evaluation" className="anim d5 about-section" style={{ marginBottom: 48 }}>
+        <SectionLabel>How Results Are Evaluated</SectionLabel>
+
+        <SubHeading id="scores">Automated Scores</SubHeading>
         <Card>
-          <p style={P}>{METRIC_GUIDE_NOTES.sharedIdea}</p>
+          <p style={P}>{METRIC_GUIDE_NOTES.intro.scope} {METRIC_GUIDE_NOTES.intro.uses}</p>
           <div style={{ display: "grid", gap: 14, marginBottom: 16 }}>
             {METRIC_EXPLAINERS.map((m) => (
               <div key={m.key} style={{ padding: 16, background: "var(--bg-inset)", borderRadius: "var(--radius-sm)" }}>
@@ -205,18 +381,15 @@ export default function AboutPage() {
                   <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>{m.name}</span>
                   <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)" }}>{m.range}</span>
                 </div>
-                <div style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.6 }}>{m.oneLiner} {m.analogy}</div>
+                <div style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.6 }}>{m.simple.join(" ")} {m.analogy}</div>
               </div>
             ))}
           </div>
-          <p style={{ ...P, fontSize: 14 }}>{METRIC_GUIDE_NOTES.whatTheyMiss}</p>
-          <MetricGuideLink label="Open the full plain-language guide" />
+          <p style={{ ...P, fontSize: 14 }}>{METRIC_GUIDE_NOTES.intro.caution}</p>
+          <MetricGuideLink label="Open complete explanation guide" />
         </Card>
-      </div>
 
-      {/* Clinical grades */}
-      <div className="anim d5" style={{ marginBottom: 48 }}>
-        <SectionLabel>Physician grading scale</SectionLabel>
+        <SubHeading id="review-scale">Physician Review Scale</SubHeading>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <div className="table-scroll">
           <table>
@@ -246,30 +419,40 @@ export default function AboutPage() {
         </p>
       </div>
 
-      {/* Data */}
-      <div className="anim d5" style={{ marginBottom: 48 }}>
-        <SectionLabel>Data</SectionLabel>
+      {/* 6. About the creator */}
+      <div id="creator" className="anim d5 about-section" style={{ marginBottom: 48 }}>
+        <SectionLabel>About the Creator</SectionLabel>
         <Card>
-          <p style={P}>
-            The main study uses 6,876 sentence pairs from two public corpora: <strong style={{ color: "var(--text-primary)" }}>ClinSpEn</strong> (professionally translated COVID-19 clinical case reports) and <strong style={{ color: "var(--text-primary)" }}>UMass EHR</strong> (de-identified clinical notes). Both are Spanish to English.
-          </p>
-          <p style={P}>
-            You can also upload your own file. It needs a column with the source-language text (for example <code>spanish_source</code> or <code>french_source</code>) and an <code>english_reference</code> column with the human translation. Spanish, French, Korean, Chinese, Portuguese, German, Arabic, Japanese, and Russian are supported.
-          </p>
-          <p style={{ ...P, marginBottom: 0 }}>
-            To try the tool without a dataset, the <Link href="/" style={{ color: "var(--accent-text)", fontWeight: 600 }}>Upload page</Link> offers small synthetic Spanish and French demo files. They contain no real patient data.
-          </p>
+          <div className="creator-card">
+            <div className="creator-mark" aria-hidden="true">{CREATOR.initials}</div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <p style={{ ...P, fontSize: 15, marginBottom: 16 }}>
+                <strong style={{ color: "var(--text-primary)" }}>{CREATOR.name}, {CREATOR.credentials},</strong> is a physician-builder who creates clinical software around the way care is actually delivered. She developed MedTranslate as an independent research project to explore whether automated translation scores can meaningfully reflect clinical accuracy and safety. Questions about the methods or data, and examples the scores missed, are always welcome.
+              </p>
+              <div className="button-row">
+                <a
+                  href={CREATOR.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontFamily: "var(--font)", fontSize: 14, fontWeight: 600, padding: "10px 20px", borderRadius: "var(--radius-sm)", background: "var(--accent)", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8 }}
+                >
+                  Visit {CREATOR.websiteLabel}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                </a>
+                <a
+                  href={`mailto:${CREATOR.email}`}
+                  style={{ fontFamily: "var(--font)", fontSize: 14, fontWeight: 600, padding: "10px 20px", borderRadius: "var(--radius-sm)", background: "transparent", color: "var(--accent-text)", border: "1.5px solid var(--accent)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8 }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                  Email me
+                </a>
+              </div>
+            </div>
+          </div>
         </Card>
       </div>
 
-      {/* Caveat */}
-      <div className="anim d5" style={{ marginBottom: 48 }}>
-        <Card style={{ borderLeft: "4px solid var(--warning)" }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>Not a clinical tool</div>
-          <p style={{ ...P, marginBottom: 0, fontSize: 14 }}>
-            MedTranslate measures how well AI models translate. It is not itself a translation service for patient care, and a high score here is never proof that a translation is safe to act on.
-          </p>
-        </Card>
+      </div>
       </div>
     </div>
   );
