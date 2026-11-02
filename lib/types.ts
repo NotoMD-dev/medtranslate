@@ -22,6 +22,8 @@ export interface JobStatusResponse {
   refused_rows?: number;
   /** Provider/config failure; unscored and retryable. Older backends omit this. */
   incomplete_rows?: number;
+  /** Refusals a reviewer marked legitimate; excluded from all scores. */
+  excluded_rows?: number;
 }
 
 /**
@@ -32,7 +34,19 @@ export interface JobStatusResponse {
  * - "infrastructure": rate limit, connection, server, or configuration
  *   failure. Says nothing about the model; unscored and retryable.
  */
-export type ErrorKind = "refusal" | "infrastructure";
+export type ErrorKind = "refusal" | "infrastructure" | "excluded";
+
+/**
+ * Reviewer decision that a refusal was legitimate (e.g. the source text is
+ * not translatable or not clinical). Keyed by pair_id in session storage and
+ * applied to every model's run for that pair, since it is a property of the
+ * source sentence, not of the model.
+ */
+export interface RefusalOverride {
+  note: string;
+  /** ISO timestamp of the decision. */
+  at: string;
+}
 
 export interface SentenceMetrics {
   pair_id: string;

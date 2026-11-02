@@ -1,5 +1,6 @@
 import type { TranslationPair, SentenceMetrics, ClinicalGrade, ReferenceFlag } from "./types";
 import { SOURCE_LANGUAGES } from "./types";
+import { rowStatus as classifyRow } from "./metrics";
 
 // ---------------------------------------------------------------------------
 // Shared CSV helpers
@@ -106,9 +107,11 @@ function parseCSVLine(line: string): string[] {
 // CSV export — for backend submission
 // ---------------------------------------------------------------------------
 
+// The backend reads the source text from `source_text`; the legacy
+// `spanish_source` duplicate is no longer sent (it doubled the upload size).
 const SUBMISSION_HEADERS = [
   "pair_id", "source", "content_type", "english_reference",
-  "source_text", "spanish_source", "llm_english_translation",
+  "source_text", "llm_english_translation",
   // Optional: lets a metrics-only re-score keep failed rows' status.
   "error", "error_kind",
 ];
@@ -118,7 +121,7 @@ function toSubmissionRow(
   englishRef: string, sourceText: string, translation: string,
   error = "", errorKind = "",
 ): string[] {
-  return [pairId, source, contentType, englishRef, sourceText, sourceText, translation, error, errorKind];
+  return [pairId, source, contentType, englishRef, sourceText, translation, error, errorKind];
 }
 
 /** Convert TranslationPair[] to a CSV File suitable for backend upload. */
@@ -161,12 +164,9 @@ export function sentenceMetricsToCSVFile(
 // CSV export — results download
 // ---------------------------------------------------------------------------
 
-/** Human-readable row status for exports. */
+/** Row status for exports (same classification the pages use). */
 function rowStatus(r: SentenceMetrics): string {
-  if (r.error_kind === "refusal") return "refused";
-  if (r.error) return "incomplete";
-  if (r.llm_english_translation) return "completed";
-  return "pending";
+  return classifyRow(r).key;
 }
 
 /** Export sentence metrics results to CSV string for the user to download. */

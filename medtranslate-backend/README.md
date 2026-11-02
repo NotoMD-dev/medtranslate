@@ -46,7 +46,6 @@ medtranslate-backend/
 │   ├── config.py         # Environment variable configuration
 │   └── __init__.py
 ├── bertscore_worker.py   # BERTScore subprocess entry point
-├── worker.py             # Standalone worker entry point
 ├── requirements.txt      # Python dependencies
 ├── Dockerfile            # Docker build for Render deployment
 ├── .env.example          # Environment variable template
@@ -75,9 +74,14 @@ The `POST /v1/jobs` endpoint accepts both CSV and XLSX files via multipart form 
 Every failed row keeps the exact provider message in `error` and a class in `error_kind`:
 
 - `refusal` (`TranslationRefused`): content filter, explicit decline, or empty reply. Scored as METEOR 0 / BERTScore 0 with an empty hypothesis in corpus BLEU, and counted in `refused_rows`.
-- `infrastructure`: rate limit exhausted after 6 retries, connection error, provider 5xx, bad request, or output limit reached before any text. Not scored; counted in `incomplete_rows`. The frontend can resubmit just these rows and then re-score the merged set in `metrics_only` mode; the optional `error` / `error_kind` CSV columns keep refused rows' status on that re-score.
+- `infrastructure`: rate limit exhausted after 6 retries, connection error, provider 5xx, bad request, or output limit reached before any text. Not scored; counted in `incomplete_rows`.
+- `excluded`: a refusal a reviewer judged legitimate, submitted on a metrics-only re-score. Not scored, out of corpus BLEU; counted in `excluded_rows`. The frontend can resubmit just these rows and then re-score the merged set in `metrics_only` mode; the optional `error` / `error_kind` CSV columns keep refused rows' status on that re-score.
 
 `output_checks.detect_format_warning()` records a `format_warning` on replies that look wrapped (preamble, translator's note, quotation marks, markdown, extra paragraphs). The reply text is never changed.
+
+### Metric Cache
+
+METEOR and BERTScore values are stored per `(candidate, reference)` pair in a `metric_cache` table. Re-scores (metrics-only jobs) reuse them and only compute rows that are new, which makes BERTScore-only runs, retries, and reviewer-override re-scores cheap. The BERTScore subprocess uses `HF_HOME=<db dir>/hf-cache` unless `HF_HOME` is set, so the model is downloaded once per deployment.
 
 ### Translation Cache
 
@@ -106,6 +110,8 @@ queued → running → complete
 | `MAX_CONCURRENT_JOBS` | No | `2` | Jobs executed simultaneously |
 | `MAX_CONCURRENT_TRANSLATIONS` | No | `4` | Provider calls in flight per job |
 | `BERTSCORE_CHUNK_SIZE` | No | `256` | Rows per BERTScore progress chunk (clamped to 32–512) |
+| `HF_HOME` | No | `<db dir>/hf-cache` | HuggingFace model cache for the BERTScore subprocess; put it on the persistent disk |
+| `JOB_IDLE_TIMEOUT` | No | `300` | Seconds without a client poll before a running job is auto-cancelled (API spend protection) |
 
 ## Metrics
 

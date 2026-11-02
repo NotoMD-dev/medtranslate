@@ -61,6 +61,7 @@ class JobStatusResponse(BaseModel):
     # failed_rows = refused_rows + incomplete_rows
     refused_rows: int = 0      # model declined / empty reply: scored as 0
     incomplete_rows: int = 0   # provider or config failure: unscored, retryable
+    excluded_rows: int = 0     # refusals a reviewer marked legitimate: unscored
 
 
 class SentenceMetrics(BaseModel):
@@ -79,6 +80,8 @@ class SentenceMetrics(BaseModel):
     #            to the top of the review queue.
     # "infrastructure": rate limit / connection / server / config failure;
     #            unscored and retryable.
+    # "excluded": a refusal a reviewer judged legitimate (set on a metrics-only
+    #            re-score); unscored and kept out of corpus BLEU.
     error_kind: Optional[str] = None
     # Heuristic description of wrapper text in the reply (preamble, note,
     # quotation marks, markdown). The text is never modified.

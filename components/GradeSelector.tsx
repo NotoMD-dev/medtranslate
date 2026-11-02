@@ -8,7 +8,7 @@ interface Props {
 
 export default function GradeSelector({ value, onChange, compact = false }: Props) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <div className="grade-selector" style={{ gap: 6 }}>
       {!compact && (
         <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, marginRight: 6 }}>
           Clinical Grade:

@@ -6,6 +6,7 @@ const STORAGE_KEYS = {
   prompt: "medtranslate:prompt",
   rowLimit: "medtranslate:rowLimit",
   reviewThreshold: "medtranslate:reviewThreshold",
+  refusalOverrides: "medtranslate:refusalOverrides",
   jobId: "medtranslate:jobId",
   jobResults: "medtranslate:jobResults",
   grades: "medtranslate:grades",
@@ -174,6 +175,18 @@ export function getSessionRowLimit() {
 
 export function setSessionRowLimit(rowLimit: number | undefined) {
   writeJSON(STORAGE_KEYS.rowLimit, rowLimit);
+}
+
+// Reviewer refusal overrides (pair_id -> decision). Small; localStorage only.
+
+export function getSessionRefusalOverrides(): Record<string, import("@/lib/types").RefusalOverride> {
+  return readJSON<Record<string, import("@/lib/types").RefusalOverride>>(STORAGE_KEYS.refusalOverrides) ?? {};
+}
+
+export function setSessionRefusalOverrides(
+  overrides: Record<string, import("@/lib/types").RefusalOverride> | undefined,
+) {
+  writeJSON(STORAGE_KEYS.refusalOverrides, overrides && Object.keys(overrides).length > 0 ? overrides : undefined);
 }
 
 // Review threshold (METEOR below this is flagged). Shared by Review and Metrics.

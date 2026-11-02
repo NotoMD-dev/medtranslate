@@ -39,8 +39,8 @@ interface SentenceMetrics {
   bertscore_f1: number | null;
   /** Exact error message if the row failed. */
   error: string | null;
-  /** "refusal" (scored as 0) | "infrastructure" (unscored, retryable) | null */
-  error_kind?: "refusal" | "infrastructure" | null;
+  /** "refusal" (scored 0) | "infrastructure" (unscored, retryable) | "excluded" (reviewer override, unscored) | null */
+  error_kind?: "refusal" | "infrastructure" | "excluded" | null;
   /** Heuristic note when the reply looks wrapped; the text is never modified. */
   format_warning?: string | null;
 }
@@ -139,6 +139,7 @@ interface JobStatusResponse {
   failed_rows: number;        // refused_rows + incomplete_rows
   refused_rows?: number;      // model declined / empty reply (scored 0)
   incomplete_rows?: number;   // provider / config failure (unscored)
+  excluded_rows?: number;     // reviewer-overridden refusals (unscored)
   error: string | null;
 }
 ```
@@ -198,7 +199,7 @@ Produced by `scripts/build_dataset.py`, manually prepared, or one of the bundled
 | `english_reference` | No | string | Human reference translation (required for metrics) |
 | `llm_english_translation` | No | string | Pre-existing translation (for re-scoring) |
 | `error` | No | string | Carried over on metrics-only re-scores so a failed row keeps its status |
-| `error_kind` | No | string | `refusal` or `infrastructure`, paired with `error` |
+| `error_kind` | No | string | `refusal`, `infrastructure`, or `excluded`, paired with `error` |
 
 ### Input XLSX
 
@@ -232,6 +233,8 @@ Exported from the frontend after a job completes.
 ### localStorage Schema
 
 `medtranslate:reviewThreshold` (number, 0–1) stores the METEOR review threshold set on the Review page; the Metrics page reads it for its "Flagged for Review" count. Absent means the default `0.4`.
+
+`medtranslate:refusalOverrides` (`Record<pair_id, { note: string; at: string }>`) stores reviewer decisions that a refusal was legitimate. Every page applies it with `applyRefusalOverrides()` before computing counts and averages; the Translate page's "Apply reviewer overrides & re-score" sends the rows with `error_kind=excluded` so the backend's corpus BLEU drops them too.
 
 Session state is persisted in the browser's `localStorage` via `lib/session.ts`.
 

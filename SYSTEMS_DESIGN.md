@@ -587,6 +587,9 @@ Every row carries one of four statuses, derived in `lib/metrics.ts`:
 | Complete | "Complete" | `--success*` | Translate table |
 | Refused | "Refused" | `--danger*` (solid `--danger` badge in the Review queue) | Translate table, Review queue (first), Metrics "Refused" tile, Compare "Refused" row |
 | Incomplete | "Incomplete" | `--warning*` | Translate table, Metrics "Incomplete" tile, Compare "Incomplete" row; "Retry N incomplete rows" button (warning style) on Translate |
+| Excluded | "Excluded" / "Excluded by reviewer" | `--bg-inset` / `--text-muted` / `--border` | Translate table, Review queue (grey badge, override panel with "Undo exclusion"), Metrics header, Compare "Excluded by reviewer" row |
+
+Row state names and colours come from `rowStatus()` and `bandStyle()` in `lib/metrics.ts`.
 | Pending | "Pending" | `--bg-inset` / `--text-muted` | Translate table |
 
 A reply with a `format_warning` shows a `⚠` glyph in `--warning` before the text in the Translate table, a warning pill in the Review queue header, and a warning box in `PairDetail`. Hovering the glyph or pill shows the reason. Small-sample notes (fewer than 50 scored rows) are a single `--warning` line under the page subtitle on Translate and Metrics, and a `--warning-light` banner on Compare. A prompt mismatch between the two compared runs is a `--danger-light` banner above the winner card with a collapsible view of both prompts.
@@ -697,6 +700,18 @@ All disabled interactive elements use `opacity: 0.4` and `cursor: not-allowed`.
 ---
 
 ## Responsive Behavior
+
+Layout classes added in 1.6.0 (all in `app/globals.css`):
+
+| Class | Purpose |
+|---|---|
+| `.table-scroll` | Wraps every data table inside a card; horizontal scroll instead of clipping. Cells opt into wrapping with `.wrap`. |
+| `.pair-grid` | Source / reference / translation panels: `repeat(auto-fit, minmax(200px, 1fr))`, so they stack on phones |
+| `.pair-footer`, `.grade-selector`, `.button-row` | Metric chips, grade buttons, and action buttons wrap and shrink instead of overflowing |
+| `.compare-selectors` | Model A / vs / Model B stack vertically under 640 px |
+| `.metrics-grid-2 > *` etc. | `min-width: 0` so long unbroken strings (the BLEU signature) cannot widen the layout |
+
+Verification: a Playwright pass at 390×844 over every route and both modals must report a layout viewport of 390 px and no element outside a `.table-scroll` extending past it.
 
 The application targets desktop browsers (1024px+) used in clinical research settings.
 

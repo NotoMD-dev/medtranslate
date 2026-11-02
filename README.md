@@ -204,6 +204,7 @@ Translations with METEOR below the review threshold (default 0.4, set on the Rev
 | **Completed** | Model returned text | Yes | Everywhere |
 | **Refused** | Content filter, explicit decline, empty reply | **Yes, as 0** (METEOR 0, BERTScore 0, empty BLEU hypothesis) | Top of Review queue; "Refused" counts on Translate, Metrics, Compare |
 | **Incomplete** | Rate limit exhausted, connection/server error, output limit reached before any text | No | "Incomplete" counts; "Retry incomplete rows" on Translate |
+| **Excluded** | A reviewer judged the refusal legitimate | No | "Excluded by reviewer" counts; set and undone on the Review page; "Apply reviewer overrides & re-score" on Translate updates corpus BLEU |
 
 The exact provider message is kept on every failed row (`error`) and the class is recorded in `error_kind`. Rows whose reply looks wrapped carry a `format_warning`; the text is scored exactly as returned.
 
@@ -244,6 +245,7 @@ This tool supports a corpus-based evaluation study using 6,876 sentence-aligned 
 | [DATA_SCHEMA.md](DATA_SCHEMA.md) | TypeScript interfaces, Pydantic models, CSV/storage schemas |
 | [SECURITY.md](SECURITY.md) | API key management, data handling, deployment checklist |
 | [METRICS_VALIDATION.md](METRICS_VALIDATION.md) | Metric implementations, clinical grading framework |
+| [PERFORMANCE_AND_RELIABILITY.md](PERFORMANCE_AND_RELIABILITY.md) | Where time and money go on large runs, what was optimised and why, Render sizing, responsive layout |
 | [CHANGELOG.md](CHANGELOG.md) | Version history and migration notes |
 
 ## Tech Stack

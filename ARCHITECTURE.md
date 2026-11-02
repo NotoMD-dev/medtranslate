@@ -115,7 +115,6 @@ medtranslate/
 │   │   ├── schemas.py            # Pydantic request/response models
 │   │   └── config.py             # Environment variable configuration
 │   ├── bertscore_worker.py       # BERTScore subprocess (keeps torch out of the API process)
-│   ├── worker.py                 # Standalone worker entry point
 │   ├── requirements.txt          # Python dependencies
 │   ├── Dockerfile                # Docker build for Render deployment
 │   ├── .env.example              # Environment variable template
@@ -208,6 +207,7 @@ BLEU and BERTScore do not affect flagging. The threshold is a triage heuristic, 
 |---|---|---|---|
 | `refusal` (`TranslationRefused`) | Provider content filter, explicit decline (`stop_reason: refusal`), empty reply | METEOR 0, BERTScore 0, empty hypothesis in corpus BLEU | Physician review (top of queue) |
 | `infrastructure` | Rate limit exhausted after retries, connection error, provider 5xx, bad request, output limit reached before any text | Not scored | "Retry incomplete rows" on the Translate page |
+| `excluded` | Set by a reviewer on the Review page when a refusal was legitimate; sent on the next metrics-only re-score | Not scored, out of corpus BLEU | "Undo exclusion" on the Review page |
 
 The retry flow is three backend jobs driven by the frontend: translate only the incomplete rows as fresh input, merge the new rows into the saved result set by `pair_id`, then submit the merged set in `metrics_only` mode (with `error`/`error_kind` columns so refused rows keep their status) so corpus BLEU and the averages cover every row.
 
@@ -261,9 +261,13 @@ The backend uses async background tasks to process jobs without blocking the API
 
 Active jobs live in memory, and every status change and final result is also written to SQLite (`DATABASE_PATH`, default `/data/medtranslate.db`). This lets a job survive a restart and lets a second backend instance answer polls for a job it is not executing. Terminal jobs older than seven days are deleted at startup. If the database path is not writable the backend falls back to memory only.
 
-### Translation Cache
+### Translation Cache and Metric Cache
 
-Each unique source text is translated once per job (identical rows share one API call), and the result is stored in a SQLite `translation_cache` table keyed on `(model, system_prompt, temperature, reasoning_effort, source_text)`. A later job with the same key reuses the stored translation instead of calling the provider. Consequences for study design:
+Each unique source text is translated once per job (identical rows share one API call), and the result is stored in a SQLite `translation_cache` table keyed on `(model, system_prompt, temperature, reasoning_effort, source_text)`. Reads happen in one batched query before translation and writes in one transaction per chunk. A later job with the same key reuses the stored translation instead of calling the provider.
+
+A second table, `metric_cache`, stores METEOR and BERTScore per `(candidate, reference)` pair, so any re-score (BERTScore-only, retry, reviewer override) only computes rows that are new. The BERTScore subprocess keeps its HuggingFace model cache next to the database (`HF_HOME`) so the model is downloaded once per deployment. See [PERFORMANCE_AND_RELIABILITY.md](PERFORMANCE_AND_RELIABILITY.md).
+
+Consequences for study design:
 
 - Re-running the same file with the same model and settings returns byte-identical translations. This is a cache hit, not evidence that the model is deterministic.
 - Changing the prompt, the model, or the effort setting produces a new key and fresh API calls.

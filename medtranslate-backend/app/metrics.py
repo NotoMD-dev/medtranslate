@@ -15,6 +15,8 @@ import sacrebleu
 from nltk.tokenize import word_tokenize
 from nltk.translate.meteor_score import meteor_score
 
+from app.config import DATABASE_PATH
+
 logger = logging.getLogger(__name__)
 
 # Ensure required NLTK resources
@@ -85,8 +87,21 @@ def _bertscore_subprocess(
         "references": references,
         "chunk_size": chunk_size,
     })
+    # Keep the HuggingFace model cache on the persistent disk (next to the
+    # SQLite file) so roberta-base is downloaded once per deployment rather
+    # than once per container start.
+    env = os.environ.copy()
+    if "HF_HOME" not in env:
+        cache_dir = os.path.join(os.path.dirname(DATABASE_PATH) or ".", "hf-cache")
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            env["HF_HOME"] = cache_dir
+        except OSError:
+            pass  # not writable: fall back to the default cache location
+
     proc = subprocess.Popen(
         [sys.executable, _BERTSCORE_WORKER],
+        env=env,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         # Discard stderr to prevent the OS pipe buffer from filling up and

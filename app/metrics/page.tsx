@@ -4,14 +4,15 @@ import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import MetricGuideLink from "@/components/MetricGuide";
 import { CLINICAL_GRADES } from "@/lib/types";
-import { summarizeMetric, countRun, failureReasons, isScored, bleuBand, meteorBand, bandStyle, DEFAULT_REVIEW_THRESHOLD, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
-import type { JobResults, ClinicalGrade } from "@/lib/types";
-import { getSessionJobResultsAsync, getSessionGrades, getSessionReviewThreshold } from "@/lib/session";
+import { summarizeMetric, countRun, failureReasons, isScored, isRefused, applyRefusalOverrides, bleuBand, meteorBand, bandStyle, DEFAULT_REVIEW_THRESHOLD, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
+import type { JobResults, ClinicalGrade, RefusalOverride } from "@/lib/types";
+import { getSessionJobResultsAsync, getSessionGrades, getSessionReviewThreshold, getSessionRefusalOverrides } from "@/lib/session";
 
 export default function MetricsPage() {
   const [jobResults, setJobResults] = useState<JobResults | null>(null);
   const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
   const [threshold, setThreshold] = useState(DEFAULT_REVIEW_THRESHOLD);
+  const [overrides, setOverrides] = useState<Record<string, RefusalOverride>>({});
 
   useEffect(() => {
     getSessionJobResultsAsync().then((persisted) => {
@@ -22,9 +23,14 @@ export default function MetricsPage() {
     // Same threshold the Review page uses (set there, saved to the session).
     const savedThreshold = getSessionReviewThreshold();
     if (savedThreshold != null) setThreshold(savedThreshold);
+    setOverrides(getSessionRefusalOverrides());
   }, []);
 
-  const sentences = jobResults?.sentence_metrics ?? [];
+  const rawSentences = jobResults?.sentence_metrics ?? [];
+  // Reviewer refusal overrides apply to the sentence-level numbers here;
+  // corpus BLEU only drops them after a re-score on the Translate page.
+  const sentences = applyRefusalOverrides(rawSentences, overrides);
+  const staleOverrides = rawSentences.filter((s) => isRefused(s) && overrides[s.pair_id]).length;
   const counts = countRun(sentences);
   // Scored rows: completed translations plus refusals (scored 0 by the backend).
   // Incomplete rows (provider/config failures) carry no score and are excluded.
@@ -103,12 +109,18 @@ export default function MetricsPage() {
             <>
               <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{counts.completed}</strong> of {sentences.length} translations completed
               {counts.refused > 0 && <> &middot; <span style={{ color: "var(--danger)" }}>{counts.refused} refused (scored 0)</span></>}
+              {counts.excluded > 0 && <> &middot; {counts.excluded} excluded by reviewer</>}
               {counts.incomplete > 0 && <> &middot; <span style={{ color: "var(--warning)" }}>{counts.incomplete} incomplete (not scored)</span></>}
             </>
           ) : (
             "Run translations first to see metrics here."
           )}
         </p>
+        {staleOverrides > 0 && (
+          <p style={{ fontSize: 12, color: "var(--warning)", margin: "0 0 10px" }}>
+            {staleOverrides} reviewer override{staleOverrides !== 1 ? "s are" : " is"} not yet reflected in corpus BLEU. Use &ldquo;Apply reviewer overrides &amp; re-score&rdquo; on the Translate page.
+          </p>
+        )}
         {completed.length > 0 && completed.length < SMALL_SAMPLE_THRESHOLD && (
           <p style={{ fontSize: 12, color: "var(--warning)", margin: "0 0 10px" }}>
             Small sample: {completed.length} scored rows. Corpus BLEU and the averages are unstable below {SMALL_SAMPLE_THRESHOLD}; treat these numbers as a smoke test.
@@ -118,7 +130,7 @@ export default function MetricsPage() {
       </div>
 
       {/* Translation failures */}
-      {(counts.refused > 0 || counts.incomplete > 0) && (
+      {(counts.refused > 0 || counts.incomplete > 0 || counts.excluded > 0) && (
         <div className="anim d1" style={{ marginBottom: 48 }}>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
             Translation Failures
@@ -130,6 +142,7 @@ export default function MetricsPage() {
               <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--danger)", lineHeight: 1, marginBottom: 16 }}>{counts.refused}</div>
               <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
                 Declined or empty replies. Counted against the model: METEOR 0, BERTScore 0, empty hypothesis in corpus BLEU. Sent to the top of the review queue.
+                {counts.excluded > 0 && <> A further <strong>{counts.excluded}</strong> refusal{counts.excluded !== 1 ? "s were" : " was"} judged legitimate by a reviewer and excluded from all scores.</>}
               </div>
             </div>
             <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
@@ -142,20 +155,20 @@ export default function MetricsPage() {
           </div>
           {failures.length > 0 && (
             <div style={{ marginTop: 16, background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)", overflow: "hidden" }}>
-              <table>
+              <div className="table-scroll"><table>
                 <thead>
                   <tr><th>Reason</th><th style={{ width: 130 }}>Kind</th><th style={{ width: 90, textAlign: "right" }}>Rows</th></tr>
                 </thead>
                 <tbody>
                   {failures.slice(0, 8).map((f) => (
                     <tr key={`${f.kind}|${f.reason}`}>
-                      <td style={{ fontSize: 13 }}>{f.reason}</td>
-                      <td style={{ fontSize: 12, color: f.kind === "refusal" ? "var(--danger)" : "var(--warning)", fontWeight: 600 }}>{f.kind === "refusal" ? "Refused" : "Incomplete"}</td>
+                      <td className="wrap" style={{ fontSize: 13 }}>{f.reason}</td>
+                      <td style={{ fontSize: 12, color: f.kind === "refusal" ? "var(--danger)" : f.kind === "excluded" ? "var(--text-muted)" : "var(--warning)", fontWeight: 600 }}>{f.kind === "refusal" ? "Refused" : f.kind === "excluded" ? "Excluded" : "Incomplete"}</td>
                       <td style={{ textAlign: "right", fontWeight: 600 }}>{f.count}</td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             </div>
           )}
         </div>
@@ -174,7 +187,7 @@ export default function MetricsPage() {
               <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--accent-text)", lineHeight: 1, marginBottom: 16 }}>
                 {corpusBleu.overall.bleu_score.toFixed(2)}
               </div>
-              <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6, marginBottom: 12 }}>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6, marginBottom: 12, overflowWrap: "anywhere" }}>
                 {corpusBleu.overall.bleu_signature}
               </div>
               <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, ...bandStyle(bleuBand(corpusBleu.overall.bleu_score).tone) }}>
@@ -280,7 +293,7 @@ export default function MetricsPage() {
           <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
         </div>
         <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)", overflow: "hidden" }}>
-          <table>
+          <div className="table-scroll"><table>
             <thead>
               <tr>
                 <th>Dataset</th>
@@ -324,7 +337,7 @@ export default function MetricsPage() {
                 <td style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-primary)" }}>{flaggedCount}</td>
               </tr>
             </tbody>
-          </table>
+          </table></div>
         </div>
       </div>
 

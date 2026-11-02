@@ -4,6 +4,38 @@ All notable changes to the MedTranslate project are documented in this file. The
 
 ---
 
+## [1.6.0] - 2026-11-02
+
+See [PERFORMANCE_AND_RELIABILITY.md](PERFORMANCE_AND_RELIABILITY.md) for the reasoning behind each change and measured effects.
+
+### Changed — Backend performance and cost
+
+- **Batched translation cache I/O**: one chunked `IN (...)` read before translation and one `executemany` write per chunk, replacing one SQLite connection per sentence
+- **Quadratic progress counting removed** from the translation fan-out loop; a 3,000-row run's bookkeeping dropped from 4.8 s to 0.7 s in the stubbed test
+- **Per-sentence metric cache** (`metric_cache` table): METEOR and BERTScore values are stored per candidate/reference pair and reused on every re-score, so BERTScore-only runs, retries, and override re-scores only compute rows that are new
+- **BERTScore model cache on the persistent disk**: the subprocess sets `HF_HOME` to `<db dir>/hf-cache` unless already set, so roberta-base is downloaded once per deployment, not once per container start
+- **Upload halved**: the submission CSV no longer repeats the source text in a legacy `spanish_source` column
+
+### Added — Reviewer refusal override
+
+- A physician can mark a refusal as legitimate on the Review page (with an optional note). The pair becomes `error_kind: "excluded"`: left out of METEOR, BERTScore, counts, and, after "Apply reviewer overrides & re-score" on the Translate page, corpus BLEU. The decision is stored per `pair_id`, applies to every model's run of that pair, can be undone, and is exported as status `excluded`
+- `JobStatusResponse.excluded_rows`; Metrics shows excluded counts and warns when overrides are not yet reflected in corpus BLEU; Compare shows an "Excluded by reviewer" row
+
+### Changed — Frontend structure
+
+- Translate page re-score flows (BERTScore-only, retry, override) share `beginRun` / `runMetricsOnly` / `commitResults` / `rescore` helpers with one error path
+- `lib/metrics.ts: rowStatus()` is the single source for row state names and colours; CSV exports use it
+
+### Changed — Responsive layout
+
+- `.table-scroll` wrappers on every card table (Compare, About, Metrics, grading-scale modal); `.pair-grid` stacks the three text panels on phones; `.pair-footer`, `.grade-selector`, `.button-row` wrap; `.compare-selectors` stack under 640 px; the BLEU signature wraps. Verified with a 390 px Playwright pass over every page and modal: no clipped controls and the layout viewport equals the device width
+
+### Removed
+
+- `medtranslate-backend/source/` (a committed virtualenv, 749 files) and `medtranslate-backend/worker.py` (placeholder)
+
+---
+
 ## [1.5.0] - 2026-11-02
 
 ### Changed — Prompt

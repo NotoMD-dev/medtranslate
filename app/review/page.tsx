@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import Header from "@/components/Header";
 import { CLINICAL_GRADES, REFERENCE_FLAG_REASONS } from "@/lib/types";
 import { exportReviewCSV, downloadFile } from "@/lib/csv";
-import { DEFAULT_REVIEW_THRESHOLD, isCompleted, isRefused } from "@/lib/metrics";
+import { DEFAULT_REVIEW_THRESHOLD, isCompleted, isRefused, isExcluded, applyRefusalOverrides } from "@/lib/metrics";
 import {
   getSessionJobResultsAsync,
   getSessionGradesAsync,
@@ -13,6 +13,8 @@ import {
   setSessionRefFlagsAsync,
   getSessionReviewThreshold,
   setSessionReviewThreshold,
+  getSessionRefusalOverrides,
+  setSessionRefusalOverrides,
 } from "@/lib/session";
 
 function sourceLabel(source: string): string {
@@ -20,7 +22,7 @@ function sourceLabel(source: string): string {
   if (source === "UMass_EHR") return "UMass";
   return source || "Unknown";
 }
-import type { JobResults, SentenceMetrics, ClinicalGrade, ReferenceFlag, ReferenceFlagReason } from "@/lib/types";
+import type { JobResults, SentenceMetrics, ClinicalGrade, ReferenceFlag, ReferenceFlagReason, RefusalOverride } from "@/lib/types";
 
 type ReviewView = "queue" | "table";
 
@@ -35,6 +37,8 @@ export default function ReviewPage() {
   const [jumpInput, setJumpInput] = useState("");
   const [refFlagOpen, setRefFlagOpen] = useState(false);
   const [showGradeInfo, setShowGradeInfo] = useState(false);
+  const [overrides, setOverrides] = useState<Record<string, RefusalOverride>>({});
+  const [overrideNote, setOverrideNote] = useState("");
 
   useEffect(() => {
     // The threshold is shared with the Metrics page's "Flagged for Review" count.
@@ -43,6 +47,7 @@ export default function ReviewPage() {
       setThreshold(savedThreshold);
       setThresholdInput(String(savedThreshold));
     }
+    setOverrides(getSessionRefusalOverrides());
     getSessionJobResultsAsync().then((persisted) => {
       if (persisted) setJobResults(persisted);
     });
@@ -54,28 +59,52 @@ export default function ReviewPage() {
     });
   }, []);
 
-  const sentences = jobResults?.sentence_metrics ?? [];
+  // Reviewer refusal overrides are applied on top of the stored results.
+  const sentences = useMemo(
+    () => applyRefusalOverrides(jobResults?.sentence_metrics ?? [], overrides),
+    [jobResults, overrides]
+  );
 
-  // Reviewable rows: completed translations plus refusals (scored 0 by the
-  // backend). Incomplete rows (provider/config failures) are not reviewable;
-  // they are retried from the Translate page.
+  // Reviewable rows: completed translations, refusals (scored 0 by the
+  // backend), and refusals a reviewer has excluded (kept visible so the
+  // decision can be undone). Incomplete rows (provider/config failures) are
+  // not reviewable; they are retried from the Translate page.
   const completed = useMemo(
-    () => sentences.filter((s) => isCompleted(s) || isRefused(s)),
+    () => sentences.filter((s) => isCompleted(s) || isRefused(s) || isExcluded(s)),
     [sentences]
   );
 
-  // Queue: refusals first (they always score 0), then pairs below the
+  // Queue: refusals and excluded refusals first, then pairs below the
   // configurable METEOR threshold in dataset order.
   const flagged = useMemo(() => {
-    const below = completed.filter((r) => r.meteor != null && r.meteor < threshold);
-    return [...below.filter(isRefused), ...below.filter((r) => !isRefused(r))];
+    const below = completed.filter((r) => isExcluded(r) || (r.meteor != null && r.meteor < threshold));
+    const first = below.filter((r) => isRefused(r) || isExcluded(r));
+    return [...first, ...below.filter((r) => !isRefused(r) && !isExcluded(r))];
   }, [completed, threshold]);
   const refusedCount = useMemo(() => flagged.filter(isRefused).length, [flagged]);
 
+  // A pair is handled when it has a grade or was excluded by the reviewer.
   const gradedCount = useMemo(
-    () => flagged.filter((r) => grades[r.pair_id] != null).length,
+    () => flagged.filter((r) => grades[r.pair_id] != null || isExcluded(r)).length,
     [flagged, grades]
   );
+
+  const handleExclude = useCallback((pairId: string, note: string) => {
+    setOverrides((prev) => {
+      const next = { ...prev, [pairId]: { note: note.trim(), at: new Date().toISOString() } };
+      setSessionRefusalOverrides(next);
+      return next;
+    });
+    setOverrideNote("");
+  }, []);
+
+  const handleUndoExclude = useCallback((pairId: string) => {
+    setOverrides((prev) => {
+      const { [pairId]: _, ...rest } = prev;
+      setSessionRefusalOverrides(rest);
+      return rest;
+    });
+  }, []);
 
   const gradeCounts = CLINICAL_GRADES.map(
     (g) => flagged.filter((r) => grades[r.pair_id] === g.grade).length
@@ -162,14 +191,14 @@ export default function ReviewPage() {
   // Navigate to next ungraded pair
   const handleSkip = useCallback(() => {
     const nextUngraded = flagged.findIndex(
-      (r, i) => i > currentIndex && grades[r.pair_id] == null
+      (r, i) => i > currentIndex && grades[r.pair_id] == null && !isExcluded(r)
     );
     if (nextUngraded !== -1) {
       setCurrentIndex(nextUngraded);
     } else {
       // Wrap around: find first ungraded from the start
       const firstUngraded = flagged.findIndex(
-        (r) => grades[r.pair_id] == null
+        (r) => grades[r.pair_id] == null && !isExcluded(r)
       );
       if (firstUngraded !== -1) {
         setCurrentIndex(firstUngraded);
@@ -328,6 +357,11 @@ export default function ReviewPage() {
                     Refused
                   </span>
                 )}
+                {isExcluded(currentPair) && (
+                  <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: "var(--bg-inset)", color: "var(--text-muted)", border: "1px solid var(--border)" }}>
+                    Excluded by reviewer
+                  </span>
+                )}
                 <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--danger-light)", color: "var(--danger)", border: "1px solid var(--danger-border)" }}>
                   METEOR {currentPair.meteor?.toFixed(3) ?? "--"}
                 </span>
@@ -361,7 +395,15 @@ export default function ReviewPage() {
                 </div>
                 <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>LLM English Translation</div>
-                  {isRefused(currentPair) ? (
+                  {isExcluded(currentPair) ? (
+                    <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--text-secondary)", padding: 12, background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-xs)" }}>
+                      <strong>No translation. Refusal judged legitimate by a reviewer; excluded from all scores.</strong>
+                      <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>{currentPair.error}</div>
+                      {overrides[currentPair.pair_id]?.note && (
+                        <div style={{ marginTop: 6, fontSize: 12 }}>Reviewer note: {overrides[currentPair.pair_id].note}</div>
+                      )}
+                    </div>
+                  ) : isRefused(currentPair) ? (
                     <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--danger)", padding: 12, background: "var(--danger-light)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-xs)" }}>
                       <strong>No translation. The model refused or returned nothing.</strong>
                       <div style={{ marginTop: 6, fontSize: 12 }}>{currentPair.error}</div>
@@ -432,6 +474,44 @@ export default function ReviewPage() {
                   Next Pair &rarr;
                 </button>
               </div>
+
+              {/* Reviewer override for refusals */}
+              {(isRefused(currentPair) || isExcluded(currentPair)) && (
+                <div style={{ borderTop: "1px solid var(--border-subtle)", marginTop: 20, paddingTop: 16 }}>
+                  {isExcluded(currentPair) ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", background: "var(--bg-inset)", border: "1px solid var(--border)", borderRadius: "var(--radius-xs)" }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", flex: 1, minWidth: 200 }}>
+                        This refusal is excluded from METEOR, BERTScore, and (after re-scoring on the Translate page) corpus BLEU.
+                      </span>
+                      <button
+                        onClick={() => handleUndoExclude(currentPair.pair_id)}
+                        style={{ fontFamily: "var(--font)", fontSize: 12, fontWeight: 500, padding: "6px 14px", borderRadius: "var(--radius-xs)", background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border)", cursor: "pointer" }}
+                      >
+                        Undo exclusion
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ padding: "12px 16px", background: "var(--bg-inset)", border: "1px solid var(--border)", borderRadius: "var(--radius-xs)" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>Was this refusal legitimate?</div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10, lineHeight: 1.5 }}>
+                        If the source text is not clinical, not translatable, or the model was right to decline, exclude it so the refusal does not count against the model. This applies to every model&rsquo;s run for this pair. Otherwise grade the clinical impact of the missing translation above.
+                      </div>
+                      <textarea
+                        placeholder="Reason (optional, included in the export)"
+                        value={overrideNote}
+                        onChange={(e) => setOverrideNote(e.target.value)}
+                        style={{ fontFamily: "var(--font)", fontSize: 12, width: "100%", padding: "8px 12px", borderRadius: "var(--radius-xs)", border: "1px solid var(--border)", background: "var(--bg-surface)", color: "var(--text-primary)", resize: "vertical", minHeight: 48, lineHeight: 1.5, marginBottom: 8 }}
+                      />
+                      <button
+                        onClick={() => handleExclude(currentPair.pair_id, overrideNote)}
+                        style={{ fontFamily: "var(--font)", fontSize: 12, fontWeight: 600, padding: "8px 16px", borderRadius: "var(--radius-xs)", background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--border)", cursor: "pointer" }}
+                      >
+                        Mark refusal as legitimate (exclude from scores)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Reference quality flag */}
               <div style={{ borderTop: "1px solid var(--border-subtle)", marginTop: 20, paddingTop: 16 }}>
@@ -588,9 +668,9 @@ export default function ReviewPage() {
                       </span>
                     </td>
                     <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.source_text || r.spanish_source}</td>
-                    <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: isRefused(r) ? "var(--danger)" : undefined }} title={r.error ?? r.format_warning ?? undefined}>
-                      {isRefused(r) ? <strong>Refused: </strong> : r.format_warning ? <span style={{ color: "var(--warning)" }}>&#9888; </span> : null}
-                      {isRefused(r) ? r.error : r.llm_english_translation}
+                    <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: isRefused(r) ? "var(--danger)" : isExcluded(r) ? "var(--text-muted)" : undefined }} title={r.error ?? r.format_warning ?? undefined}>
+                      {isRefused(r) ? <strong>Refused: </strong> : isExcluded(r) ? <strong>Excluded: </strong> : r.format_warning ? <span style={{ color: "var(--warning)" }}>&#9888; </span> : null}
+                      {isRefused(r) || isExcluded(r) ? r.error : r.llm_english_translation}
                     </td>
                     <td style={{ color: "var(--accent-text)", fontWeight: 600 }}>{r.meteor?.toFixed(3) ?? "--"}</td>
                     <td>
@@ -643,6 +723,7 @@ export default function ReviewPage() {
                 }}
               >&times;</button>
             </div>
+            <div className="table-scroll" style={{ maxHeight: "70vh", overflowY: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: "2px solid var(--border)" }}>
@@ -656,11 +737,12 @@ export default function ReviewPage() {
                   <tr key={g.grade} style={{ borderBottom: "1px solid var(--border-subtle, #eee)" }}>
                     <td style={{ padding: "10px 10px", fontWeight: 600 }}>{g.grade}</td>
                     <td style={{ padding: "10px 10px", whiteSpace: "nowrap" }}>{g.label}</td>
-                    <td style={{ padding: "10px 10px" }}>{g.description}</td>
+                    <td className="wrap" style={{ padding: "10px 10px", minWidth: 220 }}>{g.description}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}
