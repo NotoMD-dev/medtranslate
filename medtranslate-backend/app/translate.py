@@ -9,17 +9,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from typing import Optional
 
 import openai
 
 from app.config import (
     ANTHROPIC_API_KEY,
+    ANTHROPIC_EFFORT,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TEMPERATURE,
     OPENAI_API_KEY,
+    OPENAI_REASONING_EFFORT,
+    REASONING_HEADROOM_TOKENS,
     TRANSLATE_MAX_RETRIES,
     TRANSLATE_RETRY_DELAY,
 )
@@ -62,15 +66,42 @@ def _is_anthropic_model(model: str) -> bool:
     return model.startswith("claude")
 
 
-def _uses_max_completion_tokens(model: str) -> bool:
-    """Newer OpenAI models (GPT 5.x, o-series) require max_completion_tokens instead of max_tokens."""
+def _is_openai_reasoning_model(model: str) -> bool:
+    """GPT-5.x (incl. gpt-5.6-sol/terra/luna), GPT-6 and o-series models.
+
+    These take ``reasoning_effort``, require ``max_completion_tokens`` instead
+    of ``max_tokens``, and reject ``temperature`` / ``top_p`` outright (the
+    request fails on the parameter's presence, whatever its value).
+    """
     m = model.lower()
-    return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
+    return m.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
+
+
+def _uses_max_completion_tokens(model: str) -> bool:
+    return _is_openai_reasoning_model(model)
 
 
 def _supports_temperature(model: str) -> bool:
-    """Some OpenAI reasoning models reject explicit temperature values."""
-    return not model.lower().startswith("gpt-5")
+    return not _is_openai_reasoning_model(model)
+
+
+_ANTHROPIC_EFFORT_MODELS = re.compile(r"^claude-(?:opus|sonnet|haiku|fable|mythos)-(?:[5-9]|4-[6-9])")
+
+
+def _anthropic_supports_effort(model: str) -> bool:
+    """Claude 4.6+ models accept adaptive thinking and ``output_config.effort``."""
+    return bool(_ANTHROPIC_EFFORT_MODELS.match(model.lower()))
+
+
+def _anthropic_text(response) -> str:
+    """Concatenate the text blocks of a Messages API response.
+
+    Responses may begin with ``thinking`` blocks, so the first block cannot
+    be assumed to be text.
+    """
+    return "".join(
+        getattr(block, "text", "") for block in (response.content or []) if getattr(block, "type", "") == "text"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -124,30 +155,39 @@ async def _translate_openai(
     client = _get_openai_client()
     last_error: Exception | None = None
 
-    # Newer OpenAI models require max_completion_tokens instead of max_tokens
-    token_kwargs: dict = {}
-    if _uses_max_completion_tokens(model):
-        token_kwargs["max_completion_tokens"] = max_tokens
+    # Reasoning models (gpt-5.6-sol etc.) take reasoning_effort, use
+    # max_completion_tokens, and reject temperature/top_p on presence alone.
+    # Reasoning tokens count against max_completion_tokens, so add headroom.
+    request_kwargs: dict = {}
+    if _is_openai_reasoning_model(model):
+        effort = OPENAI_REASONING_EFFORT
+        request_kwargs["reasoning_effort"] = effort
+        headroom = 0 if effort == "none" else REASONING_HEADROOM_TOKENS
+        request_kwargs["max_completion_tokens"] = max_tokens + headroom
     else:
-        token_kwargs["max_tokens"] = max_tokens
-
-    sampling_kwargs: dict = {}
-    if _supports_temperature(model):
-        sampling_kwargs["temperature"] = temperature
+        request_kwargs["max_tokens"] = max_tokens
+        request_kwargs["temperature"] = temperature
 
     for attempt in range(1, TRANSLATE_MAX_RETRIES + 1):
         try:
             response = await client.chat.completions.create(
                 model=model,
-                **sampling_kwargs,
-                **token_kwargs,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text},
                 ],
+                **request_kwargs,
             )
-            content = response.choices[0].message.content
-            return (content or "").strip()
+            choice = response.choices[0]
+            content = (choice.message.content or "").strip()
+            if not content and choice.finish_reason == "length":
+                raise RuntimeError(
+                    "Output limit reached before any translation was produced; "
+                    "raise max_tokens or REASONING_HEADROOM_TOKENS"
+                )
+            if not content and choice.finish_reason == "content_filter":
+                raise RuntimeError("Model declined to translate this text (content filter)")
+            return content
 
         except openai.RateLimitError as exc:
             last_error = exc
@@ -210,11 +250,23 @@ async def _translate_anthropic(
     *,
     model: str,
     system_prompt: str,
-    temperature: float,
+    temperature: float,  # noqa: ARG001 - see note below
     max_tokens: int,
 ) -> str:
     client = _get_anthropic_client()
     last_error: Exception | None = None
+
+    # Current Claude models (Sonnet 5.5 and the rest of the 4.6+ family) reject
+    # non-default sampling parameters, so ``temperature`` is not forwarded.
+    # Adaptive thinking is enabled with the configured effort; thinking tokens
+    # count against max_tokens, so headroom is added on top of the requested
+    # limit. ``output_config`` is sent via extra_body so the request does not
+    # depend on the installed SDK version knowing that field.
+    request_kwargs: dict = {"max_tokens": max_tokens}
+    if _anthropic_supports_effort(model):
+        request_kwargs["thinking"] = {"type": "adaptive"}
+        request_kwargs["extra_body"] = {"output_config": {"effort": ANTHROPIC_EFFORT}}
+        request_kwargs["max_tokens"] = max_tokens + REASONING_HEADROOM_TOKENS
 
     for attempt in range(1, TRANSLATE_MAX_RETRIES + 1):
         try:
@@ -222,15 +274,23 @@ async def _translate_anthropic(
 
             response = await client.messages.create(
                 model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
                 system=system_prompt,
                 messages=[
                     {"role": "user", "content": text},
                 ],
+                **request_kwargs,
             )
-            content = response.content[0].text if response.content else ""
-            return (content or "").strip()
+            if response.stop_reason == "refusal":
+                details = getattr(response, "stop_details", None)
+                category = getattr(details, "category", None) or "unspecified"
+                raise RuntimeError(f"Model declined to translate this text (category: {category})")
+            content = _anthropic_text(response).strip()
+            if not content and response.stop_reason == "max_tokens":
+                raise RuntimeError(
+                    "Output limit reached before any translation was produced; "
+                    "raise max_tokens or REASONING_HEADROOM_TOKENS"
+                )
+            return content
 
         except anthropic.RateLimitError as exc:
             last_error = exc

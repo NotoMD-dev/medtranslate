@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
-from app.config import CORS_ORIGINS, DEFAULT_SYSTEM_PROMPT, SOURCE_LANGUAGE_COLUMNS
+from app.config import CORS_ORIGINS, DEFAULT_MODEL, DEFAULT_SYSTEM_PROMPT, SOURCE_LANGUAGE_COLUMNS
 from app.jobs import InputRow, cancel_job, create_job, execute_job, get_job_results, get_job_status, _db_cleanup_old_jobs
 from app.schemas import JobCreated, JobResults, JobStatusResponse, ModelConfig
 
@@ -259,7 +259,7 @@ async def parse_file(
 @app.post("/v1/jobs", response_model=JobCreated, status_code=202)
 async def submit_job(
     file: UploadFile = File(...),
-    model: str = Form("gpt-4o"),
+    model: str = Form(DEFAULT_MODEL),
     system_prompt: str = Form(DEFAULT_SYSTEM_PROMPT),
     temperature: float = Form(0.0),
     max_tokens: int = Form(1024),

@@ -197,11 +197,20 @@ export interface ModelOption {
 }
 
 export const MODEL_OPTIONS: ModelOption[] = [
-  { id: "gpt-4o", label: "GPT-4o", provider: "openai" },
-  { id: "gpt-5.1", label: "GPT 5.1", provider: "openai" },
-  { id: "gpt-5.2", label: "GPT 5.2", provider: "openai" },
-  { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4", provider: "anthropic" },
+  { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "openai" },
+  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", provider: "anthropic" },
 ];
+
+export const DEFAULT_MODEL_ID = MODEL_OPTIONS[0].id;
+
+/**
+ * Map a stored model id to one that is currently offered. Older sessions may
+ * still hold ids of retired models (e.g. "gpt-4o"); those fall back to the
+ * default so a run never targets a model the providers no longer serve.
+ */
+export function resolveModelId(id: string | undefined | null): string {
+  return id && MODEL_OPTIONS.some((m) => m.id === id) ? id : DEFAULT_MODEL_ID;
+}
 
 // ---------------------------------------------------------------------------
 // Translation configuration defaults
@@ -222,7 +231,7 @@ export interface TranslationConfig {
 }
 
 export const DEFAULT_CONFIG: TranslationConfig = {
-  model: "gpt-4o",
+  model: DEFAULT_MODEL_ID,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   temperature: 0,
   maxTokens: 1024,

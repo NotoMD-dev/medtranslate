@@ -5,7 +5,7 @@ import Header from "@/components/Header";
 import PairDetail from "@/components/PairDetail";
 import { pairsToCSVFile, sentenceMetricsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
 import { submitJob, pollUntilDone, fetchJobResults, cancelJob } from "@/lib/api";
-import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS } from "@/lib/types";
+import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS, resolveModelId } from "@/lib/types";
 import type { JobStatusResponse, JobResults, ClinicalGrade } from "@/lib/types";
 import {
   getSessionDataAsync,
@@ -41,7 +41,7 @@ export default function TranslatePage() {
   const lastPartialFetchRef = useRef(0);
   const lastOffsetRef = useRef(0);
 
-  const sessionModel = getSessionModel() || MODEL_OPTIONS[0].id;
+  const sessionModel = resolveModelId(getSessionModel());
   const modelLabel = MODEL_OPTIONS.find((m) => m.id === sessionModel)?.label || sessionModel;
 
   // Restore persisted job results on mount
@@ -179,7 +179,7 @@ export default function TranslatePage() {
 
     try {
       const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
-      const model = getSessionModel() || MODEL_OPTIONS[0].id;
+      const model = resolveModelId(getSessionModel());
       const csvFile = pairsToCSVFile(data);
 
       const { job_id } = await submitJob(csvFile, {
@@ -245,7 +245,7 @@ export default function TranslatePage() {
 
     try {
       const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
-      const model = getSessionModel() || MODEL_OPTIONS[0].id;
+      const model = resolveModelId(getSessionModel());
       const csvFile = sentenceMetricsToCSVFile(jobResults.sentence_metrics);
 
       const { job_id } = await submitJob(csvFile, {

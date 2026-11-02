@@ -17,13 +17,24 @@ CORS_ORIGINS: list[str] = (
 )
 
 # Default translation settings
-DEFAULT_MODEL: str = os.environ.get("DEFAULT_MODEL", "gpt-4o")
+DEFAULT_MODEL: str = os.environ.get("DEFAULT_MODEL", "gpt-5.6-sol")
 DEFAULT_SYSTEM_PROMPT: str = (
     "You are a medical interpreter. Translate the following Spanish clinical "
     "text into English, preserving all medical terminology and clinical meaning."
 )
 DEFAULT_TEMPERATURE: float = 0.0
 DEFAULT_MAX_TOKENS: int = 1024
+
+# Reasoning / thinking effort for models that support it.
+#   OpenAI (GPT-5.x / GPT-6 / o-series): none | low | medium | high | xhigh | max
+#   Anthropic (Claude Sonnet 5.5 and other 4.6+ models): low | medium | high | xhigh | max
+OPENAI_REASONING_EFFORT: str = os.environ.get("OPENAI_REASONING_EFFORT", "medium")
+ANTHROPIC_EFFORT: str = os.environ.get("ANTHROPIC_EFFORT", "medium")
+
+# Reasoning/thinking tokens count against the output-token limit on both
+# providers. This many extra tokens are added on top of the requested
+# max_tokens so reasoning never starves the translation itself.
+REASONING_HEADROOM_TOKENS: int = int(os.environ.get("REASONING_HEADROOM_TOKENS", "4096"))
 
 # Translation retry settings
 TRANSLATE_MAX_RETRIES: int = 6

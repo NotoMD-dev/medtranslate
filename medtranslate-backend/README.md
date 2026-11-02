@@ -78,7 +78,11 @@ queued → running → complete
 |---|---|---|---|
 | `OPENAI_API_KEY` | Yes | — | OpenAI API key for translations |
 | `CORS_ORIGINS` | No | `http://localhost:3000` | Comma-separated allowed origins |
-| `DEFAULT_MODEL` | No | `gpt-4o` | Default OpenAI model |
+| `ANTHROPIC_API_KEY` | For Claude | — | Anthropic API key (required to run Claude Sonnet 5.5) |
+| `DEFAULT_MODEL` | No | `gpt-5.6-sol` | Default model (`gpt-5.6-sol` or `claude-sonnet-5-5`) |
+| `OPENAI_REASONING_EFFORT` | No | `medium` | `reasoning_effort` for GPT-5.x/GPT-6 models (`none`, `low`, `medium`, `high`, `xhigh`, `max`) |
+| `ANTHROPIC_EFFORT` | No | `medium` | `output_config.effort` for Claude 4.6+ models (`low`, `medium`, `high`, `xhigh`, `max`) |
+| `REASONING_HEADROOM_TOKENS` | No | `4096` | Extra output tokens reserved for reasoning on top of `max_tokens` |
 
 ## Metrics
 
