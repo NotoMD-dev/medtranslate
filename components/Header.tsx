@@ -7,8 +7,8 @@ import { useTheme } from "@/src/design-system";
 const NAV_ITEMS = [
   { href: "/", label: "Upload" },
   { href: "/translate", label: "Translate" },
-  { href: "/review", label: "Review" },
   { href: "/metrics", label: "Metrics" },
+  { href: "/review", label: "Safety Review" },
   { href: "/compare", label: "Compare" },
   { href: "/about", label: "About" },
 ];

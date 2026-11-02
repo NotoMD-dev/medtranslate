@@ -23,7 +23,7 @@ const STEPS = [
     text: "Three automated scores compare the AI translation with the human one: SacreBLEU (exact wording), METEOR (forgiving wording plus word order), and optionally BERTScore (meaning). These run on the server with standard research libraries so results can be cited.",
   },
   {
-    title: "Review",
+    title: "Safety Review",
     text: "Sentences that score poorly on METEOR (below 0.4 by default) are flagged, and any sentence the model refused to translate goes to the top of the queue. A physician reads the original, the human translation, and the AI translation side by side and grades how serious any error is, from 0 (no error) to 3 (could change care).",
   },
   {
@@ -210,7 +210,7 @@ export default function AboutPage() {
             ))}
           </div>
           <p style={{ ...P, fontSize: 14 }}>{METRIC_GUIDE_NOTES.whatTheyMiss}</p>
-          <MetricGuideLink label="Open the full plain-language guide" />
+          <MetricGuideLink label="Open complete explanation guide" />
         </Card>
       </div>
 

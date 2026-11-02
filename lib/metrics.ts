@@ -174,3 +174,48 @@ export function bandStyle(tone: Tone): { background: string; color: string; bord
     border: `1px solid var(--${tone}-border)`,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Plain-language explanation of a refusal
+// ---------------------------------------------------------------------------
+
+/**
+ * What each provider safety-classifier category means. The backend stores
+ * the raw category code from the API (e.g. "category: bio") in the row's
+ * error message; this maps it to words a reviewer can act on.
+ */
+const REFUSAL_CATEGORY_NOTES: Record<string, string> = {
+  bio: "biology or biosecurity content (for example pathogens, viruses, genome sequences, or laboratory methods)",
+  cyber: "cybersecurity content (for example malware or hacking techniques)",
+  reasoning_extraction: "an attempt to extract the model's hidden reasoning",
+  frontier_llm: "an attempt to use the model to build or improve another AI model",
+  general_harms: "generally harmful content",
+};
+
+const REFUSAL_FOOTER =
+  "The sentence still counts as a failed translation (scored 0) unless a reviewer marks the refusal legitimate on the Safety Review page.";
+
+/**
+ * Turn a stored refusal error message into a sentence or two that explains
+ * why there is no translation. Returns null when the message is not a
+ * refusal this helper recognises.
+ */
+export function explainRefusal(error: string | null | undefined): string | null {
+  if (!error) return null;
+  const categoryMatch = /category:\s*([a-z_]+)/i.exec(error);
+  if (categoryMatch) {
+    const code = categoryMatch[1].toLowerCase();
+    const what = REFUSAL_CATEGORY_NOTES[code];
+    if (what) {
+      return `The provider's automated safety filter classified this sentence as ${what} and blocked the reply before the model wrote a translation. "${code}" is the filter's label, not a judgment about the text's accuracy. Clinical and research text about infections, viruses, or sequencing can trip this filter even when nothing in it is harmful. ${REFUSAL_FOOTER}`;
+    }
+    return `The provider's automated safety filter blocked the reply before the model wrote a translation ("${code}" is the filter's label). ${REFUSAL_FOOTER}`;
+  }
+  if (/content filter/i.test(error)) {
+    return `The provider's automated content filter blocked the reply before the model wrote a translation. ${REFUSAL_FOOTER}`;
+  }
+  if (/empty reply/i.test(error)) {
+    return `The model answered but the reply contained no text, so there is nothing to score. ${REFUSAL_FOOTER}`;
+  }
+  return null;
+}

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import MetricGuideLink from "@/components/MetricGuide";
 import { MODEL_OPTIONS, modelLabel } from "@/lib/types";
-import { summarizeMetric, countRun, isScored, applyRefusalOverrides, rowStatus, bandStyle, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
+import { summarizeMetric, countRun, isScored, applyRefusalOverrides, rowStatus, bandStyle, explainRefusal, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
 import { exportHeadToHeadCSV, downloadFile } from "@/lib/csv";
 import type { JobResults, RefusalOverride, HeadToHeadJudgment, SentenceMetrics } from "@/lib/types";
 import {
@@ -481,6 +481,13 @@ export default function ComparePage() {
 
 const DIFF_LIMITS = [10, 25, 0] as const; // 0 = all
 
+const navButtonStyle: React.CSSProperties = {
+  fontFamily: "var(--font)", fontSize: 12, fontWeight: 600, padding: "6px 12px",
+  borderRadius: "var(--radius-xs)", background: "var(--bg-surface)",
+  color: "var(--text-secondary)", border: "1px solid var(--border)",
+  display: "inline-flex", alignItems: "center", gap: 4, lineHeight: 1,
+};
+
 function OutputPanel({
   label,
   color,
@@ -508,8 +515,11 @@ function OutputPanel({
         )}
       </div>
       {failed ? (
-        <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--text-muted)", fontStyle: "italic" }}>
-          No translation. {sentence.error}
+        <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--text-muted)" }}>
+          <div style={{ fontStyle: "italic" }}>No translation. {sentence.error}</div>
+          {explainRefusal(sentence.error) && (
+            <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>{explainRefusal(sentence.error)}</div>
+          )}
         </div>
       ) : (
         <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
@@ -565,6 +575,31 @@ function SentenceDiffs({
   const diffs = limit > 0 ? allDiffs.slice(0, limit) : allDiffs;
   const openDiff = openPair ? allDiffs.find((d) => d.pairId === openPair) ?? null : null;
   const openJudgment = openPair ? judgments[openPair] : undefined;
+
+  // Previous / next step through the rows currently shown in the table, in
+  // table order. If the open pair is no longer shown (the "Show" limit was
+  // lowered), "next" starts again from the first row.
+  const openIndex = openPair ? diffs.findIndex((d) => d.pairId === openPair) : -1;
+  const prevDiff = openIndex > 0 ? diffs[openIndex - 1] : null;
+  const nextDiff = openIndex === -1 ? diffs[0] ?? null : openIndex < diffs.length - 1 ? diffs[openIndex + 1] : null;
+  const goPrev = () => { if (prevDiff) setOpenPair(prevDiff.pairId); };
+  const goNext = () => { if (nextDiff) setOpenPair(nextDiff.pairId); };
+
+  // Left / right arrow keys step through the list while a pair is open,
+  // except when the reviewer is typing in the note box or another field.
+  useEffect(() => {
+    if (!openPair) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT" || t?.isContentEditable) return;
+      if (e.key === "ArrowLeft" && prevDiff) { e.preventDefault(); setOpenPair(prevDiff.pairId); }
+      if (e.key === "ArrowRight" && nextDiff) { e.preventDefault(); setOpenPair(nextDiff.pairId); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openPair, prevDiff, nextDiff]);
 
   // Bring the detail card into view when a row far down the table is opened.
   useEffect(() => {
@@ -650,7 +685,7 @@ function SentenceDiffs({
         </button>
       </div>
       <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 12px" }}>
-        Click a row to read both outputs side by side and record which translation is actually better. Your verdict is a human judgment, independent of the automated scores, and is saved with the export.
+        Click a row to read both outputs side by side and record which translation is actually better. Use Prev / Next (or the left and right arrow keys) to step through the list without closing the card. Your verdict is a human judgment, independent of the automated scores, and is saved with the export.
       </p>
 
       {/* Detail card for the selected sentence. Rendered above the table (not
@@ -662,7 +697,32 @@ function SentenceDiffs({
             <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>{openDiff.pairId}</span>
             <span style={{ fontSize: 12, color: "var(--text-muted)" }}>METEOR difference {openDiff.diff.toFixed(3)}</span>
             <span style={{ flex: 1 }} />
-            <button onClick={() => setOpenPair(null)} aria-label="Close" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 20, color: "var(--text-muted)", lineHeight: 1, padding: "0 4px" }}>&times;</button>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <button
+                type="button"
+                onClick={goPrev}
+                disabled={!prevDiff}
+                aria-label="Previous pair"
+                title="Previous pair (left arrow key)"
+                style={{ ...navButtonStyle, opacity: prevDiff ? 1 : 0.4, cursor: prevDiff ? "pointer" : "default" }}
+              >
+                <span aria-hidden="true">&#8249;</span> Prev
+              </button>
+              <span style={{ fontSize: 12, color: "var(--text-muted)", minWidth: 64, textAlign: "center", fontVariantNumeric: "tabular-nums" }}>
+                {openIndex === -1 ? "not in list" : `${openIndex + 1} of ${diffs.length}`}
+              </span>
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={!nextDiff}
+                aria-label="Next pair"
+                title="Next pair (right arrow key)"
+                style={{ ...navButtonStyle, opacity: nextDiff ? 1 : 0.4, cursor: nextDiff ? "pointer" : "default" }}
+              >
+                Next <span aria-hidden="true">&#8250;</span>
+              </button>
+            </div>
+            <button onClick={() => setOpenPair(null)} aria-label="Close" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 20, color: "var(--text-muted)", lineHeight: 1, padding: "0 4px", marginLeft: 4 }}>&times;</button>
           </div>
           <div className="pair-grid" style={{ marginBottom: 16 }}>
             <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 16, minWidth: 0 }}>

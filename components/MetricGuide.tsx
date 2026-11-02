@@ -16,6 +16,8 @@ export interface MetricExplainer {
   range: string;
   oneLiner: string;
   howItWorks: string;
+  /** The formula, kept to one line, plus a sentence naming each term. */
+  howCalculated: { formula: string; terms: string };
   analogy: string;
   strictness: string;
   /** Plain-language score bands, lowest first. */
@@ -31,6 +33,10 @@ export const METRIC_EXPLAINERS: MetricExplainer[] = [
     oneLiner: "How many exact phrases the AI translation shares with the human translation.",
     howItWorks:
       "It chops both translations into short chunks of 1, 2, 3, and 4 words in a row, then counts how many of the AI's chunks appear word-for-word in the human version. It is worked out for the whole file at once, not sentence by sentence.",
+    howCalculated: {
+      formula: "BLEU = 100 \u00d7 BP \u00d7 (p\u2081 \u00d7 p\u2082 \u00d7 p\u2083 \u00d7 p\u2084)^(1/4)",
+      terms: "p\u2081 to p\u2084 are the fractions of the AI's 1-, 2-, 3-, and 4-word chunks that also appear in the human translation. BP is the brevity penalty: 1 when the AI output is at least as long as the human one, and less than 1 (exp(1 \u2212 reference length / AI length)) when it is shorter.",
+    },
     analogy:
       "Imagine laying two essays side by side and highlighting every phrase that appears in both. More highlighting means a higher score.",
     strictness:
@@ -50,8 +56,12 @@ export const METRIC_EXPLAINERS: MetricExplainer[] = [
     oneLiner: "Like BLEU, but forgiving about synonyms and word forms, and it checks word order too.",
     howItWorks:
       "It lines up words between the two translations. A match counts if the words are identical, if they share a root (\"treat\" and \"treated\"), or if they are synonyms in a dictionary (\"doctor\" and \"physician\"). It then asks: did the AI cover everything in the human version? It also takes a little off if the matching words are in a scrambled order. Each sentence gets its own score, and the app shows the average.",
+    howCalculated: {
+      formula: "METEOR = F \u00d7 (1 \u2212 0.5 \u00d7 (chunks / matched words)\u00b3), where F = 10PR / (R + 9P)",
+      terms: "P (precision) is the share of the AI's words that matched; R (recall) is the share of the human translation's words that matched. F weights recall nine times more than precision. \"Chunks\" counts how many runs of matched words are in the same order in both sentences, so a scrambled word order means more chunks and a bigger penalty.",
+    },
     analogy:
-      "A teacher grading a summary who accepts \"big\" for \"large\" and cares most about whether you covered all the key points, not whether you used the exact same words.",
+      "A teacher grading a summary who accepts \"big\" for \"large\" and cares most about whether you covered all the key points, not whether you used the exact same words. Covering more of the key points means a higher score.",
     strictness:
       "Medium. It cares much more about missing content than about extra words, so a translation that adds a note or an explanation loses less here than it does on BLEU.",
     bands: [
@@ -70,8 +80,12 @@ export const METRIC_EXPLAINERS: MetricExplainer[] = [
     oneLiner: "Compares meaning instead of words, using an AI language model.",
     howItWorks:
       "Each word is turned into a point in \"meaning space\" by a language model (roberta-base), and the score measures how close the AI translation's words are to the human translation's words in that space. \"The patient has no fever\" and \"Fever is absent\" score high even though almost no words match.",
+    howCalculated: {
+      formula: "F1 = 2PR / (P + R), then rescaled as (F1 \u2212 b) / (1 \u2212 b)",
+      terms: "Every word in each sentence becomes a vector from the roberta-base model. R (recall) is the average, over the human translation's words, of each word's best cosine similarity to any AI word; P (precision) is the same in the other direction. b is a baseline similarity measured on random sentence pairs, so 0 means \"no better than random\" and 1 means identical.",
+    },
     analogy:
-      "Asking a bilingual friend \"do these two sentences mean the same thing?\" rather than counting matching words.",
+      "Asking a bilingual friend \"do these two sentences mean the same thing?\" rather than counting matching words. The closer the two meanings, the higher the score.",
     strictness:
       "Loose on wording, strict on meaning. Rescaling makes 0 mean \"about as similar as two random sentences\" and 1 mean \"identical.\"",
     bands: [
@@ -137,7 +151,7 @@ function MetricGuideModal({ onClose }: { onClose: () => void }) {
         }}>
           <div>
             <div id="metric-guide-title" style={{ fontSize: 17, fontWeight: 700 }}>What do these scores mean?</div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>A plain-language guide to SacreBLEU, METEOR, and BERTScore</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>A complete explanation of SacreBLEU, METEOR, and BERTScore</div>
           </div>
           <button
             onClick={onClose}
@@ -157,6 +171,11 @@ function MetricGuideModal({ onClose }: { onClose: () => void }) {
               </div>
               <p style={{ margin: "0 0 10px", fontWeight: 600, color: "var(--text-primary)" }}>{m.oneLiner}</p>
               <p style={{ margin: "0 0 8px", color: "var(--text-secondary)" }}><strong>How it works.</strong> {m.howItWorks}</p>
+              <div style={{ margin: "0 0 10px", padding: "10px 12px", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-xs)" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 4 }}>How it is calculated</div>
+                <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 13, color: "var(--text-primary)", overflowWrap: "anywhere", marginBottom: 4 }}>{m.howCalculated.formula}</div>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55 }}>{m.howCalculated.terms}</div>
+              </div>
               <p style={{ margin: "0 0 8px", color: "var(--text-secondary)" }}><strong>Think of it as.</strong> {m.analogy}</p>
               <p style={{ margin: "0 0 10px", color: "var(--text-secondary)" }}><strong>How strict is it?</strong> {m.strictness}</p>
               <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 10, fontSize: 13 }}>
