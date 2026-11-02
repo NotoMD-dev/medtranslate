@@ -6,7 +6,7 @@ MedTranslate is the research instrument for a study evaluating whether large lan
 
 ## Features
 
-- **Batch translation** — Upload CSV/XLSX datasets of up to thousands of rows; translations run server-side via OpenAI GPT-4o
+- **Batch translation** — Upload CSV/XLSX datasets of up to thousands of rows; translations run server-side via OpenAI GPT 5.x or Anthropic Claude Sonnet 5.5
 - **Publication-grade metrics** — Corpus BLEU (sacrebleu), sentence-level METEOR (NLTK with WordNet + stemming), BERTScore F1 (bert-score with rescaled baselines)
 - **Clinical significance grading** — Physician review workflow with a 0–3 severity scale for flagged translations (METEOR < threshold)
 - **Light / Dark theme** — Toggle between calm academic light mode and dark mode
@@ -210,7 +210,7 @@ This tool supports a corpus-based evaluation study using 6,876 sentence-aligned 
 |---|---|---|
 | `OPENAI_API_KEY` | Yes | OpenAI API key (never exposed to frontend) |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins |
-| `DEFAULT_MODEL` | No | Default model (defaults to `gpt-4o`) |
+| `DEFAULT_MODEL` | No | Default model (defaults to `gpt-5.1`) |
 
 ## Documentation
 
@@ -233,7 +233,7 @@ This tool supports a corpus-based evaluation study using 6,876 sentence-aligned 
 | Icons | Lucide React |
 | Storage | localStorage + IndexedDB |
 | Backend | FastAPI, Python 3.11+ |
-| Translation | OpenAI Python SDK (GPT-4o) |
+| Translation | OpenAI Python SDK (GPT 5.1 / 5.2) and Anthropic Python SDK (Claude Sonnet 5.5) |
 | Metrics | sacrebleu, NLTK, bert-score, PyTorch |
 | Deployment | Vercel (frontend) + Render (backend) |
 

@@ -78,7 +78,7 @@ queued → running → complete
 |---|---|---|---|
 | `OPENAI_API_KEY` | Yes | — | OpenAI API key for translations |
 | `CORS_ORIGINS` | No | `http://localhost:3000` | Comma-separated allowed origins |
-| `DEFAULT_MODEL` | No | `gpt-4o` | Default OpenAI model |
+| `DEFAULT_MODEL` | No | `gpt-5.1` | Default model (`gpt-5.1`, `gpt-5.2`, or `claude-sonnet-5-5`) |
 
 ## Metrics
 

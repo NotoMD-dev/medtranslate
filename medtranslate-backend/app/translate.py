@@ -73,6 +73,31 @@ def _supports_temperature(model: str) -> bool:
     return not model.lower().startswith("gpt-5")
 
 
+def _anthropic_thinking_kwargs(model: str) -> dict:
+    """Thinking configuration for Anthropic models.
+
+    Claude Sonnet 5.5 runs adaptive thinking by default and thinking tokens
+    count against ``max_tokens``. Translation is a single-shot task where we
+    want every output token spent on the translation itself, so request the
+    lowest thinking setting. ``between_tools`` is only accepted by Sonnet 5.5;
+    other models are sent with their defaults.
+    """
+    if model.lower().startswith("claude-sonnet-5-5"):
+        return {"thinking": {"type": "between_tools"}}
+    return {}
+
+
+def _anthropic_text(response) -> str:
+    """Concatenate the text blocks of a Messages API response.
+
+    Responses may begin with ``thinking`` blocks, so the first block cannot
+    be assumed to be text.
+    """
+    return "".join(
+        getattr(block, "text", "") for block in (response.content or []) if getattr(block, "type", "") == "text"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Translation entry point
 # ---------------------------------------------------------------------------
@@ -210,11 +235,16 @@ async def _translate_anthropic(
     *,
     model: str,
     system_prompt: str,
-    temperature: float,
+    temperature: float,  # noqa: ARG001 - see note below
     max_tokens: int,
 ) -> str:
     client = _get_anthropic_client()
     last_error: Exception | None = None
+
+    # Current Claude models (Sonnet 5.5 and the rest of the 4.6+ family) reject
+    # non-default sampling parameters, so ``temperature`` is not forwarded.
+    # Decoding is already as deterministic as the API allows.
+    thinking_kwargs = _anthropic_thinking_kwargs(model)
 
     for attempt in range(1, TRANSLATE_MAX_RETRIES + 1):
         try:
@@ -223,14 +253,17 @@ async def _translate_anthropic(
             response = await client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
-                temperature=temperature,
                 system=system_prompt,
                 messages=[
                     {"role": "user", "content": text},
                 ],
+                **thinking_kwargs,
             )
-            content = response.content[0].text if response.content else ""
-            return (content or "").strip()
+            if response.stop_reason == "refusal":
+                details = getattr(response, "stop_details", None)
+                category = getattr(details, "category", None) or "unspecified"
+                raise RuntimeError(f"Model declined to translate this text (category: {category})")
+            return _anthropic_text(response).strip()
 
         except anthropic.RateLimitError as exc:
             last_error = exc

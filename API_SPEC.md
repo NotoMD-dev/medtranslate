@@ -24,7 +24,7 @@ Submit a CSV or XLSX file and model configuration to start a translation + metri
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `file` | file (CSV/XLSX) | Yes | — | CSV or XLSX file with at least a `spanish_source` column |
-| `model` | string | No | `"gpt-4o"` | OpenAI model identifier |
+| `model` | string | No | `"gpt-5.1"` | Model identifier (`gpt-5.1`, `gpt-5.2`, or `claude-sonnet-5-5`) |
 | `system_prompt` | string | No | *(medical interpreter prompt)* | System prompt for the LLM |
 | `temperature` | float | No | `0.0` | Sampling temperature |
 | `max_tokens` | int | No | `1024` | Maximum tokens in the LLM response |
@@ -146,7 +146,7 @@ Retrieve complete results after a job finishes.
     "torch": "2.5.1"
   },
   "translation_config": {
-    "model": "gpt-4o",
+    "model": "gpt-5.1",
     "system_prompt": "You are a medical interpreter...",
     "temperature": 0.0,
     "max_tokens": 1024
@@ -202,7 +202,7 @@ Cancel a running translation job. Rows already translated and scored are preserv
 |---|---|---|
 | `OPENAI_API_KEY` | Yes | OpenAI API key for translations |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins (defaults to localhost:3000) |
-| `DEFAULT_MODEL` | No | Default model name (defaults to `gpt-4o`) |
+| `DEFAULT_MODEL` | No | Default model name (defaults to `gpt-5.1`) |
 
 ### Frontend
 

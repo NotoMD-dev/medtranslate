@@ -10,6 +10,8 @@ import {
   SOURCE_LANGUAGES,
   DEFAULT_SOURCE_LANGUAGE,
   MODEL_OPTIONS,
+  DEFAULT_MODEL_ID,
+  resolveModelId,
   buildSystemPrompt,
 } from "@/lib/types";
 import {
@@ -39,7 +41,7 @@ export default function UploadPage() {
   const [rows, setRows] = useState<TranslationPair[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState(DEFAULT_SOURCE_LANGUAGE.code);
-  const [selectedModel, setSelectedModel] = useState(MODEL_OPTIONS[0].id);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL_ID);
   const currentLang = SOURCE_LANGUAGES.find((l) => l.code === sourceLanguage) || DEFAULT_SOURCE_LANGUAGE;
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [error, setError] = useState<string | null>(null);
@@ -61,8 +63,8 @@ export default function UploadPage() {
       if (savedLang) setSourceLanguage(savedLang);
       const savedPrompt = getSessionPrompt();
       if (savedPrompt) setSystemPrompt(savedPrompt);
-      const savedModel = getSessionModel();
-      if (savedModel) setSelectedModel(savedModel);
+      // Ignore ids of models that are no longer offered (e.g. retired "gpt-4o").
+      setSelectedModel(resolveModelId(getSessionModel()));
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -138,7 +140,7 @@ export default function UploadPage() {
     setRangeStart("");
     setRangeEnd("");
     setSourceLanguage(DEFAULT_SOURCE_LANGUAGE.code);
-    setSelectedModel(MODEL_OPTIONS[0].id);
+    setSelectedModel(DEFAULT_MODEL_ID);
     setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
     pendingSaveRef.current = null;
     clearSessionState();
