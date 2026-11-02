@@ -441,3 +441,107 @@ table tbody tr:hover td {
   background: var(--accent);
   animation: progress-slide 1.4s ease-in-out infinite;
 }
+
+/* ========================
+   ABOUT PAGE: SECTION SIDEBAR
+   ======================== */
+
+.about-layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+.about-sidebar {
+  position: sticky;
+  top: 24px;
+}
+
+.about-sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 10px 14px;
+}
+
+.about-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 1px solid var(--border);
+}
+
+.about-nav a {
+  display: block;
+  padding: 6px 14px;
+  margin-left: -1px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.about-nav a:hover {
+  color: var(--text-primary);
+}
+
+.about-nav a.active {
+  color: var(--accent-text);
+  font-weight: 600;
+  border-left-color: var(--accent);
+}
+
+/* Room so a section heading is not hidden under the mobile sticky bar. */
+.about-section {
+  scroll-margin-top: 24px;
+}
+
+@media (max-width: 900px) {
+  .about-layout {
+    display: block;
+  }
+  .about-sidebar {
+    top: 0;
+    z-index: 5;
+    background: var(--bg-base);
+    margin: 0 0 24px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .about-sidebar-title {
+    display: none;
+  }
+  .about-nav {
+    flex-direction: row;
+    gap: 6px;
+    overflow-x: auto;
+    border-left: none;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .about-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .about-nav a {
+    flex-shrink: 0;
+    margin-left: 0;
+    padding: 6px 12px;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    border-radius: 100px;
+  }
+  .about-nav a.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .about-section {
+    scroll-margin-top: 64px;
+  }
+}

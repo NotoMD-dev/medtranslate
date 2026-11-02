@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import MetricGuideLink, { METRIC_EXPLAINERS, METRIC_GUIDE_NOTES } from "@/components/MetricGuide";
@@ -80,6 +81,94 @@ function Card({ children, style }: { children: React.ReactNode; style?: React.CS
 }
 
 const P: React.CSSProperties = { fontSize: 15, lineHeight: 1.7, color: "var(--text-secondary)", margin: "0 0 12px" };
+const LINK: React.CSSProperties = { color: "var(--accent-text)", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 3 };
+
+// ---------------------------------------------------------------------------
+// Section navigation
+// ---------------------------------------------------------------------------
+
+const SECTIONS = [
+  { id: "purpose", label: "Purpose" },
+  { id: "how-a-run-works", label: "How a run works" },
+  { id: "models", label: "Models and effort" },
+  { id: "scores", label: "Reading the scores" },
+  { id: "grading", label: "Physician grading scale" },
+  { id: "data", label: "Data" },
+  { id: "caveat", label: "Not a clinical tool" },
+] as const;
+
+type SectionId = (typeof SECTIONS)[number]["id"];
+
+/**
+ * Sticky list of links to each section. The current section is tracked
+ * with an IntersectionObserver so the highlight follows the reader as
+ * they scroll; clicking a link scrolls smoothly and updates the hash.
+ */
+function SectionNav() {
+  const [active, setActive] = useState<SectionId>(SECTIONS[0].id);
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const visible = new Map<SectionId, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const id = e.target.id as SectionId;
+          if (e.isIntersecting) visible.set(id, e.intersectionRatio);
+          else visible.delete(id);
+        }
+        // Highlight the topmost visible section (sections are observed in
+        // page order, so the first id in SECTIONS that is visible wins).
+        const first = SECTIONS.find((sec) => visible.has(sec.id));
+        if (first) setActive(first.id);
+      },
+      { rootMargin: "-20% 0px -60% 0px", threshold: [0, 0.1, 0.5, 1] },
+    );
+    for (const sec of SECTIONS) {
+      const el = document.getElementById(sec.id);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, []);
+
+  // On narrow screens the links are a horizontally scrolling row; keep the
+  // active one in view as the reader scrolls the page.
+  useEffect(() => {
+    const nav = document.querySelector<HTMLElement>(".about-nav");
+    const link = nav?.querySelector<HTMLElement>("a.active");
+    if (!nav || !link || nav.scrollWidth <= nav.clientWidth) return;
+    const left = link.offsetLeft - (nav.clientWidth - link.offsetWidth) / 2;
+    nav.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
+  }, [active]);
+
+  const go = (id: SectionId) => (e: React.MouseEvent<HTMLAnchorElement>) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    e.preventDefault();
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.history.replaceState(null, "", `#${id}`);
+    setActive(id);
+  };
+
+  return (
+    <aside className="about-sidebar" aria-label="On this page">
+      <div className="about-sidebar-title">On this page</div>
+      <nav className="about-nav">
+        {SECTIONS.map((sec) => (
+          <a
+            key={sec.id}
+            href={`#${sec.id}`}
+            onClick={go(sec.id)}
+            className={active === sec.id ? "active" : undefined}
+            aria-current={active === sec.id ? "location" : undefined}
+          >
+            {sec.label}
+          </a>
+        ))}
+      </nav>
+    </aside>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -99,8 +188,12 @@ export default function AboutPage() {
         </p>
       </div>
 
+      <div className="about-layout">
+      <SectionNav />
+      <div className="about-content">
+
       {/* Purpose */}
-      <div className="anim d1" style={{ marginBottom: 48 }}>
+      <div id="purpose" className="anim d1 about-section" style={{ marginBottom: 48 }}>
         <SectionLabel>Purpose</SectionLabel>
         <Card>
           <p style={P}>
@@ -116,7 +209,7 @@ export default function AboutPage() {
       </div>
 
       {/* How it works */}
-      <div className="anim d2" style={{ marginBottom: 48 }}>
+      <div id="how-a-run-works" className="anim d2 about-section" style={{ marginBottom: 48 }}>
         <SectionLabel>How a run works</SectionLabel>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           {STEPS.map((s, i) => (
@@ -142,7 +235,7 @@ export default function AboutPage() {
       </div>
 
       {/* Models */}
-      <div className="anim d3" style={{ marginBottom: 48 }}>
+      <div id="models" className="anim d3 about-section" style={{ marginBottom: 48 }}>
         <SectionLabel>Models and effort</SectionLabel>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <div className="table-scroll">
@@ -194,7 +287,7 @@ export default function AboutPage() {
       </div>
 
       {/* Scores */}
-      <div className="anim d4" style={{ marginBottom: 48 }}>
+      <div id="scores" className="anim d4 about-section" style={{ marginBottom: 48 }}>
         <SectionLabel>Reading the scores</SectionLabel>
         <Card>
           <p style={P}>{METRIC_GUIDE_NOTES.sharedIdea}</p>
@@ -215,7 +308,7 @@ export default function AboutPage() {
       </div>
 
       {/* Clinical grades */}
-      <div className="anim d5" style={{ marginBottom: 48 }}>
+      <div id="grading" className="anim d5 about-section" style={{ marginBottom: 48 }}>
         <SectionLabel>Physician grading scale</SectionLabel>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <div className="table-scroll">
@@ -247,29 +340,32 @@ export default function AboutPage() {
       </div>
 
       {/* Data */}
-      <div className="anim d5" style={{ marginBottom: 48 }}>
+      <div id="data" className="anim d5 about-section" style={{ marginBottom: 48 }}>
         <SectionLabel>Data</SectionLabel>
         <Card>
           <p style={P}>
-            The main study uses 6,876 sentence pairs from two public corpora: <strong style={{ color: "var(--text-primary)" }}>ClinSpEn</strong> (professionally translated COVID-19 clinical case reports) and <strong style={{ color: "var(--text-primary)" }}>UMass EHR</strong> (de-identified clinical notes). Both are Spanish to English.
+            MedTranslate is a research tool developed and evaluated using two Spanish&ndash;English clinical datasets: <a href="https://zenodo.org/records/7711516" target="_blank" rel="noopener noreferrer" style={LINK}>ClinSpEn</a>, which contains professionally translated COVID-19 clinical case reports, and the <a href="https://aclanthology.org/W15-3816/" target="_blank" rel="noopener noreferrer" style={LINK}>UMass EHR corpus</a>, which contains de-identified clinical notes. Both provide aligned Spanish and English clinical text. In this evaluation, the Spanish text is translated into English by each LLM, and the resulting translation is compared with the corresponding original English text using the scoring metrics described on this page.
           </p>
           <p style={P}>
-            You can also upload your own file. It needs a column with the source-language text (for example <code>spanish_source</code> or <code>french_source</code>) and an <code>english_reference</code> column with the human translation. Spanish, French, Korean, Chinese, Portuguese, German, Arabic, Japanese, and Russian are supported.
+            You can also evaluate translations using your own dataset. The uploaded file must include a column containing the source-language text&mdash;for example, <code>spanish_source</code> or <code>french_source</code>&mdash;and an <code>english_reference</code> column containing the corresponding human-translated English text. The tool supports Spanish, French, Korean, Chinese, Portuguese, German, Arabic, Japanese, and Russian.
           </p>
           <p style={{ ...P, marginBottom: 0 }}>
-            To try the tool without a dataset, the <Link href="/" style={{ color: "var(--accent-text)", fontWeight: 600 }}>Upload page</Link> offers small synthetic Spanish and French demo files. They contain no real patient data.
+            To try MedTranslate without providing your own dataset, the <Link href="/" style={LINK}>Upload page</Link> includes small synthetic Spanish and French demonstration files. These files contain no real patient data.
           </p>
         </Card>
       </div>
 
       {/* Caveat */}
-      <div className="anim d5" style={{ marginBottom: 48 }}>
+      <div id="caveat" className="anim d5 about-section" style={{ marginBottom: 48 }}>
         <Card style={{ borderLeft: "4px solid var(--warning)" }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>Not a clinical tool</div>
           <p style={{ ...P, marginBottom: 0, fontSize: 14 }}>
             MedTranslate measures how well AI models translate. It is not itself a translation service for patient care, and a high score here is never proof that a translation is safe to act on.
           </p>
         </Card>
+      </div>
+
+      </div>
       </div>
     </div>
   );
