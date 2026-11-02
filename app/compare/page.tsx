@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import MetricGuideLink from "@/components/MetricGuide";
@@ -546,6 +546,7 @@ function SentenceDiffs({
   const [limit, setLimit] = useState<number>(DIFF_LIMITS[0]);
   const [openPair, setOpenPair] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
+  const detailRef = useRef<HTMLDivElement | null>(null);
 
   const allDiffs = useMemo(() => {
     const rowsA = applyRefusalOverrides(resultsA.sentence_metrics, overrides);
@@ -562,6 +563,15 @@ function SentenceDiffs({
   }, [resultsA, resultsB, overrides]);
 
   const diffs = limit > 0 ? allDiffs.slice(0, limit) : allDiffs;
+  const openDiff = openPair ? allDiffs.find((d) => d.pairId === openPair) ?? null : null;
+  const openJudgment = openPair ? judgments[openPair] : undefined;
+
+  // Bring the detail card into view when a row far down the table is opened.
+  useEffect(() => {
+    if (openPair && detailRef.current) {
+      detailRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [openPair]);
 
   // Reviewer preference tally over the rows currently shown
   const tally = useMemo(() => {
@@ -643,6 +653,59 @@ function SentenceDiffs({
         Click a row to read both outputs side by side and record which translation is actually better. Your verdict is a human judgment, independent of the automated scores, and is saved with the export.
       </p>
 
+      {/* Detail card for the selected sentence. Rendered above the table (not
+          inside it) so it is full width on phones, where the table scrolls
+          sideways, and stays in view when "all" rows are shown. */}
+      {openDiff && (
+        <div ref={detailRef} style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 20, boxShadow: "var(--shadow)", marginBottom: 16, border: "1px solid var(--accent)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>{openDiff.pairId}</span>
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>METEOR difference {openDiff.diff.toFixed(3)}</span>
+            <span style={{ flex: 1 }} />
+            <button onClick={() => setOpenPair(null)} aria-label="Close" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 20, color: "var(--text-muted)", lineHeight: 1, padding: "0 4px" }}>&times;</button>
+          </div>
+          <div className="pair-grid" style={{ marginBottom: 16 }}>
+            <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 16, minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 10 }}>Source text</div>
+              <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{openDiff.a.source_text || openDiff.a.spanish_source}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", margin: "16px 0 10px" }}>English reference</div>
+              <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{openDiff.a.english_reference}</div>
+            </div>
+            <OutputPanel label={labelA} color={colorA} sentence={openDiff.a} />
+            <OutputPanel label={labelB} color={colorB} sentence={openDiff.b} />
+          </div>
+
+          <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
+              Which translation is actually better?
+            </div>
+            <div className="button-row" style={{ marginBottom: 10 }}>
+              {judgeButton(openDiff.pairId, modelA, `${labelA} is better`, colorA)}
+              {judgeButton(openDiff.pairId, "tie", "About equal", "var(--text-secondary)")}
+              {judgeButton(openDiff.pairId, modelB, `${labelB} is better`, colorB)}
+              {openJudgment && (
+                <button
+                  onClick={() => onClearJudgment(openDiff.pairId)}
+                  style={{ fontFamily: "var(--font)", fontSize: 12, fontWeight: 500, padding: "10px 14px", borderRadius: "var(--radius-xs)", background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", cursor: "pointer" }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <textarea
+              placeholder="Why? (optional: e.g. Opus dropped the negation; Sol expanded an abbreviation correctly)"
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              onBlur={() => { if (openJudgment && noteDraft !== openJudgment.note) onJudge(openDiff.pairId, openJudgment.preferred, noteDraft); }}
+              style={{ fontFamily: "var(--font)", fontSize: 12, width: "100%", padding: "8px 12px", borderRadius: "var(--radius-xs)", border: "1px solid var(--border)", background: "var(--bg-inset)", color: "var(--text-primary)", resize: "vertical", minHeight: 48, lineHeight: 1.5 }}
+            />
+            {!openJudgment && noteDraft && (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Pick a verdict above to save this note.</div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="table-scroll" style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)" }}>
         <table>
           <thead>
@@ -662,8 +725,8 @@ function SentenceDiffs({
               const verdict = !j ? null : j.preferred === "tie" ? "Equal" : j.preferred === modelA ? labelA : j.preferred === modelB ? labelB : j.preferred;
               const verdictColor = !j ? "var(--text-muted)" : j.preferred === modelA ? colorA : j.preferred === modelB ? colorB : "var(--text-secondary)";
               return (
-                <Fragment key={d.pairId}>
                   <tr
+                    key={d.pairId}
                     onClick={() => setOpenPair(open ? null : d.pairId)}
                     style={{ cursor: "pointer", background: open ? "var(--accent-soft)" : undefined }}
                     aria-expanded={open}
@@ -683,52 +746,6 @@ function SentenceDiffs({
                     </td>
                     <td style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: verdictColor }}>{verdict ?? "\u2014"}</td>
                   </tr>
-                  {open && (
-                    <tr>
-                      <td colSpan={6} className="wrap" style={{ background: "var(--bg-surface)", padding: 20 }}>
-                        <div className="pair-grid" style={{ marginBottom: 16 }}>
-                          <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 16, minWidth: 0 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 10 }}>Source text</div>
-                            <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{d.a.source_text || d.a.spanish_source}</div>
-                            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", margin: "16px 0 10px" }}>English reference</div>
-                            <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{d.a.english_reference}</div>
-                          </div>
-                          <OutputPanel label={labelA} color={colorA} sentence={d.a} />
-                          <OutputPanel label={labelB} color={colorB} sentence={d.b} />
-                        </div>
-
-                        <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 16 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
-                            Which translation is actually better?
-                          </div>
-                          <div className="button-row" style={{ marginBottom: 10 }}>
-                            {judgeButton(d.pairId, modelA, `${labelA} is better`, colorA)}
-                            {judgeButton(d.pairId, "tie", "About equal", "var(--text-secondary)")}
-                            {judgeButton(d.pairId, modelB, `${labelB} is better`, colorB)}
-                            {j && (
-                              <button
-                                onClick={() => onClearJudgment(d.pairId)}
-                                style={{ fontFamily: "var(--font)", fontSize: 12, fontWeight: 500, padding: "10px 14px", borderRadius: "var(--radius-xs)", background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", cursor: "pointer" }}
-                              >
-                                Clear
-                              </button>
-                            )}
-                          </div>
-                          <textarea
-                            placeholder="Why? (optional: e.g. Opus dropped the negation; Sol expanded an abbreviation correctly)"
-                            value={noteDraft}
-                            onChange={(e) => setNoteDraft(e.target.value)}
-                            onBlur={() => { if (j && noteDraft !== j.note) onJudge(d.pairId, j.preferred, noteDraft); }}
-                            style={{ fontFamily: "var(--font)", fontSize: 12, width: "100%", padding: "8px 12px", borderRadius: "var(--radius-xs)", border: "1px solid var(--border)", background: "var(--bg-inset)", color: "var(--text-primary)", resize: "vertical", minHeight: 48, lineHeight: 1.5 }}
-                          />
-                          {!j && noteDraft && (
-                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Pick a verdict above to save this note.</div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
               );
             })}
           </tbody>
