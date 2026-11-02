@@ -6,7 +6,7 @@ The process exits after each invocation, freeing the ~400MB RoBERTa model
 from the main process memory.
 
 Protocol (one JSON object per stdout line):
-  {"type": "progress", "completed": N, "total": T}   — after each chunk
+  {"type": "progress", "completed": N, "total": T, "scores": [...]}   — after each chunk (that chunk's F1 values)
   {"type": "done", "f1_scores": [...]}                — final output
 
 Usage:
@@ -46,10 +46,12 @@ def main() -> None:
             batch_size=batch_size,
             verbose=False,
         )
-        all_f1.extend(F1.tolist())
+        chunk_scores = F1.tolist()
+        all_f1.extend(chunk_scores)
 
-        # Report progress after each chunk
-        print(json.dumps({"type": "progress", "completed": len(all_f1), "total": total}))
+        # Report progress after each chunk, with that chunk's scores so the
+        # caller can fill rows in as they are computed.
+        print(json.dumps({"type": "progress", "completed": len(all_f1), "total": total, "scores": chunk_scores}))
         sys.stdout.flush()
 
     # Final output with all scores

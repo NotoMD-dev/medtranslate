@@ -502,6 +502,8 @@ Expanded detail panel for a single translation pair. Shows three columns of text
 
 ### Translate Page (`/translate`)
 
+**Progress** (1.7.0): one bar follows the backend `phase`. Label and percentage per phase: "Translating n of N" (`translated/total`), "Scoring METEOR n of N" (`scored/(total − incomplete)`), "Computing corpus BLEU…" (indeterminate), "Loading the BERTScore model…" (indeterminate) then "Computing BERTScore n of N", "Finishing…". Indeterminate phases use `.progress-indeterminate` (a sliding accent segment). While a job runs, the table is re-fetched every 3 s (8 s above 1,500 rows) so translations and scores appear per row; a caption says so and reminds the user to keep the tab open.
+
 **Purpose**: Submit translation job and display real-time results.
 
 **Layout**:
@@ -627,7 +629,7 @@ A reply with a `format_warning` shows a `⚠` glyph in `--warning` before the te
 
 ### Compare Page (`/compare`)
 
-**Purpose**: Put two saved model runs side by side. Runs are keyed by model id in `comparisonResults` storage; the page needs at least two.
+**Purpose**: Put two saved model runs side by side. Runs are keyed by model id in `comparisonResults` storage; the page needs at least two. With exactly one run, a "Compare against" block shows the run model greyed (`--bg-inset`, "· done") and an accent button per model not yet run, "Translate the same dataset with <model>", which opens `/translate?model=<id>&autorun=1`; the Translate page selects that model and starts the run as soon as the dataset is restored. With two or more runs, models still missing are offered in a single line above the fairness warnings.
 
 **Layout**:
 ```

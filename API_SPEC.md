@@ -24,7 +24,7 @@ Submit a CSV or XLSX file and model configuration to start a translation + metri
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `file` | file (CSV/XLSX) | Yes | — | CSV or XLSX file with a source-language column (e.g. `spanish_source`) and `english_reference`. Optional `error` / `error_kind` columns let a metrics-only re-score keep failed rows' status. |
-| `model` | string | No | `"gpt-5.6-sol"` | Model identifier (`gpt-5.6-sol` or `claude-sonnet-5-5`) |
+| `model` | string | No | `"gpt-5.6-sol"` | Model identifier (`gpt-5.6-sol` or `claude-opus-5-5`) |
 | `system_prompt` | string | No | *(medical interpreter prompt)* | System prompt for the LLM |
 | `temperature` | float | No | `0.0` | Accepted for compatibility but overridden: the backend sends `0.0` to models that accept temperature and omits it for models that reject it (see `translation_config.temperature` in results) |
 | `max_tokens` | int | No | `1024` | Maximum tokens in the LLM response |
@@ -70,6 +70,7 @@ Poll the status and progress of a running job.
 {
   "job_id": "a1b2c3d4e5f6",
   "status": "running",
+  "phase": "translating",
   "total": 1000,
   "translated": 450,
   "scored": 320,
@@ -85,9 +86,10 @@ Poll the status and progress of a running job.
 |---|---|---|
 | `job_id` | string | The job identifier |
 | `status` | string | One of: `queued`, `running`, `complete`, `failed`, `cancelled` |
+| `phase` | string | What the job is doing now: `queued`, `translating`, `meteor`, `bleu`, `bertscore`, `complete`, `failed`, `cancelled`. Drives the progress bar. |
 | `total` | int | Total rows in the dataset |
-| `translated` | int | Rows translated so far |
-| `scored` | int | Rows with metrics computed so far |
+| `translated` | int | Rows translated so far (updated per sentence) |
+| `scored` | int | Rows with METEOR computed so far (updated every 25 rows during the `meteor` phase) |
 | `failed_rows` | int | Rows that failed translation (`refused_rows + incomplete_rows`) |
 | `refused_rows` | int | Model declined or returned an empty reply. Scored as 0. |
 | `incomplete_rows` | int | Provider or configuration failure. Not scored; retryable. |

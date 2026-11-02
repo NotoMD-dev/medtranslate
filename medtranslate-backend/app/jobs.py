@@ -75,6 +75,10 @@ class Job:
     refused_rows: int = 0         # model declined / empty reply (scored as 0)
     incomplete_rows: int = 0      # provider / config failure (unscored, retryable)
     excluded_rows: int = 0        # refusals a reviewer marked legitimate (unscored)
+    # Current phase for the progress bar (see JobStatusResponse.phase)
+    phase: str = "queued"
+    # Last time a lightweight status write hit SQLite (throttle; not persisted)
+    last_status_persist: float = 0.0
 
     sentence_metrics: list[SentenceMetrics] = field(default_factory=list)
     corpus_metrics: Optional[DatasetCorpusMetrics] = None
@@ -190,6 +194,7 @@ def _job_to_dict(job: Job, *, include_rows: bool = True) -> dict:
         "refused_rows": job.refused_rows,
         "incomplete_rows": job.incomplete_rows,
         "excluded_rows": job.excluded_rows,
+        "phase": job.phase,
         "sentence_metrics": [m.model_dump() for m in job.sentence_metrics],
         "corpus_metrics": job.corpus_metrics.model_dump() if job.corpus_metrics else None,
         "library_versions": job.library_versions.model_dump() if job.library_versions else None,
@@ -230,6 +235,7 @@ def _job_from_dict(data: dict) -> Job:
         refused_rows=data.get("refused_rows", 0),
         incomplete_rows=data.get("incomplete_rows", 0),
         excluded_rows=data.get("excluded_rows", 0),
+        phase=data.get("phase", "queued"),
         sentence_metrics=[
             SentenceMetrics.model_validate(m) for m in data.get("sentence_metrics", [])
         ],
@@ -291,6 +297,28 @@ def _db_save_status(job: Job) -> None:
                 )
         except Exception as exc:
             logger.warning("SQLite status write failed for job %s: %s", job.job_id, exc)
+
+
+# Progress writes are throttled so per-row updates never turn into per-row
+# multi-megabyte SQLite writes on large jobs.
+_STATUS_PERSIST_INTERVAL = float(os.getenv("STATUS_PERSIST_INTERVAL", "2.0"))
+
+
+def _db_save_status_throttled(job: Job, force: bool = False) -> None:
+    """Blocking. Persist progress at most every _STATUS_PERSIST_INTERVAL seconds."""
+    now = time.time()
+    if not force and now - job.last_status_persist < _STATUS_PERSIST_INTERVAL:
+        return
+    job.last_status_persist = now
+    _db_save_status(job)
+
+
+async def _persist_status_throttled(job: Job, force: bool = False) -> None:
+    now = time.time()
+    if not force and now - job.last_status_persist < _STATUS_PERSIST_INTERVAL:
+        return
+    job.last_status_persist = now
+    await asyncio.to_thread(_db_save_status, job)
 
 
 def _db_load(job_id: str) -> Optional[dict]:
@@ -462,11 +490,17 @@ def _metric_cache_set_many(items: list[tuple[str, float]]) -> None:
         logger.warning("Metric cache write failed: %s", exc)
 
 
-def _meteor_with_cache(rows_subset: list[tuple[int, InputRow]]) -> tuple[list[Optional[float]], int]:
+def _meteor_with_cache(
+    rows_subset: list[tuple[int, InputRow]],
+    on_progress=None,
+    progress_every: int = 25,
+) -> tuple[list[Optional[float]], int]:
     """Blocking. METEOR for each row, reading and filling the metric cache.
 
     Returns (scores, cache_hits). The key includes the NLTK version because
-    tokenizer and WordNet changes alter scores.
+    tokenizer and WordNet changes alter scores. *on_progress(batch)* is
+    called every *progress_every* rows with a list of (row_index, score)
+    pairs so the caller can show rows filling in as they are scored.
     """
     nltk_version = get_library_versions().get("nltk", "")
     keys = [
@@ -476,17 +510,24 @@ def _meteor_with_cache(rows_subset: list[tuple[int, InputRow]]) -> tuple[list[Op
     cached = _metric_cache_get_many(keys)
     scores: list[Optional[float]] = []
     fresh: list[tuple[str, float]] = []
-    for key, (_, row) in zip(keys, rows_subset):
+    batch: list[tuple[int, Optional[float]]] = []
+    for key, (i, row) in zip(keys, rows_subset):
         if key in cached:
-            scores.append(cached[key])
-            continue
-        try:
-            value: Optional[float] = compute_meteor(row.llm_english_translation, row.english_reference)
-        except Exception:
-            value = None
+            value: Optional[float] = cached[key]
+        else:
+            try:
+                value = compute_meteor(row.llm_english_translation, row.english_reference)
+            except Exception:
+                value = None
+            if value is not None:
+                fresh.append((key, value))
         scores.append(value)
-        if value is not None:
-            fresh.append((key, value))
+        batch.append((i, value))
+        if on_progress and len(batch) >= progress_every:
+            on_progress(batch)
+            batch = []
+    if on_progress and batch:
+        on_progress(batch)
     _metric_cache_set_many(fresh)
     return scores, len(cached)
 
@@ -552,6 +593,14 @@ async def _get_job(job_id: str) -> Optional[Job]:
 
     # For in-progress or unknown jobs, always read latest from SQLite
     refreshed = await _fetch_from_db(job_id)
+
+    # Execution may have started on this instance while the read was in
+    # flight. The live object is then authoritative: replacing it with the
+    # (older) SQLite copy would freeze every later poll at stale progress
+    # until the job finished (the "0% then 100%" symptom).
+    if job_id in _executing:
+        return _jobs.get(job_id)
+
     if refreshed is not None:
         _jobs[job_id] = refreshed  # update cache
         return refreshed
@@ -615,6 +664,7 @@ async def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
         refused_rows=job.refused_rows,
         incomplete_rows=job.incomplete_rows,
         excluded_rows=job.excluded_rows,
+        phase=job.phase,
         error=job.error,
         bertscore_completed=job.bertscore_completed,
         bertscore_total=job.bertscore_total,
@@ -697,6 +747,7 @@ async def execute_job(job_id: str) -> None:
 
     try:
         job.status = JobStatus.running
+        job.phase = "translating"
         await _persist(job)  # record running state
         total = len(job.rows)
         logger.info("Job %s: starting (%d rows)", job_id, total)
@@ -719,7 +770,7 @@ async def execute_job(job_id: str) -> None:
             os.getenv("MAX_CONCURRENT_TRANSLATIONS", "4")
         )
         CHUNK_SIZE = int(
-            os.getenv("TRANSLATION_CHUNK_SIZE", "200")
+            os.getenv("TRANSLATION_CHUNK_SIZE", "50")
         )
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_TRANSLATIONS)
 
@@ -767,13 +818,52 @@ async def execute_job(job_id: str) -> None:
                 for t in unique_texts
             }
             cached_map = await asyncio.to_thread(_cache_get_many, list(key_for_text.values()))
+            cache_writes_ok = temperature is None or temperature == 0.0
+
+            # Rows that share each unique text, so a finished translation can
+            # be written to its rows the moment it arrives (the table and the
+            # progress bar move per sentence, not per chunk).
+            rows_by_text: dict[str, list[int]] = {}
+            for i, row in enumerate(job.rows):
+                tk = row.source_text or row.spanish_source
+                if tk:
+                    rows_by_text.setdefault(tk, []).append(i)
+
+            def _apply_translation(text_key: str, translation: str) -> None:
+                unique_texts[text_key] = translation
+                for i in rows_by_text.get(text_key, ()):
+                    row = job.rows[i]
+                    if not row.llm_english_translation:
+                        row.llm_english_translation = translation
+                        job.sentence_metrics[i] = _make_sentence_metrics(
+                            row, llm_english_translation=translation,
+                        )
+                        job.translated += 1
+
+            def _apply_failure(text_key: str, msg: str, kind: str) -> None:
+                unique_texts[text_key] = None
+                unique_errors[text_key] = (msg, kind)
+                for i in rows_by_text.get(text_key, ()):
+                    row = job.rows[i]
+                    if not row.llm_english_translation and not row.error:
+                        row.error, row.error_kind = msg, kind
+                        job.sentence_metrics[i] = _make_sentence_metrics(
+                            row, llm_english_translation="", error=msg, error_kind=kind,
+                        )
+                        if kind == "refusal":
+                            job.refused_rows += 1
+                        else:
+                            job.incomplete_rows += 1
+                job.failed_rows = job.refused_rows + job.incomplete_rows
+
             cache_hits = 0
             for text_key, ck in key_for_text.items():
                 hit = cached_map.get(ck)
                 if hit is not None:
-                    unique_texts[text_key] = hit
+                    _apply_translation(text_key, hit)
                     cache_hits += 1
-            cache_writes_ok = temperature is None or temperature == 0.0
+            if cache_hits:
+                await _persist_status_throttled(job, force=True)
             if cache_hits:
                 logger.info("Job %s: translation cache hit for %d unique texts", job_id, cache_hits)
 
@@ -797,9 +887,14 @@ async def execute_job(job_id: str) -> None:
                             temperature=temperature,
                             max_tokens=max_tokens,
                         )
+                        _apply_translation(text, translation)
+                        await _persist_status_throttled(job)
                         return idx, text, translation, None, None
                     except Exception as exc:
-                        return idx, text, "", str(exc), classify_error(exc)
+                        kind = classify_error(exc)
+                        _apply_failure(text, str(exc), kind)
+                        await _persist_status_throttled(job)
+                        return idx, text, "", str(exc), kind
 
             unique_total = len(texts_to_translate)
             for start in range(0, unique_total, CHUNK_SIZE):
@@ -823,14 +918,15 @@ async def execute_job(job_id: str) -> None:
 
                 results = await asyncio.gather(*tasks)
 
-                new_cache_entries: list[tuple[str, str]] = []
-                for _idx, src_text, translation, error, kind in sorted(results, key=lambda x: x[0]):
-                    if error is None:
-                        unique_texts[src_text] = translation
-                        new_cache_entries.append((key_for_text[src_text], translation))
-                    else:
-                        unique_texts[src_text] = None
-                        unique_errors[src_text] = (error, kind or "infrastructure")
+                # Rows were updated as each translation arrived (see
+                # _apply_translation); here only the cache write remains.
+                new_cache_entries: list[tuple[str, str]] = [
+                    (key_for_text[src_text], translation)
+                    for _idx, src_text, translation, error, _kind in results
+                    if error is None
+                ]
+                for _idx, src_text, _translation, error, kind in results:
+                    if error is not None:
                         logger.error(
                             "Job %s unique text translation failed (%s): %s", job_id, kind, error
                         )
@@ -840,40 +936,7 @@ async def execute_job(job_id: str) -> None:
                 if new_cache_entries and cache_writes_ok:
                     await asyncio.to_thread(_cache_set_many, new_cache_entries)
 
-                # Fan results back to all rows sharing each translated text.
-                # Counts are recomputed once after the loop; recomputing them
-                # per row made this O(n^2) on large files.
-                for i, row in enumerate(job.rows):
-                    text_key = row.source_text or row.spanish_source
-                    cached = unique_texts.get(text_key)
-                    if cached is not None and not row.llm_english_translation:
-                        row.llm_english_translation = cached
-                        job.sentence_metrics[i] = _make_sentence_metrics(
-                            row, llm_english_translation=cached,
-                        )
-                    elif text_key in unique_errors and not row.llm_english_translation:
-                        msg, kind = unique_errors[text_key]
-                        row.error, row.error_kind = msg, kind
-                        job.sentence_metrics[i] = _make_sentence_metrics(
-                            row, llm_english_translation="", error=msg, error_kind=kind,
-                        )
-
-                job.translated = sum(1 for r in job.rows if r.llm_english_translation)
-                # Count failures so far (rows whose unique text was attempted and failed)
-                job.refused_rows = sum(
-                    1 for row in job.rows
-                    if not row.llm_english_translation
-                    and unique_errors.get(row.source_text or row.spanish_source, ("", ""))[1] == "refusal"
-                )
-                job.incomplete_rows = sum(
-                    1 for row in job.rows
-                    if not row.llm_english_translation
-                    and unique_errors.get(row.source_text or row.spanish_source, ("", ""))[1] == "infrastructure"
-                )
-                job.failed_rows = job.refused_rows + job.incomplete_rows
-
-                # Lightweight persist: only status/progress, not the full blob
-                await asyncio.to_thread(_db_save_status, job)
+                await _persist_status_throttled(job, force=True)
                 await asyncio.sleep(0)
 
             # Final fan-out: ensure all rows with successful translations are populated
@@ -910,6 +973,7 @@ async def execute_job(job_id: str) -> None:
         # If cancelled, finalize status and return early with partial results
         if job.cancelled:
             job.status = JobStatus.cancelled
+            job.phase = "cancelled"
             logger.info("Job %s: stopped after %d translations", job_id, job.translated)
             await _persist(job)
             _evict_oldest_terminal_jobs()
@@ -934,7 +998,21 @@ async def execute_job(job_id: str) -> None:
             if job.sentence_metrics[i].error_kind == "refusal" and row.english_reference
         ]
 
-        meteor_scores, meteor_hits = await asyncio.to_thread(_meteor_with_cache, successfully_translated)
+        job.phase = "meteor"
+        job.scored = 0
+        await _persist_status_throttled(job, force=True)
+
+        def _on_meteor_progress(batch: list[tuple[int, Optional[float]]]) -> None:
+            # Runs on the worker thread: fill scored rows in as they finish
+            # so the table and the progress bar move during scoring.
+            for i, value in batch:
+                job.sentence_metrics[i] = job.sentence_metrics[i].model_copy(update={"meteor": value})
+            job.scored += len(batch)
+            _db_save_status_throttled(job)
+
+        meteor_scores, meteor_hits = await asyncio.to_thread(
+            _meteor_with_cache, successfully_translated, _on_meteor_progress,
+        )
         if meteor_hits:
             logger.info("Job %s: METEOR cache hits for %d of %d rows", job_id, meteor_hits, len(meteor_scores))
         job.scored = len(meteor_scores) + len(refused)
@@ -956,6 +1034,8 @@ async def execute_job(job_id: str) -> None:
         # Phase 3: Corpus BLEU (sacrebleu) — computed BEFORE optional BERTScore
         # ------------------------------------------------------------------
         logger.info("Job %s: computing corpus BLEU", job_id)
+        job.phase = "bleu"
+        await _persist_status_throttled(job, force=True)
 
         all_hyps = [row.llm_english_translation for _, row in successfully_translated] + ["" for _ in refused]
         all_refs = [row.english_reference for _, row in successfully_translated] + [row.english_reference for _, row in refused]
@@ -1027,17 +1107,32 @@ async def execute_job(job_id: str) -> None:
                     "Job %s: BERTScore cache hits for %d of %d rows", job_id, len(bert_cached), len(bert_keys)
                 )
 
+            job.phase = "bertscore"
             job.bertscore_total = len(missing)
             job.bertscore_completed = 0
             await asyncio.to_thread(_db_save_status, job)
 
-            def _on_bert_progress(completed: int, total_count: int) -> None:
-                job.bertscore_completed = completed
-                job.bertscore_total = total_count
-                # Persist from the worker thread so progress is visible across instances.
-                _db_save_status(job)
-
             bert_f1_scores: list[Optional[float]] = [bert_cached.get(key) for key in bert_keys]
+            # Cached values show up immediately.
+            for k, key in enumerate(bert_keys):
+                if key in bert_cached:
+                    i = successfully_translated[k][0]
+                    job.sentence_metrics[i] = job.sentence_metrics[i].model_copy(update={"bertscore_f1": bert_cached[key]})
+
+            def _on_bert_progress(completed: int, total_count: int, chunk_scores=None) -> None:
+                # Runs on the worker thread: fill the rows of the chunk that
+                # just finished, then persist (throttled).
+                job.bertscore_total = total_count
+                if chunk_scores:
+                    start = completed - len(chunk_scores)
+                    for offset, value in enumerate(chunk_scores):
+                        k = missing[start + offset]
+                        i = successfully_translated[k][0]
+                        bert_f1_scores[k] = value
+                        job.sentence_metrics[i] = job.sentence_metrics[i].model_copy(update={"bertscore_f1": float(value)})
+                job.bertscore_completed = completed
+                _db_save_status_throttled(job)
+
             if missing:
                 try:
                     fresh_scores = await asyncio.to_thread(
@@ -1078,6 +1173,7 @@ async def execute_job(job_id: str) -> None:
             logger.error("Job %s version capture failed: %s", job_id, exc)
 
         job.status = JobStatus.complete
+        job.phase = "complete"
         await _persist(job)  # persist final results to survive future restarts
         _evict_oldest_terminal_jobs()
         logger.info("Job %s: complete", job_id)
@@ -1085,6 +1181,7 @@ async def execute_job(job_id: str) -> None:
     except Exception as exc:
         logger.error("Job %s: unhandled error in execute_job: %s", job_id, exc)
         job.status = JobStatus.failed
+        job.phase = "failed"
         job.error = f"Job execution failed: {exc}"
         await _persist(job)
         _evict_oldest_terminal_jobs()

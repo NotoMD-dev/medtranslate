@@ -418,3 +418,26 @@ table tbody tr:hover td {
     flex-direction: column;
   }
 }
+
+/* Progress bar for phases without a row count (model loading, corpus BLEU) */
+@keyframes progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+.progress-indeterminate {
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-indeterminate::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 33%;
+  border-radius: 100px;
+  background: var(--accent);
+  animation: progress-slide 1.4s ease-in-out infinite;
+}

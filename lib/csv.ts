@@ -1,4 +1,4 @@
-import type { TranslationPair, SentenceMetrics, ClinicalGrade, ReferenceFlag } from "./types";
+import type { TranslationPair, SentenceMetrics, ClinicalGrade, ReferenceFlag, RefusalOverride } from "./types";
 import { SOURCE_LANGUAGES } from "./types";
 import { rowStatus as classifyRow } from "./metrics";
 
@@ -174,12 +174,13 @@ export function exportResultsCSV(
   sentences: SentenceMetrics[],
   grades?: Record<string, ClinicalGrade>,
   refFlags?: Record<string, ReferenceFlag>,
+  overrides?: Record<string, RefusalOverride>,
 ): string {
   const headers = [
     "pair_id", "source", "content_type", "english_reference", "source_text",
     "llm_english_translation", "meteor_score", "bertscore_f1",
     "clinical_significance_grade", "reference_flag_issues", "reference_flag_notes",
-    "status", "error", "format_warning",
+    "status", "error", "format_warning", "reviewer_override_note",
   ];
 
   const rows = sentences.map((r) => {
@@ -195,6 +196,7 @@ export function exportResultsCSV(
       rowStatus(r),
       r.error ?? "",
       r.format_warning ?? "",
+      overrides?.[r.pair_id]?.note ?? "",
     ];
   });
 
@@ -211,12 +213,13 @@ export function exportReviewCSV(
   flaggedPairs: SentenceMetrics[],
   grades?: Record<string, ClinicalGrade>,
   refFlags?: Record<string, ReferenceFlag>,
+  overrides?: Record<string, RefusalOverride>,
 ): string {
   const headers = [
     "pair_id", "source", "content_type", "english_reference", "source_text",
     "llm_english_translation", "meteor_score", "bertscore_f1",
     "clinical_significance_grade", "reference_flag_issues", "reference_flag_notes",
-    "status", "error", "format_warning",
+    "status", "error", "format_warning", "reviewer_override_note",
   ];
 
   const rows = flaggedPairs.map((r) => {
@@ -232,6 +235,7 @@ export function exportReviewCSV(
       rowStatus(r),
       r.error ?? "",
       r.format_warning ?? "",
+      overrides?.[r.pair_id]?.note ?? "",
     ];
   });
 

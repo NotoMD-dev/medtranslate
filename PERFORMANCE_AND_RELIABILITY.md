@@ -187,6 +187,17 @@ Ways to keep the bill down that are now supported by the code:
    translation cache means a re-run with unchanged settings costs nothing; a
    prompt or effort change costs one call per unique sentence.
 
+## 4b. The frozen progress bar (1.7.0)
+
+**Problem.** Progress appeared to jump from 0 % to 100 %. Two causes:
+
+1. A race in the backend's job reader. A status poll that arrived while the worker was picking the job up read the job from SQLite and then overwrote the live in-memory object with that stale copy. Every later poll on the executing instance returned the frozen copy until the job finished and the reader fell back to the database. With the frontend polling immediately after submit, this happened on most runs.
+2. Progress was only written per 200-row chunk and METEOR/BERTScore only at the end of their phase, so even without the race a small job moved in one step.
+
+**Change.** The reader never replaces a job that is executing on this instance. Translations and failures are written to their rows the moment each sentence finishes; METEOR updates every 25 rows; the BERTScore subprocess streams each chunk's scores; the job reports a `phase`; SQLite progress writes are throttled to one every 2 s. The Translate page shows a phase-aware bar and re-fetches the table every few seconds so rows fill in.
+
+**Effect.** In the stubbed test a 16-row job produced 17 distinct progress states across all four phases instead of one.
+
 ## 5. Points of failure removed or reduced
 
 | Risk | Before | After |

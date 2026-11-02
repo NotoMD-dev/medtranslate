@@ -310,7 +310,7 @@ async def _translate_anthropic(
     client = _get_anthropic_client()
     last_error: Exception | None = None
 
-    # Current Claude models (Sonnet 5.5 and the rest of the 4.6+ family) reject
+    # Current Claude models (Opus 5.5 and the rest of the 4.6+ family) reject
     # non-default sampling parameters, so ``temperature`` is not forwarded.
     # Adaptive thinking is enabled with the configured effort; thinking tokens
     # count against max_tokens, so headroom is added on top of the requested

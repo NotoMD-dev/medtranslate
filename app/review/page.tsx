@@ -184,9 +184,9 @@ export default function ReviewPage() {
 
   const handleExport = useCallback(() => {
     if (!jobResults || flagged.length === 0) return;
-    const csv = exportReviewCSV(flagged, grades, refFlags);
+    const csv = exportReviewCSV(flagged, grades, refFlags, overrides);
     downloadFile(csv, "medtranslate_review.csv");
-  }, [jobResults, flagged, grades, refFlags]);
+  }, [jobResults, flagged, grades, refFlags, overrides]);
 
   // Navigate to next ungraded pair
   const handleSkip = useCallback(() => {
