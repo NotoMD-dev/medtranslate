@@ -16,62 +16,145 @@ const STORAGE_KEYS = {
 } as const;
 
 function canUseStorage() {
-  return typeof window !== "undefined";
+  if (typeof window === "undefined") return false;
+  try {
+    return typeof window.localStorage !== "undefined";
+  } catch {
+    // Accessing localStorage can throw when storage is blocked by the browser.
+    return false;
+  }
 }
 
 function readJSON<T>(key: string): T | undefined {
   if (!canUseStorage()) return undefined;
-  const raw = localStorage.getItem(key);
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(key);
+  } catch {
+    return undefined;
+  }
   if (!raw) return undefined;
 
   try {
     return JSON.parse(raw) as T;
   } catch {
-    localStorage.removeItem(key);
+    try { localStorage.removeItem(key); } catch { /* ignore */ }
     return undefined;
   }
 }
 
-function writeJSON<T>(key: string, value: T | undefined) {
-  if (!canUseStorage()) return;
-  if (value == null) {
-    localStorage.removeItem(key);
-    return;
-  }
+/** Write JSON to localStorage. Returns true only when the value was stored. */
+function writeJSON<T>(key: string, value: T | undefined): boolean {
+  if (!canUseStorage()) return false;
   try {
+    if (value == null) {
+      localStorage.removeItem(key);
+      return true;
+    }
     localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch {
-    // Quota exceeded — data lives in component state; IndexedDB handles large payloads.
+    // Quota exceeded or storage blocked — caller decides on a fallback.
+    return false;
   }
 }
 
-// Data
-export function getSessionData() {
-  return readJSON<TranslationPair[]>(STORAGE_KEYS.data);
+// ---------------------------------------------------------------------------
+// Dataset (uploaded translation pairs)
+//
+// Storage strategy, in order of preference:
+//   1. IndexedDB — handles large datasets; localStorage then holds only a
+//      small presence flag { _idb: true, length }.
+//   2. localStorage — full copy, used when IndexedDB is unavailable (private
+//      browsing, blocked storage, a hung `indexedDB.open`) and the dataset
+//      fits within the quota.
+//   3. In-memory — always kept for the lifetime of the page so client-side
+//      navigation between Upload → Translate never loses the dataset even if
+//      both persistent stores fail.
+// ---------------------------------------------------------------------------
+
+interface SessionDataPresenceFlag {
+  _idb: true;
+  length: number;
 }
 
+let memorySessionData: TranslationPair[] | undefined;
+
+function isPresenceFlag(value: unknown): value is SessionDataPresenceFlag {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as { _idb?: unknown })._idb === true
+  );
+}
+
+/** Sync getter — localStorage only. Returns the full array when one is stored there. */
+export function getSessionData(): TranslationPair[] | undefined {
+  const fromLS = readJSON<unknown>(STORAGE_KEYS.data);
+  return Array.isArray(fromLS) ? (fromLS as TranslationPair[]) : undefined;
+}
+
+/**
+ * Sync setter — localStorage + in-memory only. Prefer setSessionDataAsync(),
+ * which also persists to IndexedDB for large datasets.
+ */
 export function setSessionData(data: TranslationPair[] | undefined) {
+  memorySessionData = data;
   writeJSON(STORAGE_KEYS.data, data);
 }
 
-// Async getter — tries IndexedDB first, falls back to localStorage.
+/**
+ * Async getter. Resolves the uploaded dataset from whichever store holds it:
+ * a full localStorage copy, then IndexedDB, then the in-memory copy.
+ */
 export async function getSessionDataAsync(): Promise<TranslationPair[] | undefined> {
+  // A full array in localStorage means the most recent save could not reach
+  // IndexedDB, so it is authoritative over whatever (possibly stale) data IDB
+  // still holds.
+  const fromLS = readJSON<unknown>(STORAGE_KEYS.data);
+  if (Array.isArray(fromLS)) {
+    memorySessionData = fromLS as TranslationPair[];
+    return memorySessionData;
+  }
+
   const fromIDB = await getSessionDataIDB();
-  if (fromIDB) return fromIDB;
-  // localStorage may contain full data (small datasets written by the sync
-  // setter) or a lightweight presence flag written by setSessionDataAsync.
-  // Only return actual arrays — ignore presence flags.
-  const fromLS = getSessionData();
-  if (Array.isArray(fromLS)) return fromLS;
-  return undefined;
+  if (Array.isArray(fromIDB)) {
+    memorySessionData = fromIDB;
+    return fromIDB;
+  }
+
+  // Presence flag without readable IDB data, or nothing persisted at all:
+  // fall back to the copy kept in memory for this page lifetime.
+  return memorySessionData;
 }
 
-// Async setter — writes to IndexedDB (large-data safe) and a lightweight
-// presence flag to localStorage (avoids wasteful full-data writes that would
-// silently fail on quota-exceeded for large datasets).
+/**
+ * Async setter. Writes to IndexedDB and, only if that succeeds, replaces the
+ * localStorage copy with a lightweight presence flag. If IndexedDB fails the
+ * full dataset is written to localStorage instead, so the data is never
+ * reduced to a flag that points at nothing. The in-memory copy is always kept.
+ */
 export async function setSessionDataAsync(data: TranslationPair[] | undefined): Promise<void> {
-  await setSessionDataIDB(data);
-  writeJSON(STORAGE_KEYS.data, data ? { _idb: true, length: data.length } : undefined);
+  memorySessionData = data;
+
+  if (data == null) {
+    writeJSON(STORAGE_KEYS.data, undefined);
+    await setSessionDataIDB(undefined);
+    return;
+  }
+
+  const storedInIDB = await setSessionDataIDB(data);
+  if (storedInIDB) {
+    const flag: SessionDataPresenceFlag = { _idb: true, length: data.length };
+    writeJSON(STORAGE_KEYS.data, flag);
+    return;
+  }
+
+  // IndexedDB unavailable or write failed. Clear any previous value first so a
+  // quota failure below cannot leave a stale array or a dangling flag behind.
+  writeJSON(STORAGE_KEYS.data, undefined);
+  writeJSON(STORAGE_KEYS.data, data);
 }
 
 // Prompt
@@ -253,6 +336,7 @@ export async function setSessionComparisonResultsAsync(
 }
 
 export function clearSessionState() {
+  memorySessionData = undefined;
   setSessionData(undefined);
   setSessionPrompt(undefined);
   setSessionRowLimit(undefined);

@@ -34,6 +34,7 @@ export default function TranslatePage() {
   const [error, setError] = useState<string | null>(null);
   const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
   const [rowCount, setRowCount] = useState(0);
+  const [restoringSession, setRestoringSession] = useState(true);
   const [computeBertscore, setComputeBertscore] = useState(false);
   const abortRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -76,7 +77,7 @@ export default function TranslatePage() {
       ) {
         resumePolling(jobId);
       }
-    });
+    }).finally(() => setRestoringSession(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -518,8 +519,15 @@ export default function TranslatePage() {
         </div>
       )}
 
+      {/* Loading State — session is being restored from browser storage */}
+      {restoringSession && rowCount === 0 && pageState === "idle" && (
+        <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 64, textAlign: "center", boxShadow: "var(--shadow)" }}>
+          <div style={{ color: "var(--text-muted)", fontSize: 18 }}>Loading dataset&hellip;</div>
+        </div>
+      )}
+
       {/* Empty State */}
-      {rowCount === 0 && pageState === "idle" && (
+      {!restoringSession && rowCount === 0 && pageState === "idle" && (
         <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 64, textAlign: "center", boxShadow: "var(--shadow)" }}>
           <div style={{ color: "var(--text-muted)", fontSize: 18, marginBottom: 8 }}>No dataset loaded</div>
           <p style={{ color: "var(--text-muted)", fontSize: 14 }}>Go to the Upload tab to load your CSV or XLSX first.</p>

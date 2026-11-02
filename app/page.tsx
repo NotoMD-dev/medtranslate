@@ -19,7 +19,6 @@ import {
   getSessionSourceLanguage,
   getSessionPrompt,
   getSessionModel,
-  setSessionData,
   setSessionDataAsync,
   setSessionPrompt,
   setSessionRowLimit,
@@ -34,6 +33,9 @@ import type { TranslationPair } from "@/lib/types";
 export default function UploadPage() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
+  // Tracks the in-flight persistence of a freshly parsed file so that
+  // "Continue" can wait for it instead of racing it.
+  const pendingSaveRef = useRef<Promise<void> | null>(null);
   const [rows, setRows] = useState<TranslationPair[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState(DEFAULT_SOURCE_LANGUAGE.code);
@@ -83,8 +85,7 @@ export default function UploadPage() {
         parseFile(file, currentLang.columnName)
           .then((parsed) => {
             setRows(parsed);
-            setSessionData(parsed);
-            setSessionDataAsync(parsed); // fire-and-forget IDB write
+            pendingSaveRef.current = setSessionDataAsync(parsed).catch(() => {});
             setSessionPrompt(systemPrompt);
             setSessionCsvFileName(file.name);
           })
@@ -97,8 +98,7 @@ export default function UploadPage() {
           try {
             const parsed = parseCSV(ev.target?.result as string, currentLang.columnName);
             setRows(parsed);
-            setSessionData(parsed);
-            setSessionDataAsync(parsed); // fire-and-forget IDB write
+            pendingSaveRef.current = setSessionDataAsync(parsed).catch(() => {});
             setSessionPrompt(systemPrompt);
             setSessionCsvFileName(file.name);
           } catch (err) {
@@ -140,6 +140,7 @@ export default function UploadPage() {
     setSourceLanguage(DEFAULT_SOURCE_LANGUAGE.code);
     setSelectedModel(MODEL_OPTIONS[0].id);
     setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
+    pendingSaveRef.current = null;
     clearSessionState();
     if (fileRef.current) {
       fileRef.current.value = "";
@@ -168,15 +169,26 @@ export default function UploadPage() {
       dataToUse = rows;
     }
 
-    // Write data to IDB (reliable for large datasets) + localStorage
-    await setSessionDataAsync(dataToUse);
-    setSessionPrompt(systemPrompt);
-    setSessionRowLimit(dataToUse.length !== rows.length ? dataToUse.length : undefined);
-    setSessionModel(selectedModel);
-    setSessionSourceLanguage(sourceLanguage);
-    // Clear stale results before navigation
-    await setSessionJobResultsAsync(undefined);
-    setSessionJobId(undefined);
+    setError(null);
+    try {
+      // Let any in-flight save of the parsed file finish so it cannot
+      // overwrite the (possibly sliced) selection written below.
+      if (pendingSaveRef.current) await pendingSaveRef.current;
+      pendingSaveRef.current = null;
+      // Persist the selection: IndexedDB when available, otherwise
+      // localStorage; an in-memory copy always survives the navigation.
+      await setSessionDataAsync(dataToUse);
+      setSessionPrompt(systemPrompt);
+      setSessionRowLimit(dataToUse.length !== rows.length ? dataToUse.length : undefined);
+      setSessionModel(selectedModel);
+      setSessionSourceLanguage(sourceLanguage);
+      // Clear stale results before navigation
+      await setSessionJobResultsAsync(undefined);
+      setSessionJobId(undefined);
+    } catch {
+      // Storage problems must never strand the user on this page; the dataset
+      // is still held in memory for the Translate page.
+    }
     router.push("/translate");
   }, [rowMode, customRowCount, rangeStart, rangeEnd, rows, systemPrompt, selectedModel, sourceLanguage, router]);
 
