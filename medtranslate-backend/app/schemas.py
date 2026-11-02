@@ -25,7 +25,7 @@ class JobStatus(str, Enum):
 # ---------------------------------------------------------------------------
 
 class ModelConfig(BaseModel):
-    model: str = "gpt-5.1"
+    model: str = "gpt-5.6-sol"
     system_prompt: Optional[str] = None
     temperature: float = 0.0
     max_tokens: int = 1024

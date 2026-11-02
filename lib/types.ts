@@ -197,8 +197,7 @@ export interface ModelOption {
 }
 
 export const MODEL_OPTIONS: ModelOption[] = [
-  { id: "gpt-5.1", label: "GPT 5.1", provider: "openai" },
-  { id: "gpt-5.2", label: "GPT 5.2", provider: "openai" },
+  { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "openai" },
   { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", provider: "anthropic" },
 ];
 

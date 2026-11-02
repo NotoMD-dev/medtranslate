@@ -23,7 +23,7 @@ MedTranslate uses a **two-service architecture**: a Next.js frontend deployed to
 │         │                                          │                     │
 │  ┌──────▼──────┐                          ┌────────▼────────────────┐   │
 │  │   Review     │                         │  OpenAI / Anthropic API │   │
-│  │  (review/)  │                          │  (GPT 5.x / Sonnet 5.5) │   │
+│  │  (review/)  │                          │ (GPT-5.6 Sol/Sonnet 5.5)│   │
 │  └──────┬──────┘                          └─────────────────────────┘   │
 │         │                                                                │
 │  ┌──────▼──────┐                                                        │

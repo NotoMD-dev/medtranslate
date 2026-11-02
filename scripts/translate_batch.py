@@ -6,7 +6,7 @@ Usage:
     python translate_batch.py \
         --input data/unified_translation_dataset.csv \
         --output data/results_with_translations.csv \
-        --model gpt-5.2 \
+        --model gpt-5.6-sol \
         --api openai
 """
 
@@ -17,6 +17,9 @@ import sys
 import time
 from typing import Iterator
 
+
+REASONING_EFFORT = os.environ.get("REASONING_EFFORT", "medium")
+REASONING_HEADROOM = int(os.environ.get("REASONING_HEADROOM_TOKENS", "4096"))
 
 SYSTEM_PROMPT = (
     "You are a medical interpreter. Translate the following Spanish clinical "
@@ -29,9 +32,13 @@ def translate_openai(text: str, model: str) -> str:
     """Translate using OpenAI API."""
     import openai
     client = openai.OpenAI()
-    # GPT 5.x models take max_completion_tokens and reject explicit temperature.
-    is_gpt5 = model.lower().startswith("gpt-5")
-    kwargs = {"max_completion_tokens": 1024} if is_gpt5 else {"temperature": 0, "max_tokens": 1024}
+    # Reasoning models (GPT-5.x / GPT-6 / o-series) take reasoning_effort and
+    # max_completion_tokens, and reject temperature on presence alone.
+    # Reasoning tokens count against the limit, hence the headroom.
+    if model.lower().startswith(("gpt-5", "gpt-6", "o1", "o3", "o4")):
+        kwargs = {"reasoning_effort": REASONING_EFFORT, "max_completion_tokens": 1024 + REASONING_HEADROOM}
+    else:
+        kwargs = {"temperature": 0, "max_tokens": 1024}
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -47,15 +54,16 @@ def translate_anthropic(text: str, model: str) -> str:
     """Translate using Anthropic API."""
     import anthropic
     client = anthropic.Anthropic()
-    # Sonnet 5.5 thinks by default; use the lowest thinking setting so the
-    # whole token budget goes to the translation.
-    kwargs = {"thinking": {"type": "between_tools"}} if model.lower().startswith("claude-sonnet-5-5") else {}
+    # Claude 4.6+ models: adaptive thinking at the configured effort. Thinking
+    # tokens count against max_tokens, hence the headroom. No temperature:
+    # these models reject non-default sampling parameters.
     response = client.messages.create(
         model=model,
-        max_tokens=1024,
+        max_tokens=1024 + REASONING_HEADROOM,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": text}],
-        **kwargs,
+        thinking={"type": "adaptive"},
+        extra_body={"output_config": {"effort": REASONING_EFFORT}},
     )
     if response.stop_reason == "refusal":
         raise RuntimeError("Model declined to translate this text")
@@ -72,7 +80,7 @@ def main():
     parser = argparse.ArgumentParser(description="Batch translate medical text")
     parser.add_argument("--input", required=True, help="Input CSV path")
     parser.add_argument("--output", required=True, help="Output CSV path")
-    parser.add_argument("--model", default="gpt-5.1", help="Model name (e.g. gpt-5.1, gpt-5.2, claude-sonnet-5-5)")
+    parser.add_argument("--model", default="gpt-5.6-sol", help="Model name (e.g. gpt-5.6-sol, claude-sonnet-5-5)")
     parser.add_argument(
         "--api", choices=["openai", "anthropic"], default="openai",
         help="API provider"

@@ -6,7 +6,7 @@ MedTranslate is the research instrument for a study evaluating whether large lan
 
 ## Features
 
-- **Batch translation** — Upload CSV/XLSX datasets of up to thousands of rows; translations run server-side via OpenAI GPT 5.x or Anthropic Claude Sonnet 5.5
+- **Batch translation** — Upload CSV/XLSX datasets of up to thousands of rows; translations run server-side via OpenAI GPT-5.6 Sol or Anthropic Claude Sonnet 5.5
 - **Publication-grade metrics** — Corpus BLEU (sacrebleu), sentence-level METEOR (NLTK with WordNet + stemming), BERTScore F1 (bert-score with rescaled baselines)
 - **Clinical significance grading** — Physician review workflow with a 0–3 severity scale for flagged translations (METEOR < threshold)
 - **Light / Dark theme** — Toggle between calm academic light mode and dark mode
@@ -210,7 +210,11 @@ This tool supports a corpus-based evaluation study using 6,876 sentence-aligned 
 |---|---|---|
 | `OPENAI_API_KEY` | Yes | OpenAI API key (never exposed to frontend) |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins |
-| `DEFAULT_MODEL` | No | Default model (defaults to `gpt-5.1`) |
+| `ANTHROPIC_API_KEY` | For Claude | Anthropic API key (required to run Claude Sonnet 5.5) |
+| `DEFAULT_MODEL` | No | Default model (defaults to `gpt-5.6-sol`) |
+| `OPENAI_REASONING_EFFORT` | No | Reasoning effort for GPT-5.x/GPT-6 models: `none`, `low`, `medium` (default), `high`, `xhigh`, `max` |
+| `ANTHROPIC_EFFORT` | No | Thinking effort for Claude: `low`, `medium` (default), `high`, `xhigh`, `max` |
+| `REASONING_HEADROOM_TOKENS` | No | Extra output tokens reserved for reasoning on top of `max_tokens` (default `4096`) |
 
 ## Documentation
 
@@ -233,7 +237,7 @@ This tool supports a corpus-based evaluation study using 6,876 sentence-aligned 
 | Icons | Lucide React |
 | Storage | localStorage + IndexedDB |
 | Backend | FastAPI, Python 3.11+ |
-| Translation | OpenAI Python SDK (GPT 5.1 / 5.2) and Anthropic Python SDK (Claude Sonnet 5.5) |
+| Translation | OpenAI Python SDK (GPT-5.6 Sol) and Anthropic Python SDK (Claude Sonnet 5.5) |
 | Metrics | sacrebleu, NLTK, bert-score, PyTorch |
 | Deployment | Vercel (frontend) + Render (backend) |
 
