@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+# Separates the stable refusal reason from the provider's free-text
+# explanation inside a stored error message. Mirrored in lib/metrics.ts.
+PROVIDER_EXPLANATION_MARK = ". Provider explanation: "
+
+
 class TranslationRefused(RuntimeError):
     """The model answered but produced no translation (content filter,
     explicit refusal, or an empty reply). This is model behaviour and is
@@ -335,9 +340,18 @@ async def _translate_anthropic(
                 **request_kwargs,
             )
             if response.stop_reason == "refusal":
+                # stop_details carries the safety classifier's category label
+                # and, when the API provides one, a free-text explanation.
+                # Both are kept in the error message; the explanation sits
+                # after a fixed marker so the frontend can show it on its own
+                # line and still group rows by the reason before it.
                 details = getattr(response, "stop_details", None)
                 category = getattr(details, "category", None) or "unspecified"
-                raise TranslationRefused(f"Model declined to translate this text (category: {category})")
+                explanation = (getattr(details, "explanation", None) or "").strip()
+                msg = f"Model declined to translate this text (category: {category})"
+                if explanation:
+                    msg += f"{PROVIDER_EXPLANATION_MARK}{explanation}"
+                raise TranslationRefused(msg)
             content = _anthropic_text(response).strip()
             if not content and response.stop_reason == "max_tokens":
                 raise RuntimeError(

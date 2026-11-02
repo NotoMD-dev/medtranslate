@@ -164,6 +164,17 @@ export default function MetricsPage() {
                     <tr key={`${f.kind}|${f.reason}`}>
                       <td className="wrap" style={{ fontSize: 13 }}>
                         {f.reason}
+                        {f.providerExplanations.length > 0 && (
+                          <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-primary)", lineHeight: 1.55 }}>
+                            <strong>What the provider said:</strong>
+                            <ul style={{ margin: "2px 0 0", paddingLeft: 18 }}>
+                              {f.providerExplanations.map((e) => <li key={e}>&ldquo;{e}&rdquo;</li>)}
+                            </ul>
+                            {f.count > f.providerExplanations.length && (
+                              <div style={{ color: "var(--text-muted)", marginTop: 2 }}>Open a pair on the Safety Review page to read the explanation for that row.</div>
+                            )}
+                          </div>
+                        )}
                         {(f.kind === "refusal" || f.kind === "excluded") && explainRefusal(f.reason) && (
                           <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.55 }}>{explainRefusal(f.reason)}</div>
                         )}

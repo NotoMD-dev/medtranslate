@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import MetricGuideLink from "@/components/MetricGuide";
 import { MODEL_OPTIONS, modelLabel } from "@/lib/types";
-import { summarizeMetric, countRun, isScored, applyRefusalOverrides, rowStatus, bandStyle, explainRefusal, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
+import { summarizeMetric, countRun, isScored, applyRefusalOverrides, rowStatus, bandStyle, explainRefusal, splitRefusalError, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
 import { exportHeadToHeadCSV, downloadFile } from "@/lib/csv";
 import type { JobResults, RefusalOverride, HeadToHeadJudgment, SentenceMetrics } from "@/lib/types";
 import {
@@ -516,7 +516,12 @@ function OutputPanel({
       </div>
       {failed ? (
         <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--text-muted)" }}>
-          <div style={{ fontStyle: "italic" }}>No translation. {sentence.error}</div>
+          <div style={{ fontStyle: "italic" }}>No translation. {splitRefusalError(sentence.error).reason}</div>
+          {splitRefusalError(sentence.error).providerExplanation && (
+            <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-primary)" }}>
+              <strong>What the provider said:</strong> &ldquo;{splitRefusalError(sentence.error).providerExplanation}&rdquo;
+            </div>
+          )}
           {explainRefusal(sentence.error) && (
             <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>{explainRefusal(sentence.error)}</div>
           )}

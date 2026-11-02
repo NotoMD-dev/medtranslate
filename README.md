@@ -34,7 +34,7 @@ All translation and metric computation occurs server-side. The frontend never ca
 
 ```
 medtranslate/
-├── app/                          # Next.js pages (Upload, Translate, Metrics, Safety Review, Compare, About)
+├── app/                          # Next.js pages (Upload, Translate, Metrics, Compare, Safety Review, About)
 │   ├── layout.tsx                # Root layout with metadata and fonts
 │   ├── globals.css               # Global styles, animations, CSS variables
 │   ├── page.tsx                  # Upload page (with demo dataset loader)

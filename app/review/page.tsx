@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import Header from "@/components/Header";
 import { CLINICAL_GRADES, REFERENCE_FLAG_REASONS } from "@/lib/types";
 import { exportReviewCSV, downloadFile } from "@/lib/csv";
-import { DEFAULT_REVIEW_THRESHOLD, isCompleted, isRefused, isExcluded, applyRefusalOverrides, explainRefusal } from "@/lib/metrics";
+import { DEFAULT_REVIEW_THRESHOLD, isCompleted, isRefused, isExcluded, applyRefusalOverrides, explainRefusal, splitRefusalError } from "@/lib/metrics";
 import {
   getSessionJobResultsAsync,
   getSessionGradesAsync,
@@ -406,7 +406,12 @@ export default function ReviewPage() {
                   ) : isRefused(currentPair) ? (
                     <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--danger)", padding: 12, background: "var(--danger-light)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-xs)" }}>
                       <strong>No translation. The model refused or returned nothing.</strong>
-                      <div style={{ marginTop: 6, fontSize: 12 }}>{currentPair.error}</div>
+                      <div style={{ marginTop: 6, fontSize: 12 }}>{splitRefusalError(currentPair.error).reason}</div>
+                      {splitRefusalError(currentPair.error).providerExplanation && (
+                        <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-primary)" }}>
+                          <strong>What the provider said:</strong> &ldquo;{splitRefusalError(currentPair.error).providerExplanation}&rdquo;
+                        </div>
+                      )}
                       {explainRefusal(currentPair.error) && (
                         <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)" }}>{explainRefusal(currentPair.error)}</div>
                       )}

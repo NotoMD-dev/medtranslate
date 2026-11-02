@@ -113,14 +113,52 @@ export function countRun(sentences: SentenceMetrics[]): RunCounts {
 }
 
 /** Group failed rows by error message, most frequent first. */
-export function failureReasons(sentences: SentenceMetrics[]): { reason: string; kind: string; count: number }[] {
-  const map = new Map<string, { reason: string; kind: string; count: number }>();
+/**
+ * Separates the stable refusal reason from the provider's free-text
+ * explanation inside a stored error message. Mirrored in the backend
+ * (medtranslate-backend/app/translate.py).
+ */
+const PROVIDER_EXPLANATION_MARK = ". Provider explanation: ";
+
+/**
+ * Split a stored error message into the reason (stable across rows, used
+ * for grouping) and the provider's own explanation of the refusal, when the
+ * API returned one. Older rows have no explanation.
+ */
+export function splitRefusalError(error: string | null | undefined): { reason: string; providerExplanation: string | null } {
+  if (!error) return { reason: "", providerExplanation: null };
+  const i = error.indexOf(PROVIDER_EXPLANATION_MARK);
+  if (i === -1) return { reason: error, providerExplanation: null };
+  const explanation = error.slice(i + PROVIDER_EXPLANATION_MARK.length).trim();
+  return { reason: error.slice(0, i), providerExplanation: explanation || null };
+}
+
+export interface FailureReason {
+  reason: string;
+  kind: string;
+  count: number;
+  /** Distinct provider explanations seen for this reason (at most a few). */
+  providerExplanations: string[];
+}
+
+const MAX_EXPLANATIONS_PER_REASON = 3;
+
+export function failureReasons(sentences: SentenceMetrics[]): FailureReason[] {
+  const map = new Map<string, FailureReason>();
   for (const s of sentences) {
     if (!s.error) continue;
     const kind = isRefused(s) ? "refusal" : isExcluded(s) ? "excluded" : "infrastructure";
-    const key = `${kind}|${s.error}`;
-    const entry = map.get(key) ?? { reason: s.error, kind, count: 0 };
+    const { reason, providerExplanation } = splitRefusalError(s.error);
+    const key = `${kind}|${reason}`;
+    const entry = map.get(key) ?? { reason, kind, count: 0, providerExplanations: [] };
     entry.count += 1;
+    if (
+      providerExplanation &&
+      entry.providerExplanations.length < MAX_EXPLANATIONS_PER_REASON &&
+      !entry.providerExplanations.includes(providerExplanation)
+    ) {
+      entry.providerExplanations.push(providerExplanation);
+    }
     map.set(key, entry);
   }
   return [...map.values()].sort((a, b) => b.count - a.count);
