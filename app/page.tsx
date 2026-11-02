@@ -32,6 +32,20 @@ import {
 } from "@/lib/session";
 import type { TranslationPair } from "@/lib/types";
 
+interface DemoDataset {
+  code: string;
+  label: string;
+  path: string;
+  fileName: string;
+  rows: number;
+}
+
+/** Small synthetic datasets bundled in public/demo (no real patient data). */
+const DEMO_DATASETS: DemoDataset[] = [
+  { code: "es", label: "Spanish demo", path: "/demo/medtranslate_demo_spanish.csv", fileName: "medtranslate_demo_spanish.csv", rows: 15 },
+  { code: "fr", label: "French demo", path: "/demo/medtranslate_demo_french.csv", fileName: "medtranslate_demo_french.csv", rows: 15 },
+];
+
 export default function UploadPage() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -50,6 +64,7 @@ export default function UploadPage() {
   const [customRowCount, setCustomRowCount] = useState<string>("");
   const [rangeStart, setRangeStart] = useState<string>("");
   const [rangeEnd, setRangeEnd] = useState<string>("");
+  const [loadingDemo, setLoadingDemo] = useState<string | null>(null);
 
   // Restore dataset from session on mount so users can re-use the same dataset
   // for head-to-head model comparison without re-uploading.
@@ -111,6 +126,36 @@ export default function UploadPage() {
       }
     },
     [systemPrompt, currentLang.columnName]
+  );
+
+  // Load one of the bundled synthetic demo datasets (public/demo/*.csv) so a
+  // first-time user can try the whole pipeline without a file of their own.
+  const loadDemo = useCallback(
+    async (demo: DemoDataset) => {
+      setError(null);
+      setLoadingDemo(demo.code);
+      try {
+        const resp = await fetch(demo.path);
+        if (!resp.ok) throw new Error(`Could not load demo dataset (${resp.status})`);
+        const text = await resp.text();
+        const lang = SOURCE_LANGUAGES.find((l) => l.code === demo.code) || DEFAULT_SOURCE_LANGUAGE;
+        const parsed = parseCSV(text, lang.columnName);
+        const prompt = buildSystemPrompt(lang.label);
+        setSourceLanguage(lang.code);
+        setSystemPrompt(prompt);
+        setRows(parsed);
+        setFileName(demo.fileName);
+        pendingSaveRef.current = setSessionDataAsync(parsed).catch(() => {});
+        setSessionPrompt(prompt);
+        setSessionCsvFileName(demo.fileName);
+        setSessionSourceLanguage(lang.code);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setLoadingDemo(null);
+      }
+    },
+    []
   );
 
   const handleUpload = useCallback(
@@ -253,6 +298,7 @@ export default function UploadPage() {
         }}
       >
         {rows.length === 0 ? (
+          <>
           <div
             className="drop-zone"
             onClick={() => fileRef.current?.click()}
@@ -281,6 +327,40 @@ export default function UploadPage() {
               Supports .csv and .xlsx up to 50MB
             </div>
           </div>
+          <div className="demo-row" style={{ marginTop: 20, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+              No dataset yet? Try a demo:
+            </span>
+            {DEMO_DATASETS.map((d) => (
+              <button
+                key={d.code}
+                onClick={() => loadDemo(d)}
+                disabled={loadingDemo !== null}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "var(--radius-xs)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: "var(--font)",
+                  cursor: loadingDemo ? "wait" : "pointer",
+                  background: "var(--accent-soft)",
+                  color: "var(--accent-text)",
+                  border: "1px solid var(--accent)",
+                  opacity: loadingDemo && loadingDemo !== d.code ? 0.6 : 1,
+                }}
+              >
+                {loadingDemo === d.code ? "Loading…" : `${d.label} (${d.rows} rows)`}
+              </button>
+            ))}
+            <a
+              href="/demo/medtranslate_demo_spanish.csv"
+              download
+              style={{ fontSize: 12, color: "var(--text-muted)", textDecoration: "underline", textUnderlineOffset: 3 }}
+            >
+              Download the CSV to see the format
+            </a>
+          </div>
+          </>
         ) : (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

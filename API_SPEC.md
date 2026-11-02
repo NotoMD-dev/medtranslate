@@ -149,10 +149,13 @@ Retrieve complete results after a job finishes.
     "model": "gpt-5.6-sol",
     "system_prompt": "You are a medical interpreter...",
     "temperature": 0.0,
-    "max_tokens": 1024
+    "max_tokens": 1024,
+    "reasoning_effort": "medium"
   }
 }
 ```
+
+`reasoning_effort` is the thinking/reasoning effort the backend actually applied to the run (`OPENAI_REASONING_EFFORT` for GPT-5.x reasoning models, `ANTHROPIC_EFFORT` for Claude 4.6+ models). It is `null` for models that take no effort setting.
 
 ### Key Fields
 

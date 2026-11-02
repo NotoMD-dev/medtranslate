@@ -31,6 +31,10 @@ class ModelConfig(BaseModel):
     max_tokens: int = 1024
     compute_bertscore: bool = False  # opt-in: avoids ~400MB torch load
     metrics_only: bool = False  # skip translation, only compute metrics (e.g. BERTScore)
+    # Reasoning/thinking effort actually applied to this job's model (None when
+    # the model does not take an effort setting). Recorded so results stay
+    # reproducible and the UI can show how the run was configured.
+    reasoning_effort: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

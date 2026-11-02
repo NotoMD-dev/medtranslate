@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/review", label: "Review" },
   { href: "/metrics", label: "Metrics" },
   { href: "/compare", label: "Compare" },
+  { href: "/about", label: "About" },
 ];
 
 export default function Header() {

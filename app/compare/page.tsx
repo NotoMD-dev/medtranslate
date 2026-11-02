@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/Header";
+import MetricGuideLink from "@/components/MetricGuide";
 import { MODEL_OPTIONS } from "@/lib/types";
 import { summarizeMetric } from "@/lib/metrics";
 import type { JobResults } from "@/lib/types";
@@ -10,6 +11,7 @@ import { getSessionComparisonResultsAsync } from "@/lib/session";
 interface ModelSummary {
   modelId: string;
   label: string;
+  effort: string | null;
   bleu: number | null;
   meteorMean: number | null;
   meteorStd: number | null;
@@ -34,6 +36,7 @@ function summarize(results: JobResults): ModelSummary {
   return {
     modelId: results.translation_config?.model || "unknown",
     label: getModelLabel(results.translation_config?.model || "unknown"),
+    effort: results.translation_config?.reasoning_effort ?? null,
     bleu: results.corpus_metrics?.overall.bleu_score ?? null,
     meteorMean: meteorVals.length > 0 ? meteorStats.mean : null,
     meteorStd: meteorVals.length > 0 ? meteorStats.std : null,
@@ -44,19 +47,23 @@ function summarize(results: JobResults): ModelSummary {
   };
 }
 
-function winnerBadge(val: "A" | "B" | "tie") {
+type Winner = "A" | "B" | "tie" | "none";
+
+function winnerBadge(val: Winner) {
   const colors = {
     A: { bg: "var(--accent-soft)", color: "var(--accent-text)", border: "var(--accent)" },
     B: { bg: "#F3E8FF", color: "#7C3AED", border: "#C4B5FD" },
     tie: { bg: "var(--bg-inset)", color: "var(--text-muted)", border: "var(--border)" },
+    none: { bg: "transparent", color: "var(--text-muted)", border: "var(--border-subtle)" },
   };
   const c = colors[val];
+  const text = val === "tie" ? "Tie" : val === "none" ? "Not computed" : `Model ${val}`;
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100,
       fontSize: 11, fontWeight: 600, background: c.bg, color: c.color, border: `1px solid ${c.border}`,
     }}>
-      {val === "tie" ? "Tie" : `Model ${val}`}
+      {text}
     </span>
   );
 }
@@ -87,9 +94,10 @@ export default function ComparePage() {
     [modelB, comparisonData]
   );
 
-  // Determine winners per metric (higher is better)
-  function getWinner(a: number | null, b: number | null): "A" | "B" | "tie" {
-    if (a == null && b == null) return "tie";
+  // Determine winners per metric (higher is better). A metric missing from
+  // both runs (e.g. BERTScore left off) is "none" and stays out of the tally.
+  function getWinner(a: number | null, b: number | null): Winner {
+    if (a == null && b == null) return "none";
     if (a == null) return "B";
     if (b == null) return "A";
     if (Math.abs(a - b) < 0.001) return "tie";
@@ -127,9 +135,11 @@ export default function ComparePage() {
     },
   ] : [];
 
-  // Count wins
+  // Count wins (metrics not computed for either run are excluded)
   const winsA = metrics.filter((m) => m.winner === "A").length;
   const winsB = metrics.filter((m) => m.winner === "B").length;
+  const ties = metrics.filter((m) => m.winner === "tie").length;
+  const notComputed = metrics.filter((m) => m.winner === "none").map((m) => m.name);
 
   return (
     <div className="page-container">
@@ -140,9 +150,10 @@ export default function ComparePage() {
         <h1 style={{ fontSize: 32, fontWeight: 700, letterSpacing: "-0.025em", color: "var(--text-primary)", marginBottom: 6, lineHeight: 1.2 }}>
           Head-to-Head Comparison
         </h1>
-        <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
+        <p style={{ fontSize: 15, color: "var(--text-muted)", margin: "0 0 10px" }}>
           Compare translation quality metrics between two model runs.
         </p>
+        <MetricGuideLink />
       </div>
 
       {availableModels.length < 2 ? (
@@ -222,8 +233,13 @@ export default function ComparePage() {
               <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
                 {summaryA.label}: {winsA} win{winsA !== 1 ? "s" : ""} &middot;{" "}
                 {summaryB.label}: {winsB} win{winsB !== 1 ? "s" : ""} &middot;{" "}
-                {metrics.filter((m) => m.winner === "tie").length} tie{metrics.filter((m) => m.winner === "tie").length !== 1 ? "s" : ""}
+                {ties} tie{ties !== 1 ? "s" : ""}
               </div>
+              {notComputed.length > 0 && (
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6 }}>
+                  {notComputed.join(", ")} was not computed for these runs and is not counted. Enable &ldquo;Include BERTScore&rdquo; on the Translate page to add it.
+                </div>
+              )}
             </div>
           )}
 
@@ -236,9 +252,15 @@ export default function ComparePage() {
                     <th>Metric</th>
                     <th style={{ textAlign: "center" }}>
                       <span style={{ color: "var(--accent-text)" }}>{summaryA.label}</span>
+                      {summaryA.effort && (
+                        <span style={{ display: "block", fontSize: 10, fontWeight: 500, letterSpacing: 0, textTransform: "none", color: "var(--text-muted)" }}>effort: {summaryA.effort}</span>
+                      )}
                     </th>
                     <th style={{ textAlign: "center" }}>
                       <span style={{ color: "#7C3AED" }}>{summaryB.label}</span>
+                      {summaryB.effort && (
+                        <span style={{ display: "block", fontSize: 10, fontWeight: 500, letterSpacing: 0, textTransform: "none", color: "var(--text-muted)" }}>effort: {summaryB.effort}</span>
+                      )}
                     </th>
                     <th style={{ textAlign: "center" }}>Winner</th>
                   </tr>
