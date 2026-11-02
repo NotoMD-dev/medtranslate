@@ -16,6 +16,20 @@ MedTranslate computes three standard machine translation metrics to quantify how
 
 All metrics are computed in the FastAPI backend (`medtranslate-backend/app/metrics.py`). The frontend displays values exactly as returned by the backend JSON.
 
+A plain-language explanation of the three metrics, written for readers without a machine-translation background, is available in the app behind the "What do these scores mean?" link on the Metrics and Compare pages and on the About page (`components/MetricGuide.tsx`). This document is the technical reference.
+
+### Which rows are scored
+
+Only **completed** rows are scored: rows with a non-empty LLM translation and a non-empty `english_reference`. Rows whose translation failed (provider error after retries, refusal, empty output) carry `error: "Translation failed"`, have `meteor` and `bertscore_f1` set to `null`, and are excluded from corpus BLEU. They are therefore invisible to every metric and to the review queue; check the `failed_rows` count in the job status or the "Completed Pairs" row on the Compare page before interpreting a run.
+
+### How translations are produced
+
+- Each unique source text in a job is translated once and the result is fanned out to duplicate rows.
+- The backend keeps a SQLite translation cache keyed on `(model, system_prompt, temperature, reasoning_effort, source_text)`. A re-run with identical settings returns cached text without calling the provider, so identical output across re-runs is not evidence of model determinism.
+- The reasoning/thinking effort applied (`OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT`, default `medium` for both) is recorded as `translation_config.reasoning_effort` in the results.
+- Temperature is **not** sent to GPT-5.x reasoning models or Claude 4.6+ models; both families reject the parameter. The `temperature: 0.0` in `translation_config` is kept for the cache key and for any older model that still accepts it. Reasoning models are not guaranteed to be deterministic.
+- The system prompt asks the model to translate but does not instruct it to return only the translation. A model that adds a preamble ("Here is the translation:") or a trailing note lowers BLEU sharply (precision-based) while lowering METEOR only modestly (recall-weighted). Inspect raw outputs in the Review panel before attributing a BLEU gap to translation quality.
+
 ---
 
 ## Corpus BLEU (sacrebleu)
@@ -133,6 +147,18 @@ Automated metrics cannot reliably detect clinically dangerous translation errors
 | **1** | Minor linguistic error | Amber (`#f59e0b`) | Stylistic or grammatical difference with no change in clinical meaning |
 | **2** | Moderate error | Orange (`#f97316`) | Potential for confusion, unlikely to change clinical management |
 | **3** | Clinically significant | Red (`#ef4444`) | Could alter diagnosis, treatment, or disposition |
+
+### What Triggers Clinician Review
+
+A pair enters the review queue when **all** of the following hold:
+
+| Condition | Where it is enforced |
+|---|---|
+| The row has an LLM translation and no `error` | `app/review/page.tsx` (`completed` filter) |
+| The row has a METEOR score (requires an `english_reference`) | backend scoring; `meteor != null` |
+| METEOR is **strictly below** the threshold | Review page threshold box, default `0.4` |
+
+Nothing else triggers review. BLEU is corpus-level and cannot flag a sentence; BERTScore is optional and is not consulted. The threshold entered on the Review page is not persisted and is not shared with the Metrics page, whose "Flagged for Review" count always uses `0.4`. The threshold is a triage heuristic: it concentrates physician time on the sentences most likely to differ from the reference, but a pair above the threshold can still contain a clinically significant error (a dropped negation moves METEOR very little). Reviewers may also use the "jump to pair" box to grade any flagged pair and the reference-flag control to mark a weak reference.
 
 ### Review Workflow
 

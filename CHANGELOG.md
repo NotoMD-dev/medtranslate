@@ -16,6 +16,16 @@ All notable changes to the MedTranslate project are documented in this file. The
 ### Fixed
 
 - **Compare tally**: a metric that was not computed for either run (typically BERTScore) was counted as a "tie"; it is now shown as "Not computed" and left out of the win/tie counts, with a hint on how to enable it
+- **Translation cache ignored reasoning effort**: the SQLite cache key was `(model, system_prompt, temperature, source_text)`, so changing `OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT` and re-running the same file silently reused translations produced at the old effort. The effort is now part of the key, and the effort recorded on the job is taken from the same helper that the translator uses, so results and cache agree. Existing cache rows are orphaned (one extra provider call per unique text on the next run)
+
+### Documentation
+
+- **ARCHITECTURE.md**: directory structure (Compare/About pages, MetricGuide, `public/demo/`, `bertscore_worker.py`); pipeline diagram corrected to the real phase order (METEOR → BLEU → BERTScore) with dedupe and cache; new "What Triggers Clinician Review", "Job Store: Memory plus SQLite", "Translation Cache", and "Reasoning Effort Is Recorded" sections replacing the stale "In-Memory Job Store (MVP)"
+- **SECURITY.md**: the "No Persistent PHI Storage" section was wrong; the backend persists jobs and a translation cache to SQLite. Rewritten to describe what is stored, retention, and how to run memory-only; added a note that `public/demo/` is public and must stay synthetic; LLM-provider section now covers Anthropic
+- **METRICS_VALIDATION.md**: which rows are scored, how translations are produced (dedupe, cache, effort, temperature not sent, preamble caveat), and an explicit "What Triggers Clinician Review" table
+- **DATA_SCHEMA.md**: `reasoning_effort` on `ModelConfig`; generalized source-language column; demo files
+- **SYSTEMS_DESIGN.md**: information architecture now lists Compare and About; `MetricGuide` component spec (including the portal rationale); Upload page demo controls; Compare and About page specifications
+- **medtranslate-backend/README.md**: project structure, source-column detection, recorded translation settings, translation cache, additional environment variables
 
 ---
 

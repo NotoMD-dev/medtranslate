@@ -38,12 +38,13 @@ docker run -p 8000:8000 -e OPENAI_API_KEY=sk-... medtranslate-backend
 medtranslate-backend/
 ├── app/
 │   ├── main.py           # FastAPI app, CORS, all endpoints
-│   ├── jobs.py           # In-memory job store, async background execution
-│   ├── metrics.py        # SacreBLEU corpus BLEU, NLTK METEOR, BERTScore
-│   ├── translate.py      # OpenAI translation with retry and rate-limit handling
+│   ├── jobs.py           # Job store (memory + SQLite), translation cache, async execution
+│   ├── metrics.py        # SacreBLEU corpus BLEU, NLTK METEOR, BERTScore (via subprocess)
+│   ├── translate.py      # OpenAI / Anthropic translation with retry, effort handling
 │   ├── schemas.py        # Pydantic request/response models
 │   ├── config.py         # Environment variable configuration
 │   └── __init__.py
+├── bertscore_worker.py   # BERTScore subprocess entry point
 ├── worker.py             # Standalone worker entry point
 ├── requirements.txt      # Python dependencies
 ├── Dockerfile            # Docker build for Render deployment
@@ -62,7 +63,15 @@ medtranslate-backend/
 
 ### File Upload
 
-The `POST /v1/jobs` endpoint accepts both CSV and XLSX files via multipart form upload. XLSX files are parsed server-side using `openpyxl`. The required column is `spanish_source`.
+The `POST /v1/jobs` endpoint accepts both CSV and XLSX files via multipart form upload. XLSX files are parsed server-side using `openpyxl`. The source column is detected from the known language columns (`spanish_source`, `french_source`, …, or `source_text`) or passed explicitly as `source_column`.
+
+### Translation Settings Recorded With Results
+
+`GET /v1/jobs/{id}/results` returns `translation_config` with the model, system prompt, `temperature`, `max_tokens`, and `reasoning_effort`. `reasoning_effort` is the value of `OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT` that was in force when the job ran (`null` for models that take no effort setting). Temperature is not forwarded to current GPT-5.x or Claude models; both reject it.
+
+### Translation Cache
+
+Unique source texts are translated once per job, and every translation is stored in a SQLite `translation_cache` table keyed on `(model, system_prompt, temperature, reasoning_effort, source_text)`. Later jobs with the same key reuse the stored text and make no provider call. Change any part of the key (for example the effort environment variable) to force fresh translations, or delete the table rows.
 
 ### Job Lifecycle
 
@@ -83,6 +92,10 @@ queued → running → complete
 | `OPENAI_REASONING_EFFORT` | No | `medium` | `reasoning_effort` for GPT-5.x/GPT-6 models (`none`, `low`, `medium`, `high`, `xhigh`, `max`) |
 | `ANTHROPIC_EFFORT` | No | `medium` | `output_config.effort` for Claude 4.6+ models (`low`, `medium`, `high`, `xhigh`, `max`) |
 | `REASONING_HEADROOM_TOKENS` | No | `4096` | Extra output tokens reserved for reasoning on top of `max_tokens` |
+| `DATABASE_PATH` | No | `/data/medtranslate.db` | SQLite file for job persistence and the translation cache; memory-only if unwritable |
+| `MAX_CONCURRENT_JOBS` | No | `2` | Jobs executed simultaneously |
+| `MAX_CONCURRENT_TRANSLATIONS` | No | `4` | Provider calls in flight per job |
+| `BERTSCORE_CHUNK_SIZE` | No | `256` | Rows per BERTScore progress chunk (clamped to 32–512) |
 
 ## Metrics
 

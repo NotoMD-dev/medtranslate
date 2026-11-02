@@ -65,15 +65,23 @@ medtranslate/
 │   │   └── page.tsx              # "/translate" — Job submission and result display
 │   ├── review/
 │   │   └── page.tsx              # "/review" — Clinical safety review
-│   └── metrics/
-│       └── page.tsx              # "/metrics" — Aggregate metrics dashboard
+│   ├── metrics/
+│   │   └── page.tsx              # "/metrics" — Aggregate metrics dashboard
+│   ├── compare/
+│   │   └── page.tsx              # "/compare" — Head-to-head comparison of two model runs
+│   └── about/
+│       └── page.tsx              # "/about" — Purpose, pipeline, models/effort, score guide
 │
 ├── components/                   # Shared React components
 │   ├── Header.tsx                # Top navigation bar with workflow tabs and theme toggle
-│   ├── MetricsCard.tsx           # Metric value display card
+│   ├── MetricGuide.tsx           # "What do these scores mean?" modal + explainer text
 │   ├── PairDetail.tsx            # Three-column translation detail panel
-│   ├── GradeSelector.tsx         # Clinical significance grade buttons (0–3)
-│   └── StatusPill.tsx            # Row status badge
+│   └── GradeSelector.tsx         # Clinical significance grade buttons (0–3)
+│
+├── public/demo/                  # Static assets served by Next.js
+│   ├── medtranslate_demo_spanish.csv   # Synthetic 15-row Spanish demo (no PHI)
+│   ├── medtranslate_demo_french.csv    # Synthetic 15-row French demo (no PHI)
+│   └── README.md
 │
 ├── src/design-system/            # Design tokens and UI primitives
 │   ├── tokens.css                # CSS custom properties (light mode defaults)
@@ -101,11 +109,12 @@ medtranslate/
 ├── medtranslate-backend/         # FastAPI backend service
 │   ├── app/
 │   │   ├── main.py               # FastAPI app, CORS, endpoints
-│   │   ├── jobs.py               # Job store, background execution
-│   │   ├── metrics.py            # SacreBLEU, NLTK METEOR, BERTScore
-│   │   ├── translate.py          # OpenAI translation with retry
+│   │   ├── jobs.py               # Job store (memory + SQLite), translation cache, background execution
+│   │   ├── metrics.py            # SacreBLEU, NLTK METEOR, BERTScore (subprocess)
+│   │   ├── translate.py          # OpenAI / Anthropic translation with retry, effort handling
 │   │   ├── schemas.py            # Pydantic request/response models
 │   │   └── config.py             # Environment variable configuration
+│   ├── bertscore_worker.py       # BERTScore subprocess (keeps torch out of the API process)
 │   ├── worker.py                 # Standalone worker entry point
 │   ├── requirements.txt          # Python dependencies
 │   ├── Dockerfile                # Docker build for Render deployment
@@ -149,14 +158,16 @@ TranslationPair[]
     │
     ▼
 POST /v1/jobs (multipart/form-data)
-    │                          ┌─────────────────────────┐
-    │                          │ 1. Parse CSV/XLSX        │
-    │                          │ 2. Translate (OpenAI)    │
-    │                          │ 3. METEOR per sentence   │
-    │                          │ 4. BERTScore batch       │
-    │                          │ 5. Corpus BLEU           │
-    │                          │ 6. Store results         │
-    │                          └─────────┬───────────────┘
+    │                          ┌──────────────────────────────────┐
+    │                          │ 1. Parse CSV/XLSX                 │
+    │                          │ 2. Translate (OpenAI / Anthropic) │
+    │                          │    - dedupe identical source text │
+    │                          │    - SQLite translation cache     │
+    │                          │ 3. METEOR per sentence            │
+    │                          │ 4. Corpus BLEU (overall + source) │
+    │                          │ 5. BERTScore batch (opt-in)       │
+    │                          │ 6. Record library versions, store │
+    │                          └─────────┬────────────────────────┘
 Translate Page                           │
 ──────────────                           │
 GET /v1/jobs/{id} (polling 2s) ────────>│
@@ -166,15 +177,27 @@ GET /v1/jobs/{id} (polling 2s) ────────>│
 GET /v1/jobs/{id}/results ──────────────>│
     ◄── { corpus_metrics,    ◄───────────┘
           sentence_metrics,
-          library_versions }
+          library_versions,
+          translation_config (model, prompt, reasoning_effort) }
     │
     ▼
 IndexedDB (JobResults) + localStorage
     │
     ├──> Translate page (results table)
     ├──> Metrics page (aggregate dashboard)
-    └──> Review page (flagged pairs for grading)
+    ├──> Review page (flagged pairs for grading)
+    └──> Compare page (one saved result set per model id)
 ```
+
+### What Triggers Clinician Review
+
+The review queue is derived entirely in the browser from the backend's per-sentence results:
+
+1. A row must be **completed**: it has an `llm_english_translation` and no `error`. Rows whose translation failed (API error, refusal, empty output) are excluded from the queue and from all metrics; they are only visible in the Translate table and the "Completed Pairs" row on the Compare page.
+2. The row's **METEOR score must be below the threshold**. The Review page threshold defaults to `0.4` and can be changed in the threshold box; the Metrics page "Flagged for Review" count always uses `0.4`.
+3. Rows with no `english_reference` have no METEOR score and are never flagged.
+
+BLEU and BERTScore do not affect flagging. The threshold is a triage heuristic, not a safety guarantee: a translation can score above it and still contain a clinically significant error.
 
 ### What the Frontend Does NOT Do
 
@@ -220,9 +243,21 @@ All translation calls and metric computations happen server-side in the Python b
 
 The backend uses async background tasks to process jobs without blocking the API thread. This supports datasets with thousands of rows. Jobs can be cancelled via `POST /v1/jobs/{id}/cancel`.
 
-### In-Memory Job Store (MVP)
+### Job Store: Memory plus SQLite
 
-Jobs are stored in memory. For production scale-out, replace with Redis or a database-backed store.
+Active jobs live in memory, and every status change and final result is also written to SQLite (`DATABASE_PATH`, default `/data/medtranslate.db`). This lets a job survive a restart and lets a second backend instance answer polls for a job it is not executing. Terminal jobs older than seven days are deleted at startup. If the database path is not writable the backend falls back to memory only.
+
+### Translation Cache
+
+Each unique source text is translated once per job (identical rows share one API call), and the result is stored in a SQLite `translation_cache` table keyed on `(model, system_prompt, temperature, reasoning_effort, source_text)`. A later job with the same key reuses the stored translation instead of calling the provider. Consequences for study design:
+
+- Re-running the same file with the same model and settings returns byte-identical translations. This is a cache hit, not evidence that the model is deterministic.
+- Changing the prompt, the model, or the effort setting produces a new key and fresh API calls.
+- To force fresh translations with unchanged settings, delete the `translation_cache` rows or point `DATABASE_PATH` at a new file.
+
+### Reasoning Effort Is Recorded
+
+The effort actually sent to the provider (`OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT`, both `medium` by default) is stored on the job as `translation_config.reasoning_effort`, returned with results, and shown on the Compare page. Temperature is not sent to either current model family (both reject it); the `temperature: 0.0` in the config is retained for the cache key and for older models.
 
 ### Client-Side Clinical Grading
 

@@ -31,7 +31,7 @@ from app.schemas import (
     ModelConfig,
     SentenceMetrics,
 )
-from app.translate import translate_text
+from app.translate import effective_reasoning_effort, translate_text
 
 logger = logging.getLogger(__name__)
 
@@ -343,9 +343,20 @@ def _db_cleanup_old_jobs(days: int = 7) -> int:
 # Translation cache helpers
 # ---------------------------------------------------------------------------
 
-def _cache_key(model: str, system_prompt: str, temperature: float, source_text: str) -> str:
-    """Build a deterministic cache key from the translation parameters."""
-    raw = f"{model}|{system_prompt}|{temperature}|{source_text}"
+def _cache_key(
+    model: str,
+    system_prompt: str,
+    temperature: float,
+    source_text: str,
+    reasoning_effort: Optional[str] = None,
+) -> str:
+    """Build a deterministic cache key from the translation parameters.
+
+    The reasoning/thinking effort is part of the key: the same model and
+    prompt at a different effort is a different experiment, so a run at
+    ``high`` must never be served translations produced at ``medium``.
+    """
+    raw = f"{model}|{system_prompt}|{temperature}|{reasoning_effort or ''}|{source_text}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:64]
 
 
@@ -566,6 +577,12 @@ async def execute_job(job_id: str) -> None:
         max_tokens = job.model_config.max_tokens
         compute_bertscore = getattr(job.model_config, "compute_bertscore", False)
         metrics_only = getattr(job.model_config, "metrics_only", False)
+        # Effort that translate_text() will actually apply for this model.
+        # Recorded on the job (so results say how they were produced) and
+        # folded into the translation-cache key.
+        reasoning_effort = effective_reasoning_effort(model)
+        if getattr(job.model_config, "reasoning_effort", None) != reasoning_effort:
+            job.model_config.reasoning_effort = reasoning_effort
 
         # Tunable concurrency controls
         MAX_CONCURRENT_TRANSLATIONS = int(
@@ -618,7 +635,7 @@ async def execute_job(job_id: str) -> None:
             cache_hits = 0
             for text_key in list(unique_texts.keys()):
                 try:
-                    ck = _cache_key(model, system_prompt, temperature, text_key)
+                    ck = _cache_key(model, system_prompt, temperature, text_key, reasoning_effort)
                     cached = await asyncio.to_thread(_cache_get, ck)
                     if cached is not None:
                         unique_texts[text_key] = cached
@@ -650,7 +667,7 @@ async def execute_job(job_id: str) -> None:
                         )
                         # Write to cache (only for deterministic temperature=0)
                         try:
-                            ck = _cache_key(model, system_prompt, temperature, text)
+                            ck = _cache_key(model, system_prompt, temperature, text, reasoning_effort)
                             await asyncio.to_thread(_cache_set, ck, translation, temperature)
                         except Exception:
                             pass  # cache write failure is non-critical

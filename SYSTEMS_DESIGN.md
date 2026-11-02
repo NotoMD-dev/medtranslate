@@ -41,21 +41,23 @@ MedTranslate targets clinical researchers and physician reviewers. The visual la
 
 ## Information Architecture
 
-The application follows a strict four-step linear workflow, enforced by the navigation bar:
+The application follows a four-step linear workflow, with two supporting pages, all reachable from the navigation bar:
 
 ```
-┌──────────┐     ┌─────────────┐     ┌──────────┐     ┌──────────┐
-│  Upload   │ ──> │  Translate   │ ──> │  Review   │ ──> │  Metrics  │
-│   (/)     │     │ (/translate) │     │ (/review) │     │ (/metrics)│
-└──────────┘     └─────────────┘     └──────────┘     └──────────┘
+┌──────────┐     ┌─────────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌─────────┐
+│  Upload   │ ──> │  Translate   │ ──> │  Review   │ ──> │  Metrics  │     │ Compare  │     │  About  │
+│   (/)     │     │ (/translate) │     │ (/review) │     │ (/metrics)│     │(/compare)│     │ (/about)│
+└──────────┘     └─────────────┘     └──────────┘     └──────────┘     └──────────┘     └─────────┘
 ```
 
 | Step | Route | Purpose |
 |---|---|---|
-| **Upload** | `/` | Import dataset, configure model, set system prompt |
+| **Upload** | `/` | Import dataset (or load a bundled demo), choose source language and model, view system prompt |
 | **Translate** | `/translate` | Submit job, monitor progress, view per-row results |
 | **Review** | `/review` | Physician grades flagged translations (METEOR < threshold) |
 | **Metrics** | `/metrics` | Aggregate dashboard — corpus BLEU, METEOR/BERTScore stats, grade distribution |
+| **Compare** | `/compare` | Head-to-head of two saved model runs, with reasoning effort shown per model |
+| **About** | `/about` | Purpose, pipeline walkthrough, models and effort, plain-language score guide, grading scale |
 
 Navigation is rendered by `components/Header.tsx`. The active tab uses an accent-colored bottom border; inactive tabs use muted text.
 
@@ -386,7 +388,7 @@ React context provider for light/dark mode toggling.
 
 #### Header
 
-Top navigation bar. Renders four workflow tabs (Upload, Translate, Review, Metrics) and a theme toggle button.
+Top navigation bar. Renders six tabs (Upload, Translate, Review, Metrics, Compare, About) and a theme toggle button.
 
 - Active tab: `color: --accent-text`, `border-bottom: 2px solid --accent`
 - Inactive tab: `color: --text-muted`, `border-bottom: 2px solid transparent`
@@ -439,16 +441,18 @@ Expanded detail panel for a single translation pair. Shows three columns of text
 - Metric values displayed inline with label
 - GradeSelector rendered on the right
 
-#### MetricsCard
+#### MetricGuide
 
-Standalone metric display used on the Metrics page.
+`components/MetricGuide.tsx`. Exports a default `MetricGuideLink` (an inline "What do these scores mean?" link with a circled "?" glyph) and the explainer data (`METRIC_EXPLAINERS`, `METRIC_GUIDE_NOTES`) reused by the About page.
 
-| Prop | Type | Description |
-|---|---|---|
-| `label` | string | Uppercase label |
-| `value` | `number \| null` | Metric value (displays `.toFixed(3)` or "--") |
-| `description` | string? | Explanatory text |
-| `count` | number? | Sample size shown as "n = X" |
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `label` | string | `"What do these scores mean?"` | Link text |
+| `style` | `CSSProperties`? | — | Overrides for the link |
+
+- Clicking opens a centered modal (720px wide, max 88vh, scrollable body) with one card per metric: one-line summary, how it works, an analogy, strictness, a score-band table, and a "good to know" note; followed by why the metrics disagree, what they cannot detect, and how the head-to-head winner is decided.
+- The modal is rendered through a React portal into `document.body`. Page sections use the `fadeUp` entry animation with `fill-mode: forwards`, which leaves a `transform` on the section; a `position: fixed` element inside it would scroll and stack with that section rather than the viewport.
+- Closes on backdrop click, the × button, or Escape. Used on the Metrics and Compare page headers and the About page.
 
 ---
 
@@ -469,6 +473,9 @@ Standalone metric display used on the Metrics page.
 │  │  │  Drag & drop or click to upload │     │   │
 │  │  │  .csv, .xlsx (up to 50MB)       │     │   │
 │  │  └─────────────────────────────────┘     │   │
+│  │  No dataset yet? Try a demo:             │   │
+│  │  [Spanish demo (15 rows)] [French demo]  │   │
+│  │  Download the CSV to see the format      │   │
 │  │                                           │   │
 │  │  [File info: name, row count]            │   │
 │  │  [Remove file button]                     │   │
@@ -487,6 +494,7 @@ Standalone metric display used on the Metrics page.
 **Interactions**:
 - File input accepts `.csv` and `.xlsx`
 - XLSX parsing happens server-side via backend (security: no client-side XLSX)
+- Demo buttons fetch `/demo/medtranslate_demo_<lang>.csv`, select the matching source language and prompt, parse client-side, and persist exactly like an uploaded file. Buttons are disabled while a demo loads; failures show in the standard error banner.
 - After file selection, row count displays immediately
 - "Remove file" clears localStorage and resets state
 - System prompt textarea pre-filled with medical interpreter default
@@ -578,6 +586,7 @@ Standalone metric display used on the Metrics page.
 ```
 ┌─────────────────────────────────────────────────┐
 │  PageHeader: "Metrics Dashboard"                │
+│  (?) What do these scores mean?   ← MetricGuide │
 │                                                 │
 │  CORPUS BLEU ────────────────────────────       │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐  │
@@ -599,6 +608,41 @@ Standalone metric display used on the Metrics page.
 │  sacrebleu 2.4.3 | nltk 3.9.1 | ...            │
 └─────────────────────────────────────────────────┘
 ```
+
+### Compare Page (`/compare`)
+
+**Purpose**: Put two saved model runs side by side. Runs are keyed by model id in `comparisonResults` storage; the page needs at least two.
+
+**Layout**:
+```
+┌─────────────────────────────────────────────────┐
+│  PageHeader: "Head-to-Head Comparison"          │
+│  (?) What do these scores mean?                 │
+│                                                 │
+│  MODEL A [select ▼]     vs     MODEL B [select ▼]│
+│                                                 │
+│  Card: OVERALL WINNER                            │
+│    <label> · A: n wins · B: n wins · n ties      │
+│    "BERTScore F1 was not computed … not counted" │
+│                                                 │
+│  Table: Metric | A (effort: x) | B (effort: y) | Winner │
+│    SacreBLEU / METEOR ± std / BERTScore F1       │
+│    Completed Pairs                               │
+│                                                 │
+│  LARGEST METEOR SCORE DIFFERENCES (top 10)       │
+└─────────────────────────────────────────────────┘
+```
+
+**Rules**:
+- Model A is styled with the accent green; Model B with the UMass purple (`#7C3AED`).
+- Winner per metric: higher value wins; `|a − b| < 0.001` is a tie; a metric absent from both runs is "Not computed" (grey outline badge) and excluded from the win/tie tally.
+- `effort: <value>` is shown under each model name when `translation_config.reasoning_effort` is present.
+
+### About Page (`/about`)
+
+**Purpose**: Orientation for new users and reviewers. Static content only; no session state.
+
+**Sections** (each under a `SectionLabel`): Purpose; How a run works (numbered five-step list: Upload, Translate, Score, Review, Compare); Models and effort (table from `MODEL_OPTIONS` plus two cards: what "effort" means, the system prompt); Reading the scores (one card per metric from `METRIC_EXPLAINERS`, plus a `MetricGuideLink`); Physician grading scale (table from `CLINICAL_GRADES`); Data; a "Not a clinical tool" caveat card with a `--warning` left border.
 
 ---
 

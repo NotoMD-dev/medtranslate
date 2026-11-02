@@ -87,8 +87,12 @@ interface ModelConfig {
   system_prompt: string;
   temperature: number;
   max_tokens: number;
+  /** Reasoning/thinking effort the backend applied, or null if the model takes none. */
+  reasoning_effort?: string | null;
 }
 ```
+
+`reasoning_effort` is set by the backend at job creation from `OPENAI_REASONING_EFFORT` (GPT-5.x reasoning models) or `ANTHROPIC_EFFORT` (Claude 4.6+). It is part of the translation-cache key and is displayed on the Compare page.
 
 ### `JobResults`
 
@@ -163,7 +167,7 @@ Defined in `medtranslate-backend/app/schemas.py`. These mirror the TypeScript in
 | `DatasetCorpusMetrics` | Overall + per-dataset corpus BLEU |
 | `LibraryVersions` | Version strings for reproducibility |
 | `JobResults` | Complete response from GET /v1/jobs/{id}/results |
-| `ModelConfig` | Translation configuration (model, prompt, temp, max_tokens) |
+| `ModelConfig` | Translation configuration (model, prompt, temp, max_tokens, compute_bertscore, metrics_only, reasoning_effort) |
 
 ---
 
@@ -171,11 +175,11 @@ Defined in `medtranslate-backend/app/schemas.py`. These mirror the TypeScript in
 
 ### Input Dataset CSV
 
-Produced by `scripts/build_dataset.py` or manually prepared.
+Produced by `scripts/build_dataset.py`, manually prepared, or one of the bundled demo files in `public/demo/` (`medtranslate_demo_spanish.csv`, `medtranslate_demo_french.csv`; 15 synthetic rows each, `source = "Demo_Synthetic"`).
 
 | Column | Required | Type | Description |
 |---|---|---|---|
-| `spanish_source` | **Yes** | string | Spanish clinical text to be translated |
+| `<language>_source` | **Yes** | string | Source clinical text. The column name follows the selected source language: `spanish_source`, `french_source`, `korean_source`, `chinese_source`, `portuguese_source`, `german_source`, `arabic_source`, `japanese_source`, `russian_source`. A generic `source_text` column is also accepted. |
 | `pair_id` | No | string | Unique row identifier (auto-generated if missing) |
 | `source` | No | string | Corpus origin (defaults to `"ClinSpEn_ClinicalCases"`) |
 | `content_type` | No | string | Document type (defaults to `"clinical_case_report"`) |
