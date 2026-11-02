@@ -264,3 +264,121 @@ table tbody tr:hover td {
     grid-template-columns: 1fr;
   }
 }
+
+/* ========================
+   RESPONSIVE: tables, selectors, detail panels
+   ======================== */
+
+/* Any data table inside a card scrolls sideways on narrow screens instead
+   of being clipped by the card's overflow: hidden. */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-scroll table {
+  min-width: 100%;
+}
+
+.table-scroll th,
+.table-scroll td {
+  white-space: nowrap;
+}
+
+.table-scroll td.wrap,
+.table-scroll th.wrap {
+  white-space: normal;
+  min-width: 180px;
+}
+
+/* Model A / vs / Model B selectors on the Compare page */
+.compare-selectors {
+  display: flex;
+  gap: 24px;
+  align-items: flex-end;
+}
+
+.compare-selectors > .compare-vs {
+  padding-bottom: 12px;
+  font-size: 18px;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .compare-selectors {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .compare-selectors > .compare-vs {
+    text-align: center;
+    padding: 0;
+  }
+}
+
+/* Three-column source / reference / translation panels */
+.pair-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 640px) {
+  .pair-grid {
+    gap: 12px;
+  }
+}
+
+/* Metrics + grade row under a pair detail */
+.pair-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pair-footer > .pair-grade {
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .pair-footer > .pair-grade {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
+/* Button groups never overflow; buttons shrink and wrap instead */
+.button-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.button-row > button {
+  min-width: 0;
+}
+
+/* Grade selector buttons wrap on narrow screens */
+.grade-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Grid cells and flex children may shrink below their content's intrinsic
+   width (long unbroken strings such as the BLEU signature otherwise force
+   the whole layout wider than the phone). */
+.metrics-grid-2 > *,
+.stats-row > *,
+.pair-grid > * {
+  min-width: 0;
+}
+
+.metrics-grid-2 {
+  overflow-wrap: anywhere;
+}

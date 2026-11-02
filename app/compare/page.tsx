@@ -4,14 +4,15 @@ import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/Header";
 import MetricGuideLink from "@/components/MetricGuide";
 import { MODEL_OPTIONS } from "@/lib/types";
-import { summarizeMetric } from "@/lib/metrics";
-import type { JobResults } from "@/lib/types";
-import { getSessionComparisonResultsAsync } from "@/lib/session";
+import { summarizeMetric, countRun, isScored, applyRefusalOverrides, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
+import type { JobResults, RefusalOverride } from "@/lib/types";
+import { getSessionComparisonResultsAsync, getSessionRefusalOverrides } from "@/lib/session";
 
 interface ModelSummary {
   modelId: string;
   label: string;
   effort: string | null;
+  systemPrompt: string | null;
   bleu: number | null;
   meteorMean: number | null;
   meteorStd: number | null;
@@ -19,17 +20,26 @@ interface ModelSummary {
   bertStd: number | null;
   totalPairs: number;
   completedPairs: number;
+  refusedPairs: number;
+  excludedPairs: number;
+  incompletePairs: number;
+  scoredPairs: number;
 }
 
 function getModelLabel(modelId: string): string {
   return MODEL_OPTIONS.find((m) => m.id === modelId)?.label || modelId;
 }
 
-function summarize(results: JobResults): ModelSummary {
-  const sentences = results.sentence_metrics ?? [];
-  const completed = sentences.filter((s) => s.llm_english_translation && !s.error);
-  const meteorVals = completed.map((s) => s.meteor).filter((v): v is number => v != null);
-  const bertVals = completed.map((s) => s.bertscore_f1).filter((v): v is number => v != null);
+function summarize(results: JobResults, overrides: Record<string, RefusalOverride>): ModelSummary {
+  // Reviewer overrides are a property of the source sentence, so they apply
+  // to both runs alike.
+  const sentences = applyRefusalOverrides(results.sentence_metrics ?? [], overrides);
+  const counts = countRun(sentences);
+  // Scored rows = completed translations + refusals (scored 0). Incomplete
+  // rows (provider/config failures) carry no score.
+  const scored = sentences.filter(isScored);
+  const meteorVals = scored.map((s) => s.meteor).filter((v): v is number => v != null);
+  const bertVals = scored.map((s) => s.bertscore_f1).filter((v): v is number => v != null);
   const meteorStats = summarizeMetric(meteorVals);
   const bertStats = summarizeMetric(bertVals);
 
@@ -37,13 +47,18 @@ function summarize(results: JobResults): ModelSummary {
     modelId: results.translation_config?.model || "unknown",
     label: getModelLabel(results.translation_config?.model || "unknown"),
     effort: results.translation_config?.reasoning_effort ?? null,
+    systemPrompt: results.translation_config?.system_prompt ?? null,
     bleu: results.corpus_metrics?.overall.bleu_score ?? null,
     meteorMean: meteorVals.length > 0 ? meteorStats.mean : null,
     meteorStd: meteorVals.length > 0 ? meteorStats.std : null,
     bertMean: bertVals.length > 0 ? bertStats.mean : null,
     bertStd: bertVals.length > 0 ? bertStats.std : null,
     totalPairs: sentences.length,
-    completedPairs: completed.length,
+    completedPairs: counts.completed,
+    refusedPairs: counts.refused,
+    excludedPairs: counts.excluded,
+    incompletePairs: counts.incomplete,
+    scoredPairs: scored.length,
   };
 }
 
@@ -72,8 +87,10 @@ export default function ComparePage() {
   const [comparisonData, setComparisonData] = useState<Record<string, JobResults>>({});
   const [modelA, setModelA] = useState<string>("");
   const [modelB, setModelB] = useState<string>("");
+  const [overrides, setOverrides] = useState<Record<string, RefusalOverride>>({});
 
   useEffect(() => {
+    setOverrides(getSessionRefusalOverrides());
     getSessionComparisonResultsAsync().then((saved) => {
       if (!saved) return;
       setComparisonData(saved);
@@ -86,12 +103,12 @@ export default function ComparePage() {
   const availableModels = Object.keys(comparisonData);
 
   const summaryA = useMemo(
-    () => (modelA && comparisonData[modelA] ? summarize(comparisonData[modelA]) : null),
-    [modelA, comparisonData]
+    () => (modelA && comparisonData[modelA] ? summarize(comparisonData[modelA], overrides) : null),
+    [modelA, comparisonData, overrides]
   );
   const summaryB = useMemo(
-    () => (modelB && comparisonData[modelB] ? summarize(comparisonData[modelB]) : null),
-    [modelB, comparisonData]
+    () => (modelB && comparisonData[modelB] ? summarize(comparisonData[modelB], overrides) : null),
+    [modelB, comparisonData, overrides]
   );
 
   // Determine winners per metric (higher is better). A metric missing from
@@ -140,6 +157,12 @@ export default function ComparePage() {
   const winsB = metrics.filter((m) => m.winner === "B").length;
   const ties = metrics.filter((m) => m.winner === "tie").length;
   const notComputed = metrics.filter((m) => m.winner === "none").map((m) => m.name);
+  const promptMismatch =
+    !!summaryA && !!summaryB && !!summaryA.systemPrompt && !!summaryB.systemPrompt &&
+    summaryA.systemPrompt.trim() !== summaryB.systemPrompt.trim();
+  const smallSample =
+    !!summaryA && !!summaryB &&
+    Math.min(summaryA.scoredPairs, summaryB.scoredPairs) < SMALL_SAMPLE_THRESHOLD;
 
   return (
     <div className="page-container">
@@ -170,7 +193,7 @@ export default function ComparePage() {
       ) : (
         <>
           {/* Model selectors */}
-          <div className="anim d1" style={{ marginBottom: 32, display: "flex", gap: 24 }}>
+          <div className="anim d1 compare-selectors" style={{ marginBottom: 32 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
                 Model A
@@ -190,9 +213,7 @@ export default function ComparePage() {
                 ))}
               </select>
             </div>
-            <div style={{ display: "flex", alignItems: "flex-end", paddingBottom: 12, fontSize: 18, color: "var(--text-muted)", fontWeight: 700 }}>
-              vs
-            </div>
+            <div className="compare-vs">vs</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
                 Model B
@@ -213,6 +234,25 @@ export default function ComparePage() {
               </select>
             </div>
           </div>
+
+          {/* Fairness warnings */}
+          {promptMismatch && summaryA && summaryB && (
+            <div className="anim d2" style={{ marginBottom: 16, padding: 16, background: "var(--danger-light)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-sm)", color: "var(--danger)", fontSize: 13, lineHeight: 1.6 }}>
+              <strong>These runs used different system prompts, so the comparison is not fair.</strong> Re-run {summaryA.label} or {summaryB.label} with the current prompt before reading the winner.
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ cursor: "pointer", fontSize: 12 }}>Show both prompts</summary>
+                <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+                  <div style={{ marginBottom: 6 }}><strong style={{ color: "var(--accent-text)" }}>{summaryA.label}:</strong> {summaryA.systemPrompt}</div>
+                  <div><strong style={{ color: "#7C3AED" }}>{summaryB.label}:</strong> {summaryB.systemPrompt}</div>
+                </div>
+              </details>
+            </div>
+          )}
+          {smallSample && summaryA && summaryB && (
+            <div className="anim d2" style={{ marginBottom: 16, padding: 14, background: "var(--warning-light)", border: "1px solid var(--warning-border)", borderRadius: "var(--radius-sm)", color: "var(--warning)", fontSize: 13, lineHeight: 1.6 }}>
+              <strong>Small sample.</strong> {summaryA.label} has {summaryA.scoredPairs} scored rows and {summaryB.label} has {summaryB.scoredPairs}. Below {SMALL_SAMPLE_THRESHOLD}, corpus BLEU and the averages swing with every sentence; a difference smaller than the &plusmn; spread is not evidence.
+            </div>
+          )}
 
           {/* Overall winner banner */}
           {summaryA && summaryB && (
@@ -245,7 +285,7 @@ export default function ComparePage() {
 
           {/* Comparison table */}
           {summaryA && summaryB && (
-            <div className="anim d3" style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)", overflow: "hidden", marginBottom: 48 }}>
+            <div className="anim d3 table-scroll" style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)", marginBottom: 48 }}>
               <table>
                 <thead>
                   <tr>
@@ -268,7 +308,7 @@ export default function ComparePage() {
                 <tbody>
                   {metrics.map((m) => (
                     <tr key={m.name}>
-                      <td>
+                      <td className="wrap">
                         <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>{m.name}</div>
                         <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{m.desc}</div>
                       </td>
@@ -291,7 +331,7 @@ export default function ComparePage() {
                       <td style={{ textAlign: "center" }}>{winnerBadge(m.winner)}</td>
                     </tr>
                   ))}
-                  {/* Summary row */}
+                  {/* Summary rows */}
                   <tr>
                     <td style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-muted)" }}>
                       Completed Pairs
@@ -301,6 +341,43 @@ export default function ComparePage() {
                     </td>
                     <td style={{ background: "var(--bg-inset)", textAlign: "center", fontWeight: 600, color: "var(--text-primary)" }}>
                       {summaryB.completedPairs} / {summaryB.totalPairs}
+                    </td>
+                    <td style={{ background: "var(--bg-inset)" }} />
+                  </tr>
+                  <tr>
+                    <td style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-muted)" }}>
+                      <div>Refused (scored 0)</div>
+                      <div style={{ fontSize: 11, fontWeight: 400 }}>Model declined or returned nothing</div>
+                    </td>
+                    <td style={{ background: "var(--bg-inset)", textAlign: "center", fontWeight: 600, color: summaryA.refusedPairs > 0 ? "var(--danger)" : "var(--text-primary)" }}>
+                      {summaryA.refusedPairs}
+                    </td>
+                    <td style={{ background: "var(--bg-inset)", textAlign: "center", fontWeight: 600, color: summaryB.refusedPairs > 0 ? "var(--danger)" : "var(--text-primary)" }}>
+                      {summaryB.refusedPairs}
+                    </td>
+                    <td style={{ background: "var(--bg-inset)" }} />
+                  </tr>
+                  {(summaryA.excludedPairs > 0 || summaryB.excludedPairs > 0) && (
+                    <tr>
+                      <td className="wrap" style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-muted)" }}>
+                        <div>Excluded by reviewer</div>
+                        <div style={{ fontSize: 11, fontWeight: 400 }}>Refusal judged legitimate; not scored</div>
+                      </td>
+                      <td style={{ background: "var(--bg-inset)", textAlign: "center", fontWeight: 600, color: "var(--text-primary)" }}>{summaryA.excludedPairs}</td>
+                      <td style={{ background: "var(--bg-inset)", textAlign: "center", fontWeight: 600, color: "var(--text-primary)" }}>{summaryB.excludedPairs}</td>
+                      <td style={{ background: "var(--bg-inset)" }} />
+                    </tr>
+                  )}
+                  <tr>
+                    <td style={{ background: "var(--bg-inset)", fontWeight: 600, color: "var(--text-muted)" }}>
+                      <div>Incomplete (not scored)</div>
+                      <div style={{ fontSize: 11, fontWeight: 400 }}>Provider or configuration failure; retry on Translate</div>
+                    </td>
+                    <td style={{ background: "var(--bg-inset)", textAlign: "center", fontWeight: 600, color: summaryA.incompletePairs > 0 ? "var(--warning)" : "var(--text-primary)" }}>
+                      {summaryA.incompletePairs}
+                    </td>
+                    <td style={{ background: "var(--bg-inset)", textAlign: "center", fontWeight: 600, color: summaryB.incompletePairs > 0 ? "var(--warning)" : "var(--text-primary)" }}>
+                      {summaryB.incompletePairs}
                     </td>
                     <td style={{ background: "var(--bg-inset)" }} />
                   </tr>
@@ -367,7 +444,7 @@ function SentenceDiffs({
         Largest METEOR Score Differences
         <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
       </div>
-      <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)", overflow: "hidden" }}>
+      <div className="table-scroll" style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)" }}>
         <table>
           <thead>
             <tr>

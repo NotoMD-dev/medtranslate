@@ -1,5 +1,6 @@
 import type { TranslationPair, SentenceMetrics, ClinicalGrade, ReferenceFlag } from "./types";
 import { SOURCE_LANGUAGES } from "./types";
+import { rowStatus as classifyRow } from "./metrics";
 
 // ---------------------------------------------------------------------------
 // Shared CSV helpers
@@ -106,16 +107,21 @@ function parseCSVLine(line: string): string[] {
 // CSV export — for backend submission
 // ---------------------------------------------------------------------------
 
+// The backend reads the source text from `source_text`; the legacy
+// `spanish_source` duplicate is no longer sent (it doubled the upload size).
 const SUBMISSION_HEADERS = [
   "pair_id", "source", "content_type", "english_reference",
-  "source_text", "spanish_source", "llm_english_translation",
+  "source_text", "llm_english_translation",
+  // Optional: lets a metrics-only re-score keep failed rows' status.
+  "error", "error_kind",
 ];
 
 function toSubmissionRow(
   pairId: string, source: string, contentType: string,
   englishRef: string, sourceText: string, translation: string,
+  error = "", errorKind = "",
 ): string[] {
-  return [pairId, source, contentType, englishRef, sourceText, sourceText, translation];
+  return [pairId, source, contentType, englishRef, sourceText, translation, error, errorKind];
 }
 
 /** Convert TranslationPair[] to a CSV File suitable for backend upload. */
@@ -129,12 +135,26 @@ export function pairsToCSVFile(pairs: TranslationPair[], filename = "dataset.csv
   return new File([toCSVString(SUBMISSION_HEADERS, rows)], filename, { type: "text/csv" });
 }
 
-/** Convert SentenceMetrics[] to a CSV File for re-submission in metrics-only mode. */
-export function sentenceMetricsToCSVFile(sentences: SentenceMetrics[], filename = "dataset.csv"): File {
+/**
+ * Convert SentenceMetrics[] to a CSV File for re-submission.
+ *
+ * With `keepStatus` (default, used for metrics-only re-scoring) each row's
+ * translation, error and error_kind are carried over so refused rows stay
+ * refused. With `keepStatus: false` (used to retry incomplete rows) the rows
+ * are submitted as fresh, untranslated input.
+ */
+export function sentenceMetricsToCSVFile(
+  sentences: SentenceMetrics[],
+  filename = "dataset.csv",
+  keepStatus = true,
+): File {
   const rows = sentences.map((r) =>
     toSubmissionRow(
       r.pair_id, r.source, r.content_type,
-      r.english_reference, r.source_text || r.spanish_source, r.llm_english_translation,
+      r.english_reference, r.source_text || r.spanish_source,
+      keepStatus ? r.llm_english_translation : "",
+      keepStatus ? r.error ?? "" : "",
+      keepStatus ? r.error_kind ?? "" : "",
     ),
   );
   return new File([toCSVString(SUBMISSION_HEADERS, rows)], filename, { type: "text/csv" });
@@ -143,6 +163,11 @@ export function sentenceMetricsToCSVFile(sentences: SentenceMetrics[], filename 
 // ---------------------------------------------------------------------------
 // CSV export — results download
 // ---------------------------------------------------------------------------
+
+/** Row status for exports (same classification the pages use). */
+function rowStatus(r: SentenceMetrics): string {
+  return classifyRow(r).key;
+}
 
 /** Export sentence metrics results to CSV string for the user to download. */
 export function exportResultsCSV(
@@ -153,7 +178,8 @@ export function exportResultsCSV(
   const headers = [
     "pair_id", "source", "content_type", "english_reference", "source_text",
     "llm_english_translation", "meteor_score", "bertscore_f1",
-    "clinical_significance_grade", "reference_flag_issues", "reference_flag_notes", "error",
+    "clinical_significance_grade", "reference_flag_issues", "reference_flag_notes",
+    "status", "error", "format_warning",
   ];
 
   const rows = sentences.map((r) => {
@@ -166,7 +192,9 @@ export function exportResultsCSV(
       grades?.[r.pair_id] != null ? String(grades[r.pair_id]) : "",
       flag ? flag.reasons.join("; ") : "",
       flag?.notes ?? "",
+      rowStatus(r),
       r.error ?? "",
+      r.format_warning ?? "",
     ];
   });
 
@@ -188,6 +216,7 @@ export function exportReviewCSV(
     "pair_id", "source", "content_type", "english_reference", "source_text",
     "llm_english_translation", "meteor_score", "bertscore_f1",
     "clinical_significance_grade", "reference_flag_issues", "reference_flag_notes",
+    "status", "error", "format_warning",
   ];
 
   const rows = flaggedPairs.map((r) => {
@@ -200,6 +229,9 @@ export function exportReviewCSV(
       grades?.[r.pair_id] != null ? String(grades[r.pair_id]) : "",
       flag ? flag.reasons.join("; ") : "",
       flag?.notes ?? "",
+      rowStatus(r),
+      r.error ?? "",
+      r.format_warning ?? "",
     ];
   });
 

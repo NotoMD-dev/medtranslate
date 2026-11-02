@@ -31,7 +31,8 @@ from app.schemas import (
     ModelConfig,
     SentenceMetrics,
 )
-from app.translate import translate_text
+from app.output_checks import detect_format_warning
+from app.translate import classify_error, effective_reasoning_effort, translate_text
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ class InputRow:
     english_reference: str
     spanish_source: str = ""  # backward compat
     llm_english_translation: str = ""
+    # Carried over on metrics-only re-scores so failed rows keep their status.
+    error: str = ""
+    error_kind: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +71,10 @@ class Job:
 
     translated: int = 0
     scored: int = 0
-    failed_rows: int = 0
+    failed_rows: int = 0          # refused_rows + incomplete_rows
+    refused_rows: int = 0         # model declined / empty reply (scored as 0)
+    incomplete_rows: int = 0      # provider / config failure (unscored, retryable)
+    excluded_rows: int = 0        # refusals a reviewer marked legitimate (unscored)
 
     sentence_metrics: list[SentenceMetrics] = field(default_factory=list)
     corpus_metrics: Optional[DatasetCorpusMetrics] = None
@@ -149,6 +156,13 @@ def _ensure_db() -> bool:
                 "CREATE TABLE IF NOT EXISTS translation_cache "
                 "(cache_key TEXT PRIMARY KEY, translation TEXT NOT NULL, created_at REAL)"
             )
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            # Per-sentence metric cache (METEOR, BERTScore) keyed on the
+            # candidate/reference pair, so re-scores only compute new rows.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS metric_cache "
+                "(cache_key TEXT PRIMARY KEY, value REAL NOT NULL, created_at REAL)"
+            )
         _db_ready = True
         logger.info("SQLite job store ready at %s", DATABASE_PATH)
         return True
@@ -173,6 +187,9 @@ def _job_to_dict(job: Job, *, include_rows: bool = True) -> dict:
         "translated": job.translated,
         "scored": job.scored,
         "failed_rows": job.failed_rows,
+        "refused_rows": job.refused_rows,
+        "incomplete_rows": job.incomplete_rows,
+        "excluded_rows": job.excluded_rows,
         "sentence_metrics": [m.model_dump() for m in job.sentence_metrics],
         "corpus_metrics": job.corpus_metrics.model_dump() if job.corpus_metrics else None,
         "library_versions": job.library_versions.model_dump() if job.library_versions else None,
@@ -191,6 +208,8 @@ def _job_to_dict(job: Job, *, include_rows: bool = True) -> dict:
                 "english_reference": r.english_reference,
                 "spanish_source": r.spanish_source,
                 "llm_english_translation": r.llm_english_translation,
+                "error": r.error,
+                "error_kind": r.error_kind,
             }
             for r in job.rows
         ]
@@ -208,6 +227,9 @@ def _job_from_dict(data: dict) -> Job:
         translated=data.get("translated", 0),
         scored=data.get("scored", 0),
         failed_rows=data.get("failed_rows", 0),
+        refused_rows=data.get("refused_rows", 0),
+        incomplete_rows=data.get("incomplete_rows", 0),
+        excluded_rows=data.get("excluded_rows", 0),
         sentence_metrics=[
             SentenceMetrics.model_validate(m) for m in data.get("sentence_metrics", [])
         ],
@@ -343,43 +365,134 @@ def _db_cleanup_old_jobs(days: int = 7) -> int:
 # Translation cache helpers
 # ---------------------------------------------------------------------------
 
-def _cache_key(model: str, system_prompt: str, temperature: float, source_text: str) -> str:
-    """Build a deterministic cache key from the translation parameters."""
-    raw = f"{model}|{system_prompt}|{temperature}|{source_text}"
+def _cache_key(
+    model: str,
+    system_prompt: str,
+    temperature: Optional[float],
+    source_text: str,
+    reasoning_effort: Optional[str] = None,
+) -> str:
+    """Build a deterministic cache key from the translation parameters.
+
+    The reasoning/thinking effort is part of the key: the same model and
+    prompt at a different effort is a different experiment, so a run at
+    ``high`` must never be served translations produced at ``medium``.
+    """
+    raw = f"{model}|{system_prompt}|{temperature}|{reasoning_effort or ''}|{source_text}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:64]
 
 
-def _cache_get(key: str) -> Optional[str]:
-    """Look up a cached translation. Returns None on miss or error."""
-    if not _ensure_db():
-        return None
+def _cache_get_many(keys: list[str]) -> dict[str, str]:
+    """Look up many cached translations in one connection. Missing keys are absent."""
+    if not keys or not _ensure_db():
+        return {}
+    found: dict[str, str] = {}
     try:
         with sqlite3.connect(DATABASE_PATH) as conn:
-            row = conn.execute(
-                "SELECT translation FROM translation_cache WHERE cache_key = ?",
-                (key,),
-            ).fetchone()
-        return row[0] if row else None
-    except Exception:
-        return None
+            for i in range(0, len(keys), 500):
+                chunk = keys[i:i + 500]
+                placeholders = ",".join("?" * len(chunk))
+                for k, v in conn.execute(
+                    f"SELECT cache_key, translation FROM translation_cache WHERE cache_key IN ({placeholders})",
+                    chunk,
+                ):
+                    found[k] = v
+    except Exception as exc:
+        logger.warning("Translation cache read failed: %s", exc)
+    return found
 
 
-def _cache_set(key: str, translation: str, temperature: float) -> None:
-    """Store a translation in the cache. Only caches deterministic (temperature=0) outputs."""
-    if temperature != 0.0:
+def _cache_set_many(items: list[tuple[str, str]]) -> None:
+    """Store many translations in one transaction. Failures are non-critical."""
+    if not items or not _ensure_db():
         return
-    if not _ensure_db():
-        return
+    now = time.time()
     try:
         with _write_lock:
             with sqlite3.connect(DATABASE_PATH) as conn:
-                conn.execute(
+                conn.executemany(
                     "INSERT OR REPLACE INTO translation_cache (cache_key, translation, created_at) "
                     "VALUES (?, ?, ?)",
-                    (key, translation, time.time()),
+                    [(k, v, now) for k, v in items],
                 )
-    except Exception:
-        pass  # cache write failure is non-critical
+    except Exception as exc:
+        logger.warning("Translation cache write failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Metric cache helpers (METEOR / BERTScore per candidate-reference pair)
+# ---------------------------------------------------------------------------
+
+def _metric_key(metric: str, version: str, candidate: str, reference: str) -> str:
+    raw = f"{metric}|{version}|{candidate}|{reference}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:64]
+
+
+def _metric_cache_get_many(keys: list[str]) -> dict[str, float]:
+    if not keys or not _ensure_db():
+        return {}
+    found: dict[str, float] = {}
+    try:
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            for i in range(0, len(keys), 500):
+                chunk = keys[i:i + 500]
+                placeholders = ",".join("?" * len(chunk))
+                for k, v in conn.execute(
+                    f"SELECT cache_key, value FROM metric_cache WHERE cache_key IN ({placeholders})",
+                    chunk,
+                ):
+                    found[k] = float(v)
+    except Exception as exc:
+        logger.warning("Metric cache read failed: %s", exc)
+    return found
+
+
+def _metric_cache_set_many(items: list[tuple[str, float]]) -> None:
+    if not items or not _ensure_db():
+        return
+    now = time.time()
+    try:
+        with _write_lock:
+            with sqlite3.connect(DATABASE_PATH) as conn:
+                conn.executemany(
+                    "INSERT OR REPLACE INTO metric_cache (cache_key, value, created_at) VALUES (?, ?, ?)",
+                    [(k, v, now) for k, v in items],
+                )
+    except Exception as exc:
+        logger.warning("Metric cache write failed: %s", exc)
+
+
+def _meteor_with_cache(rows_subset: list[tuple[int, InputRow]]) -> tuple[list[Optional[float]], int]:
+    """Blocking. METEOR for each row, reading and filling the metric cache.
+
+    Returns (scores, cache_hits). The key includes the NLTK version because
+    tokenizer and WordNet changes alter scores.
+    """
+    nltk_version = get_library_versions().get("nltk", "")
+    keys = [
+        _metric_key("meteor", nltk_version, row.llm_english_translation, row.english_reference)
+        for _, row in rows_subset
+    ]
+    cached = _metric_cache_get_many(keys)
+    scores: list[Optional[float]] = []
+    fresh: list[tuple[str, float]] = []
+    for key, (_, row) in zip(keys, rows_subset):
+        if key in cached:
+            scores.append(cached[key])
+            continue
+        try:
+            value: Optional[float] = compute_meteor(row.llm_english_translation, row.english_reference)
+        except Exception:
+            value = None
+        scores.append(value)
+        if value is not None:
+            fresh.append((key, value))
+    _metric_cache_set_many(fresh)
+    return scores, len(cached)
+
+
+# BERTScore configuration baked into the cache key (see bertscore_worker.py).
+_BERTSCORE_CONFIG = "roberta-base|en|rescaled"
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +612,9 @@ async def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
         translated=job.translated,
         scored=job.scored,
         failed_rows=job.failed_rows,
+        refused_rows=job.refused_rows,
+        incomplete_rows=job.incomplete_rows,
+        excluded_rows=job.excluded_rows,
         error=job.error,
         bertscore_completed=job.bertscore_completed,
         bertscore_total=job.bertscore_total,
@@ -527,8 +643,31 @@ async def get_job_results(job_id: str, *, offset: int = 0, limit: int = 0) -> Op
     )
 
 
+def _update_failure_counts(job: Job) -> None:
+    """Recount refused / incomplete / excluded rows from sentence_metrics."""
+    refused = incomplete = excluded = 0
+    for m in job.sentence_metrics:
+        if m.error_kind == "refusal":
+            refused += 1
+        elif m.error_kind == "excluded":
+            excluded += 1
+        elif m.error:
+            incomplete += 1
+    job.refused_rows, job.incomplete_rows, job.excluded_rows = refused, incomplete, excluded
+    job.failed_rows = refused + incomplete
+
+
 def _make_sentence_metrics(row: InputRow, **overrides) -> SentenceMetrics:
-    """Helper to build a SentenceMetrics from an InputRow with optional overrides."""
+    """Helper to build a SentenceMetrics from an InputRow with optional overrides.
+
+    ``format_warning`` is derived from the translation unless given explicitly;
+    the translation text itself is never altered.
+    """
+    translation = overrides.get("llm_english_translation", row.llm_english_translation)
+    if "format_warning" in overrides:
+        format_warning = overrides["format_warning"]
+    else:
+        format_warning = detect_format_warning(translation, row.source_text) if translation else None
     return SentenceMetrics(
         pair_id=row.pair_id,
         source=row.source,
@@ -536,10 +675,12 @@ def _make_sentence_metrics(row: InputRow, **overrides) -> SentenceMetrics:
         source_text=row.source_text,
         spanish_source=row.spanish_source or row.source_text,
         english_reference=row.english_reference,
-        llm_english_translation=overrides.get("llm_english_translation", row.llm_english_translation),
+        llm_english_translation=translation,
         meteor=overrides.get("meteor", None),
         bertscore_f1=overrides.get("bertscore_f1", None),
         error=overrides.get("error", None),
+        error_kind=overrides.get("error_kind", None),
+        format_warning=format_warning,
     )
 
 
@@ -566,6 +707,12 @@ async def execute_job(job_id: str) -> None:
         max_tokens = job.model_config.max_tokens
         compute_bertscore = getattr(job.model_config, "compute_bertscore", False)
         metrics_only = getattr(job.model_config, "metrics_only", False)
+        # Effort that translate_text() will actually apply for this model.
+        # Recorded on the job (so results say how they were produced) and
+        # folded into the translation-cache key.
+        reasoning_effort = effective_reasoning_effort(model)
+        if getattr(job.model_config, "reasoning_effort", None) != reasoning_effort:
+            job.model_config.reasoning_effort = reasoning_effort
 
         # Tunable concurrency controls
         MAX_CONCURRENT_TRANSLATIONS = int(
@@ -575,22 +722,6 @@ async def execute_job(job_id: str) -> None:
             os.getenv("TRANSLATION_CHUNK_SIZE", "200")
         )
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_TRANSLATIONS)
-
-        async def _translate_one(index: int, row: InputRow):
-            async with semaphore:
-                try:
-                    # Use source_text (the generalized column) for translation
-                    text_to_translate = row.source_text or row.spanish_source
-                    translation = await translate_text(
-                        text_to_translate,
-                        model=model,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                    )
-                    return index, translation, None
-                except Exception as exc:
-                    return index, "", str(exc)
 
         # Pre-populate sentence_metrics with all rows (pending state)
         # so the frontend can display the table immediately during polling.
@@ -603,28 +734,46 @@ async def execute_job(job_id: str) -> None:
         # Phase 1: Concurrent translation (chunked) — SKIP if metrics_only
         # ------------------------------------------------------------------
         if metrics_only:
-            # In metrics-only mode, use existing translations from the CSV
+            # In metrics-only mode, use existing translations from the CSV.
+            # Rows submitted with an error/error_kind (a previous run's
+            # failures) keep that status so refusals are still scored as 0
+            # and incomplete rows stay unscored.
             logger.info("Job %s: metrics-only mode, skipping translation", job_id)
+            for i, row in enumerate(job.rows):
+                if not row.llm_english_translation and row.error:
+                    # "excluded" is set by a reviewer who judged a refusal
+                    # legitimate; it is kept out of every score.
+                    kind = row.error_kind if row.error_kind in ("refusal", "infrastructure", "excluded") else "infrastructure"
+                    job.sentence_metrics[i] = _make_sentence_metrics(
+                        row, llm_english_translation="", error=row.error, error_kind=kind,
+                    )
             job.translated = sum(1 for r in job.rows if r.llm_english_translation)
+            _update_failure_counts(job)
         else:
             # --- Deduplication pre-pass: translate each unique source text once ---
             unique_texts: dict[str, str | None] = {}  # source_text -> translation (None = not yet translated)
+            # source_text -> (error message, "refusal" | "infrastructure")
+            unique_errors: dict[str, tuple[str, str]] = {}
             for row in job.rows:
                 text_key = row.source_text or row.spanish_source
                 if text_key and text_key not in unique_texts:
                     unique_texts[text_key] = None
 
-            # Check translation cache for unique texts (warm up from previous runs)
+            # Check the translation cache for every unique text in one batch
+            # (one connection, chunked IN queries) instead of one connection
+            # per sentence.
+            key_for_text = {
+                t: _cache_key(model, system_prompt, temperature, t, reasoning_effort)
+                for t in unique_texts
+            }
+            cached_map = await asyncio.to_thread(_cache_get_many, list(key_for_text.values()))
             cache_hits = 0
-            for text_key in list(unique_texts.keys()):
-                try:
-                    ck = _cache_key(model, system_prompt, temperature, text_key)
-                    cached = await asyncio.to_thread(_cache_get, ck)
-                    if cached is not None:
-                        unique_texts[text_key] = cached
-                        cache_hits += 1
-                except Exception:
-                    pass  # cache miss is fine
+            for text_key, ck in key_for_text.items():
+                hit = cached_map.get(ck)
+                if hit is not None:
+                    unique_texts[text_key] = hit
+                    cache_hits += 1
+            cache_writes_ok = temperature is None or temperature == 0.0
             if cache_hits:
                 logger.info("Job %s: translation cache hit for %d unique texts", job_id, cache_hits)
 
@@ -648,15 +797,9 @@ async def execute_job(job_id: str) -> None:
                             temperature=temperature,
                             max_tokens=max_tokens,
                         )
-                        # Write to cache (only for deterministic temperature=0)
-                        try:
-                            ck = _cache_key(model, system_prompt, temperature, text)
-                            await asyncio.to_thread(_cache_set, ck, translation, temperature)
-                        except Exception:
-                            pass  # cache write failure is non-critical
-                        return idx, text, translation, None
+                        return idx, text, translation, None, None
                     except Exception as exc:
-                        return idx, text, "", str(exc)
+                        return idx, text, "", str(exc), classify_error(exc)
 
             unique_total = len(texts_to_translate)
             for start in range(0, unique_total, CHUNK_SIZE):
@@ -680,33 +823,54 @@ async def execute_job(job_id: str) -> None:
 
                 results = await asyncio.gather(*tasks)
 
-                for _idx, src_text, translation, error in sorted(results, key=lambda x: x[0]):
+                new_cache_entries: list[tuple[str, str]] = []
+                for _idx, src_text, translation, error, kind in sorted(results, key=lambda x: x[0]):
                     if error is None:
                         unique_texts[src_text] = translation
+                        new_cache_entries.append((key_for_text[src_text], translation))
                     else:
                         unique_texts[src_text] = None
-                        logger.error("Job %s unique text translation failed: %s", job_id, error)
+                        unique_errors[src_text] = (error, kind or "infrastructure")
+                        logger.error(
+                            "Job %s unique text translation failed (%s): %s", job_id, kind, error
+                        )
 
-                # Fan results back to all rows sharing each translated text
+                # One cache write per chunk (not per sentence); only when
+                # sampling is pinned (temperature 0) or the model takes none.
+                if new_cache_entries and cache_writes_ok:
+                    await asyncio.to_thread(_cache_set_many, new_cache_entries)
+
+                # Fan results back to all rows sharing each translated text.
+                # Counts are recomputed once after the loop; recomputing them
+                # per row made this O(n^2) on large files.
                 for i, row in enumerate(job.rows):
                     text_key = row.source_text or row.spanish_source
                     cached = unique_texts.get(text_key)
                     if cached is not None and not row.llm_english_translation:
                         row.llm_english_translation = cached
-                        job.translated = sum(1 for r in job.rows if r.llm_english_translation)
                         job.sentence_metrics[i] = _make_sentence_metrics(
                             row, llm_english_translation=cached,
                         )
-                    elif cached is None and text_key and unique_texts.get(text_key) is None:
-                        # Check if this text was attempted but failed
-                        pass
+                    elif text_key in unique_errors and not row.llm_english_translation:
+                        msg, kind = unique_errors[text_key]
+                        row.error, row.error_kind = msg, kind
+                        job.sentence_metrics[i] = _make_sentence_metrics(
+                            row, llm_english_translation="", error=msg, error_kind=kind,
+                        )
 
-                # Count failures: rows whose unique text was attempted but got None
-                job.failed_rows = sum(
+                job.translated = sum(1 for r in job.rows if r.llm_english_translation)
+                # Count failures so far (rows whose unique text was attempted and failed)
+                job.refused_rows = sum(
                     1 for row in job.rows
-                    if not row.llm_english_translation and unique_texts.get(row.source_text or row.spanish_source) is None
-                    and (row.source_text or row.spanish_source) in unique_texts
+                    if not row.llm_english_translation
+                    and unique_errors.get(row.source_text or row.spanish_source, ("", ""))[1] == "refusal"
                 )
+                job.incomplete_rows = sum(
+                    1 for row in job.rows
+                    if not row.llm_english_translation
+                    and unique_errors.get(row.source_text or row.spanish_source, ("", ""))[1] == "infrastructure"
+                )
+                job.failed_rows = job.refused_rows + job.incomplete_rows
 
                 # Lightweight persist: only status/progress, not the full blob
                 await asyncio.to_thread(_db_save_status, job)
@@ -721,17 +885,27 @@ async def execute_job(job_id: str) -> None:
                     job.sentence_metrics[i] = _make_sentence_metrics(
                         row, llm_english_translation=cached,
                     )
-                elif text_key:
-                    # Translation failed for this unique text
+                elif text_key in unique_errors:
+                    # Translation failed for this unique text: keep the real
+                    # message and its class so the row can be scored (refusal)
+                    # or retried (infrastructure).
+                    msg, kind = unique_errors[text_key]
+                    row.error, row.error_kind = msg, kind
                     job.sentence_metrics[i] = _make_sentence_metrics(
-                        row, llm_english_translation="", error="Translation failed",
+                        row, llm_english_translation="", error=msg, error_kind=kind,
+                    )
+                elif text_key and job.cancelled:
+                    # Never attempted because the job was stopped: leave pending.
+                    pass
+                elif text_key:
+                    msg, kind = "Translation was not attempted", "infrastructure"
+                    row.error, row.error_kind = msg, kind
+                    job.sentence_metrics[i] = _make_sentence_metrics(
+                        row, llm_english_translation="", error=msg, error_kind=kind,
                     )
 
             job.translated = sum(1 for r in job.rows if r.llm_english_translation)
-            job.failed_rows = sum(
-                1 for r in job.rows
-                if not r.llm_english_translation and (r.source_text or r.spanish_source)
-            )
+            _update_failure_counts(job)
 
         # If cancelled, finalize status and return early with partial results
         if job.cancelled:
@@ -751,18 +925,19 @@ async def execute_job(job_id: str) -> None:
             for i, row in enumerate(job.rows)
             if row.llm_english_translation and row.english_reference
         ]
+        # Refusals are model behaviour and count against it: METEOR 0,
+        # BERTScore 0, and an empty hypothesis in corpus BLEU. Infrastructure
+        # failures stay unscored.
+        refused: list[tuple[int, InputRow]] = [
+            (i, row)
+            for i, row in enumerate(job.rows)
+            if job.sentence_metrics[i].error_kind == "refusal" and row.english_reference
+        ]
 
-        def _meteor_pass(rows_subset):
-            results = []
-            for i, row in rows_subset:
-                try:
-                    results.append(compute_meteor(row.llm_english_translation, row.english_reference))
-                except Exception:
-                    results.append(None)
-            return results
-
-        meteor_scores = await asyncio.to_thread(_meteor_pass, successfully_translated)
-        job.scored = len(meteor_scores)
+        meteor_scores, meteor_hits = await asyncio.to_thread(_meteor_with_cache, successfully_translated)
+        if meteor_hits:
+            logger.info("Job %s: METEOR cache hits for %d of %d rows", job_id, meteor_hits, len(meteor_scores))
+        job.scored = len(meteor_scores) + len(refused)
         await asyncio.to_thread(_db_save_status, job)
 
         # Update sentence_metrics with METEOR scores
@@ -771,14 +946,19 @@ async def execute_job(job_id: str) -> None:
             job.sentence_metrics[i] = _make_sentence_metrics(
                 row, llm_english_translation=row.llm_english_translation, meteor=meteor_val,
             )
+        for i, row in refused:
+            existing = job.sentence_metrics[i]
+            job.sentence_metrics[i] = existing.model_copy(
+                update={"meteor": 0.0, "bertscore_f1": 0.0 if compute_bertscore else None}
+            )
 
         # ------------------------------------------------------------------
         # Phase 3: Corpus BLEU (sacrebleu) — computed BEFORE optional BERTScore
         # ------------------------------------------------------------------
         logger.info("Job %s: computing corpus BLEU", job_id)
 
-        all_hyps = [row.llm_english_translation for _, row in successfully_translated]
-        all_refs = [row.english_reference for _, row in successfully_translated]
+        all_hyps = [row.llm_english_translation for _, row in successfully_translated] + ["" for _ in refused]
+        all_refs = [row.english_reference for _, row in successfully_translated] + [row.english_reference for _, row in refused]
 
         try:
             overall_score, overall_sig = compute_corpus_bleu(all_hyps, all_refs)
@@ -800,6 +980,8 @@ async def execute_job(job_id: str) -> None:
             grouped_pairs.setdefault(source_key, []).append(
                 (row.llm_english_translation, row.english_reference)
             )
+        for _, row in refused:
+            grouped_pairs.setdefault(row.source or "Unknown", []).append(("", row.english_reference))
 
         for source_key, pairs in grouped_pairs.items():
             try:
@@ -833,14 +1015,19 @@ async def execute_job(job_id: str) -> None:
         # ------------------------------------------------------------------
         if compute_bertscore:
             logger.info("Job %s: computing BERTScore (user opted in)", job_id)
-            candidates_for_bert = [
-                row.llm_english_translation for _, row in successfully_translated
+            # Only rows without a cached score go to the (expensive) model.
+            bert_keys = [
+                _metric_key("bertscore", _BERTSCORE_CONFIG, row.llm_english_translation, row.english_reference)
+                for _, row in successfully_translated
             ]
-            references_for_bert = [
-                row.english_reference for _, row in successfully_translated
-            ]
+            bert_cached = await asyncio.to_thread(_metric_cache_get_many, bert_keys)
+            missing = [k for k, key in enumerate(bert_keys) if key not in bert_cached]
+            if bert_cached:
+                logger.info(
+                    "Job %s: BERTScore cache hits for %d of %d rows", job_id, len(bert_cached), len(bert_keys)
+                )
 
-            job.bertscore_total = len(candidates_for_bert)
+            job.bertscore_total = len(missing)
             job.bertscore_completed = 0
             await asyncio.to_thread(_db_save_status, job)
 
@@ -850,16 +1037,24 @@ async def execute_job(job_id: str) -> None:
                 # Persist from the worker thread so progress is visible across instances.
                 _db_save_status(job)
 
-            try:
-                bert_f1_scores = await asyncio.to_thread(
-                    compute_bertscore_batch,
-                    candidates_for_bert,
-                    references_for_bert,
-                    _on_bert_progress,
-                )
-            except Exception as exc:
-                logger.error("Job %s BERTScore batch failed: %s", job_id, exc)
-                bert_f1_scores = [None] * len(candidates_for_bert)
+            bert_f1_scores: list[Optional[float]] = [bert_cached.get(key) for key in bert_keys]
+            if missing:
+                try:
+                    fresh_scores = await asyncio.to_thread(
+                        compute_bertscore_batch,
+                        [successfully_translated[k][1].llm_english_translation for k in missing],
+                        [successfully_translated[k][1].english_reference for k in missing],
+                        _on_bert_progress,
+                    )
+                except Exception as exc:
+                    logger.error("Job %s BERTScore batch failed: %s", job_id, exc)
+                    fresh_scores = [None] * len(missing)
+                fresh_entries: list[tuple[str, float]] = []
+                for k, value in zip(missing, fresh_scores):
+                    bert_f1_scores[k] = value
+                    if value is not None:
+                        fresh_entries.append((bert_keys[k], float(value)))
+                await asyncio.to_thread(_metric_cache_set_many, fresh_entries)
 
             # Update sentence_metrics with BERTScore
             for idx, (i, row) in enumerate(successfully_translated):
@@ -869,17 +1064,7 @@ async def execute_job(job_id: str) -> None:
                     if idx < len(bert_f1_scores) and bert_f1_scores[idx] is not None
                     else None
                 )
-                job.sentence_metrics[i] = SentenceMetrics(
-                    pair_id=existing.pair_id,
-                    source=existing.source,
-                    content_type=existing.content_type,
-                    source_text=existing.source_text,
-                    spanish_source=existing.spanish_source,
-                    english_reference=existing.english_reference,
-                    llm_english_translation=existing.llm_english_translation,
-                    meteor=existing.meteor,
-                    bertscore_f1=bert_val,
-                )
+                job.sentence_metrics[i] = existing.model_copy(update={"bertscore_f1": bert_val})
         else:
             logger.info("Job %s: skipping BERTScore (not requested)", job_id)
 

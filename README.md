@@ -11,7 +11,9 @@ MedTranslate is the research instrument for a study evaluating whether large lan
 - **Plain-language metric guide** — A "What do these scores mean?" modal on the Metrics and Compare pages explains SacreBLEU, METEOR, and BERTScore for non-specialists
 - **About page** — Explains the study's purpose, how a run works end to end, which models and reasoning effort are used, and how to read the scores and clinical grades
 - **Publication-grade metrics** — Corpus BLEU (sacrebleu), sentence-level METEOR (NLTK with WordNet + stemming), BERTScore F1 (bert-score with rescaled baselines)
-- **Clinical significance grading** — Physician review workflow with a 0–3 severity scale for flagged translations (METEOR < threshold)
+- **Clinical significance grading** — Physician review workflow with a 0–3 severity scale for flagged translations (METEOR < threshold); model refusals are scored as 0 and reviewed first
+- **Failure accounting** — Every failed row keeps its exact error. Refusals (model declined or returned nothing) count against the model; infrastructure failures (rate limit, connection, server, config) are kept out of the scores and can be retried in one click
+- **Output-format warnings** — Replies that look wrapped (a preamble, a translator's note, quotation marks, markdown) are flagged, never modified, so a low BLEU can be traced to formatting rather than translation
 - **Light / Dark theme** — Toggle between calm academic light mode and dark mode
 - **Head-to-head comparison** — Run the same dataset through two models and compare them metric by metric; the reasoning effort used for each run is recorded with its results
 - **Design system** — Token-based primitives (Card, Button, Badge, MetricValue, ProgressBar, GradeRow) for consistent UI
@@ -193,7 +195,18 @@ Physician-adjudicated grading of translation discrepancies:
 | 2 | Moderate error | Potential for confusion, unlikely to change clinical management |
 | 3 | Clinically significant | Could alter diagnosis, treatment, or disposition |
 
-Translations with METEOR < 0.4 (configurable threshold) are flagged for physician review.
+Translations with METEOR below the review threshold (default 0.4, set on the Review page and shared with the Metrics page) are flagged for physician review. Rows the model refused to translate are scored 0 and placed at the top of the queue. Rows that failed for infrastructure reasons are not scored and are retried from the Translate page.
+
+## How Failures Are Handled
+
+| Outcome | Example causes | Scored? | Where it shows |
+|---|---|---|---|
+| **Completed** | Model returned text | Yes | Everywhere |
+| **Refused** | Content filter, explicit decline, empty reply | **Yes, as 0** (METEOR 0, BERTScore 0, empty BLEU hypothesis) | Top of Review queue; "Refused" counts on Translate, Metrics, Compare |
+| **Incomplete** | Rate limit exhausted, connection/server error, output limit reached before any text | No | "Incomplete" counts; "Retry incomplete rows" on Translate |
+| **Excluded** | A reviewer judged the refusal legitimate | No | "Excluded by reviewer" counts; set and undone on the Review page; "Apply reviewer overrides & re-score" on Translate updates corpus BLEU |
+
+The exact provider message is kept on every failed row (`error`) and the class is recorded in `error_kind`. Rows whose reply looks wrapped carry a `format_warning`; the text is scored exactly as returned.
 
 ## Study Context
 
@@ -232,6 +245,7 @@ This tool supports a corpus-based evaluation study using 6,876 sentence-aligned 
 | [DATA_SCHEMA.md](DATA_SCHEMA.md) | TypeScript interfaces, Pydantic models, CSV/storage schemas |
 | [SECURITY.md](SECURITY.md) | API key management, data handling, deployment checklist |
 | [METRICS_VALIDATION.md](METRICS_VALIDATION.md) | Metric implementations, clinical grading framework |
+| [PERFORMANCE_AND_RELIABILITY.md](PERFORMANCE_AND_RELIABILITY.md) | Where time and money go on large runs, what was optimised and why, Render sizing, responsive layout |
 | [CHANGELOG.md](CHANGELOG.md) | Version history and migration notes |
 
 ## Tech Stack

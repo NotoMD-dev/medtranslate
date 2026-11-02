@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import Header from "@/components/Header";
 import PairDetail from "@/components/PairDetail";
 import { pairsToCSVFile, sentenceMetricsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
 import { submitJob, pollUntilDone, fetchJobResults, cancelJob } from "@/lib/api";
 import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS, resolveModelId } from "@/lib/types";
-import type { JobStatusResponse, JobResults, ClinicalGrade } from "@/lib/types";
+import { countRun, isIncomplete, isRefused, applyRefusalOverrides, rowStatus, bleuBand, bandStyle, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
+import type { JobStatusResponse, JobResults, ClinicalGrade, SentenceMetrics, RefusalOverride } from "@/lib/types";
 import {
   getSessionDataAsync,
   getSessionPrompt,
@@ -19,6 +20,7 @@ import {
   setSessionGradesAsync,
   setSessionComparisonResultsAsync,
   getSessionComparisonResultsAsync,
+  getSessionRefusalOverrides,
 } from "@/lib/session";
 
 type PageState = "idle" | "submitting" | "running" | "complete" | "failed";
@@ -36,6 +38,7 @@ export default function TranslatePage() {
   const [rowCount, setRowCount] = useState(0);
   const [restoringSession, setRestoringSession] = useState(true);
   const [computeBertscore, setComputeBertscore] = useState(false);
+  const [overrides, setOverrides] = useState<Record<string, RefusalOverride>>({});
   const abortRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const lastPartialFetchRef = useRef(0);
@@ -46,6 +49,7 @@ export default function TranslatePage() {
 
   // Restore persisted job results on mount
   useEffect(() => {
+    setOverrides(getSessionRefusalOverrides());
     getSessionGradesAsync().then((persisted) => {
       if (persisted) setGrades(persisted);
     });
@@ -225,15 +229,14 @@ export default function TranslatePage() {
     }
   }, [computeBertscore, makeStatusCallback]);
 
-  const handleRunBertscoreOnly = useCallback(async () => {
-    if (!jobResults || jobResults.sentence_metrics.length === 0) {
-      setError("No translations available. Run translations first.");
-      return;
-    }
+  // -------------------------------------------------------------------------
+  // Shared job helpers. BERTScore-only, retry, and reviewer-override flows
+  // all end in the same "re-score everything in metrics-only mode" step; the
+  // backend's metric cache makes that step cheap for rows scored before.
+  // -------------------------------------------------------------------------
 
-    // Save current results so we can merge BERTScore back in
-    preRunResultsRef.current = jobResults;
-
+  /** Reset page state for a new job and return its AbortController. */
+  const beginRun = useCallback(() => {
     setPageState("submitting");
     setError(null);
     setJobStatus(null);
@@ -242,80 +245,144 @@ export default function TranslatePage() {
     lastOffsetRef.current = 0;
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    return controller;
+  }, []);
 
+  /**
+   * Submit rows as a metrics-only job (translations and failure statuses are
+   * carried over; nothing is re-translated) and wait for it to finish.
+   */
+  const runMetricsOnly = useCallback(
+    async (rows: SentenceMetrics[], withBert: boolean, signal: AbortSignal): Promise<JobResults> => {
+      const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
+      const model = resolveModelId(getSessionModel());
+      const { job_id } = await submitJob(sentenceMetricsToCSVFile(rows, "rescore.csv", true), {
+        model, systemPrompt, temperature: 0, maxTokens: 1024, computeBertscore: withBert, metricsOnly: true,
+      });
+      setSessionJobId(job_id);
+      setRowCount(rows.length);
+      setPageState("running");
+      return pollUntilDone(
+        job_id,
+        async (status) => { if (!abortRef.current) setJobStatus(status); },
+        2000,
+        signal,
+      );
+    },
+    [],
+  );
+
+  /** Persist a finished result set everywhere the other pages read it. */
+  const commitResults = useCallback(async (results: JobResults) => {
+    setJobResults(results);
+    setRowCount(results.sentence_metrics.length);
+    await setSessionJobResultsAsync(results);
+    const model = resolveModelId(getSessionModel());
+    const comp = (await getSessionComparisonResultsAsync()) || {};
+    comp[model] = results;
+    await setSessionComparisonResultsAsync(comp);
+  }, []);
+
+  /** Re-score the given rows and replace the current results, keeping the original translation config. */
+  const rescore = useCallback(
+    async (rows: SentenceMetrics[], withBert: boolean, failureMessage: string) => {
+      const prev = jobResults;
+      if (!prev) return;
+      preRunResultsRef.current = prev;
+      const controller = beginRun();
+      try {
+        const fresh = await runMetricsOnly(rows, withBert, controller.signal);
+        if (fresh.status === "complete") {
+          await commitResults({ ...fresh, translation_config: prev.translation_config ?? fresh.translation_config });
+        } else {
+          setJobResults(prev);
+          if (!abortRef.current) setError(failureMessage);
+        }
+      } catch (err) {
+        if (!abortRef.current) {
+          setJobResults(prev);
+          setError((err as Error).message);
+        }
+      } finally {
+        preRunResultsRef.current = null;
+        setPageState("complete");
+      }
+    },
+    [jobResults, beginRun, runMetricsOnly, commitResults],
+  );
+
+  const handleRunBertscoreOnly = useCallback(async () => {
+    if (!jobResults || jobResults.sentence_metrics.length === 0) {
+      setError("No translations available. Run translations first.");
+      return;
+    }
+    await rescore(applyRefusalOverrides(jobResults.sentence_metrics, overrides), true, "BERTScore run did not complete.");
+  }, [jobResults, overrides, rescore]);
+
+  /** Re-score so reviewer refusal overrides are excluded from corpus BLEU as well. */
+  const handleApplyOverrides = useCallback(async () => {
+    if (!jobResults) return;
+    const keepBert = jobResults.sentence_metrics.some((s) => s.bertscore_f1 != null);
+    await rescore(applyRefusalOverrides(jobResults.sentence_metrics, overrides), keepBert, "Re-score did not complete.");
+  }, [jobResults, overrides, rescore]);
+
+  /**
+   * Retry only rows that failed for infrastructure reasons. Refusals are model
+   * behaviour and are not retried. Translate the incomplete rows as a fresh
+   * job, merge by pair_id, then re-score everything together so corpus BLEU
+   * and the averages cover every row.
+   */
+  const handleRetryIncomplete = useCallback(async () => {
+    if (!jobResults) return;
+    const incomplete = jobResults.sentence_metrics.filter(isIncomplete);
+    if (incomplete.length === 0) return;
+    const prev = jobResults;
+    preRunResultsRef.current = prev;
+    const controller = beginRun();
     try {
       const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
       const model = resolveModelId(getSessionModel());
-      const csvFile = sentenceMetricsToCSVFile(jobResults.sentence_metrics);
+      const keepBert = prev.sentence_metrics.some((s) => s.bertscore_f1 != null);
 
-      const { job_id } = await submitJob(csvFile, {
-        model,
-        systemPrompt,
-        temperature: 0,
-        maxTokens: 1024,
-        computeBertscore: true,
-        metricsOnly: true,
+      const { job_id } = await submitJob(sentenceMetricsToCSVFile(incomplete, "retry.csv", false), {
+        model, systemPrompt, temperature: 0, maxTokens: 1024, computeBertscore: false,
       });
-
       setSessionJobId(job_id);
+      setRowCount(incomplete.length);
       setPageState("running");
-
-      const newResults = await pollUntilDone(
+      const retried = await pollUntilDone(
         job_id,
-        async (status) => {
-          if (!abortRef.current) setJobStatus(status);
-        },
+        async (status) => { if (!abortRef.current) setJobStatus(status); },
         2000,
         controller.signal,
       );
 
-      // Merge: keep the previous METEOR/BLEU data and layer in BERTScore
-      const prev = preRunResultsRef.current;
-      if (prev && newResults.status === "complete") {
-        const mergedSentences = prev.sentence_metrics.map((existing) => {
-          const fresh = newResults.sentence_metrics.find(
-            (s) => s.pair_id === existing.pair_id,
-          );
-          return {
-            ...existing,
-            meteor: existing.meteor ?? fresh?.meteor ?? null,
-            bertscore_f1: fresh?.bertscore_f1 ?? existing.bertscore_f1 ?? null,
-          };
-        });
+      const fresh = new Map(retried.sentence_metrics.map((s) => [s.pair_id, s]));
+      const merged = prev.sentence_metrics.map((s) => (fresh.has(s.pair_id) ? { ...s, ...fresh.get(s.pair_id)! } : s));
+      const recovered = retried.sentence_metrics.filter((s) => s.llm_english_translation).length;
 
-        const mergedResults: JobResults = {
-          ...prev,
-          sentence_metrics: mergedSentences,
-          corpus_metrics: prev.corpus_metrics ?? newResults.corpus_metrics,
-          library_versions: newResults.library_versions ?? prev.library_versions,
-        };
-
-        setJobResults(mergedResults);
-        await setSessionJobResultsAsync(mergedResults);
-
-        const comp = (await getSessionComparisonResultsAsync()) || {};
-        comp[model] = mergedResults;
-        await setSessionComparisonResultsAsync(comp);
-      } else {
-        setJobResults(newResults);
-        await setSessionJobResultsAsync(newResults);
+      let finalResults: JobResults = { ...prev, sentence_metrics: merged };
+      if (recovered > 0) {
+        const rescored = await runMetricsOnly(applyRefusalOverrides(merged, overrides), keepBert, controller.signal);
+        if (rescored.status === "complete") {
+          finalResults = { ...rescored, translation_config: prev.translation_config ?? rescored.translation_config };
+        }
       }
-
-      preRunResultsRef.current = null;
-      const isStopped = newResults.status === "cancelled" || abortRef.current;
-      setPageState(
-        isStopped ? "complete" : newResults.status === "complete" ? "complete" : "failed",
-      );
+      await commitResults(finalResults);
+      if (recovered < incomplete.length) {
+        setError(`${incomplete.length - recovered} of ${incomplete.length} retried rows failed again. You can retry once the provider recovers.`);
+      }
     } catch (err) {
       if (!abortRef.current) {
-        // Restore previous results on error so nothing is lost
-        if (preRunResultsRef.current) setJobResults(preRunResultsRef.current);
-        preRunResultsRef.current = null;
+        setJobResults(prev);
+        setRowCount(prev.sentence_metrics.length);
         setError((err as Error).message);
-        setPageState("complete"); // stay in complete so existing data is visible
       }
+    } finally {
+      preRunResultsRef.current = null;
+      setPageState("complete");
     }
-  }, [jobResults]);
+  }, [jobResults, overrides, beginRun, runMetricsOnly, commitResults]);
 
   const handleAbort = useCallback(async () => {
     abortRef.current = true;
@@ -347,9 +414,13 @@ export default function TranslatePage() {
     downloadFile(csv, "medtranslate_results.csv");
   }, [jobResults, grades]);
 
-  const sentences = jobResults?.sentence_metrics ?? [];
-  const completedCount = sentences.filter((s) => s.llm_english_translation && !s.error).length;
-  const errorCount = sentences.filter((s) => s.error).length;
+  const rawSentences = jobResults?.sentence_metrics ?? [];
+  // Reviewer refusal overrides are applied for display. The stored results
+  // (and corpus BLEU) change only when "Apply reviewer overrides" re-scores.
+  const sentences = useMemo(() => applyRefusalOverrides(rawSentences, overrides), [rawSentences, overrides]);
+  const pendingOverrides = rawSentences.filter((s) => isRefused(s) && overrides[s.pair_id]).length;
+  const counts = countRun(sentences);
+  const completedCount = counts.completed;
 
   const progressPct = jobStatus && jobStatus.total > 0
     ? (jobStatus.translated / jobStatus.total) * 100
@@ -361,8 +432,9 @@ export default function TranslatePage() {
   const isBertscorePhase = !!jobStatus && jobStatus.bertscore_total > 0;
 
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
-  const canRunBertOnly =
-    pageState !== "running" && pageState !== "submitting" && completedCount > 0;
+  const idle = pageState !== "running" && pageState !== "submitting";
+  const canRunBertOnly = idle && completedCount > 0;
+  const canRetry = idle && counts.incomplete > 0;
 
   return (
     <div className="page-container">
@@ -376,9 +448,28 @@ export default function TranslatePage() {
         <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
           <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{rowCount}</strong> pairs
           {" "}&middot; Model: <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{modelLabel}</strong>
-          {pageState === "complete" && <>{" "}&middot; {completedCount} completed &middot; {errorCount} errors</>}
-          {pageState === "running" && jobStatus && <>{" "}&middot; {jobStatus.translated} translated</>}
+          {pageState === "complete" && (
+            <>
+              {" "}&middot; {completedCount} completed
+              {counts.refused > 0 && <> &middot; <span style={{ color: "var(--danger)" }}>{counts.refused} refused</span></>}
+              {counts.excluded > 0 && <> &middot; <span style={{ color: "var(--text-muted)" }}>{counts.excluded} excluded by reviewer</span></>}
+              {counts.incomplete > 0 && <> &middot; <span style={{ color: "var(--warning)" }}>{counts.incomplete} incomplete</span></>}
+              {counts.formatWarnings > 0 && <> &middot; <span style={{ color: "var(--warning)" }}>{counts.formatWarnings} format warning{counts.formatWarnings !== 1 ? "s" : ""}</span></>}
+            </>
+          )}
+          {pageState === "running" && jobStatus && (
+            <>
+              {" "}&middot; {jobStatus.translated} translated
+              {(jobStatus.refused_rows ?? 0) > 0 && <> &middot; {jobStatus.refused_rows} refused</>}
+              {(jobStatus.incomplete_rows ?? 0) > 0 && <> &middot; {jobStatus.incomplete_rows} incomplete</>}
+            </>
+          )}
         </p>
+        {pageState === "complete" && counts.scored > 0 && counts.scored < SMALL_SAMPLE_THRESHOLD && (
+          <p style={{ fontSize: 12, color: "var(--warning)", margin: "8px 0 0" }}>
+            Small sample: {counts.scored} scored rows. Corpus BLEU and the averages will move a lot with each added sentence; treat this run as a smoke test.
+          </p>
+        )}
       </div>
 
       {/* Corpus BLEU hero metric */}
@@ -389,8 +480,8 @@ export default function TranslatePage() {
             <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--accent-text)", lineHeight: 1, marginBottom: 16 }}>
               {jobResults.corpus_metrics.overall.bleu_score.toFixed(2)}
             </div>
-            <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--warning-light)", color: "var(--warning)", border: "1px solid var(--warning-border)" }}>
-              Moderate
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, ...bandStyle(bleuBand(jobResults.corpus_metrics.overall.bleu_score).tone) }}>
+              {bleuBand(jobResults.corpus_metrics.overall.bleu_score).label}
             </span>
           </div>
         </div>
@@ -417,7 +508,7 @@ export default function TranslatePage() {
         )}
 
         {pageState === "idle" || pageState === "complete" || pageState === "failed" ? (
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="button-row">
             <button
               onClick={handleRun}
               disabled={rowCount === 0}
@@ -430,6 +521,20 @@ export default function TranslatePage() {
             >
               {pageState === "complete" || pageState === "failed" ? "Re-run Translations" : "Run Translations"}
             </button>
+            {canRetry && (
+              <button
+                onClick={handleRetryIncomplete}
+                title="Re-translate only the rows that failed for provider or configuration reasons, then re-score the whole set."
+                style={{
+                  fontFamily: "var(--font)", fontSize: 13, fontWeight: 500, borderRadius: "var(--radius-sm)",
+                  padding: "10px 24px", cursor: "pointer",
+                  background: "var(--warning-light)", color: "var(--warning)",
+                  border: "1px solid var(--warning-border)", transition: "all 0.2s",
+                }}
+              >
+                Retry {counts.incomplete} incomplete row{counts.incomplete !== 1 ? "s" : ""}
+              </button>
+            )}
             {canRunBertOnly && (
               <button
                 onClick={handleRunBertscoreOnly}
@@ -512,6 +617,21 @@ export default function TranslatePage() {
         </div>
       )}
 
+      {/* Reviewer overrides not yet reflected in corpus BLEU */}
+      {pendingOverrides > 0 && idle && (
+        <div style={{ marginBottom: 20, padding: 16, background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", fontSize: 13, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ flex: 1, minWidth: 200 }}>
+            {pendingOverrides} refusal{pendingOverrides !== 1 ? "s" : ""} marked legitimate by a reviewer {pendingOverrides !== 1 ? "are" : "is"} shown as excluded, but corpus BLEU still counts {pendingOverrides !== 1 ? "them" : "it"} until you re-score.
+          </span>
+          <button
+            onClick={handleApplyOverrides}
+            style={{ fontFamily: "var(--font)", fontSize: 13, fontWeight: 500, padding: "8px 16px", borderRadius: "var(--radius-sm)", background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer" }}
+          >
+            Apply reviewer overrides &amp; re-score
+          </button>
+        </div>
+      )}
+
       {/* Error banner */}
       {error && (
         <div style={{ marginBottom: 20, padding: 16, background: "var(--danger-light)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-sm)", color: "var(--danger)", fontSize: 14 }}>
@@ -564,6 +684,7 @@ export default function TranslatePage() {
                 {sentences.slice(0, 200).map((r, i) => {
                   const hasError = !!r.error;
                   const hasTranslation = !!r.llm_english_translation;
+                  const status = rowStatus(r);
                   return (
                     <tr
                       key={`${r.pair_id}-${i}`}
@@ -585,8 +706,9 @@ export default function TranslatePage() {
                         </span>
                       </td>
                       <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.source_text || r.spanish_source}</td>
-                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: hasTranslation ? "var(--text-primary)" : "var(--text-muted)" }}>
-                        {r.llm_english_translation || (hasError ? "Failed" : "...")}
+                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: hasTranslation ? "var(--text-primary)" : "var(--text-muted)" }} title={r.format_warning ? `Format warning: ${r.format_warning}` : r.error ?? undefined}>
+                        {r.format_warning && <span style={{ color: "var(--warning)", marginRight: 6 }} aria-label="Format warning">&#9888;</span>}
+                        {r.llm_english_translation || (hasError ? r.error : "...")}
                       </td>
                       <td style={{ color: "var(--accent-text)", fontWeight: 600 }}>
                         {r.meteor != null ? r.meteor.toFixed(3) : "--"}
@@ -597,13 +719,11 @@ export default function TranslatePage() {
                         </td>
                       )}
                       <td>
-                        <span style={{
-                          display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, border: "1px solid",
-                          background: hasError ? "var(--danger-light)" : hasTranslation ? "var(--success-light)" : "var(--bg-inset)",
-                          color: hasError ? "var(--danger)" : hasTranslation ? "var(--success)" : "var(--text-muted)",
-                          borderColor: hasError ? "var(--danger-border)" : hasTranslation ? "var(--success-border)" : "var(--border)",
+                        <span title={r.error ?? undefined} style={{
+                          display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600,
+                          ...bandStyle(status.tone),
                         }}>
-                          {hasError ? "Error" : hasTranslation ? "Complete" : "Pending"}
+                          {status.label}
                         </span>
                       </td>
                     </tr>

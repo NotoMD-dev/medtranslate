@@ -18,9 +18,14 @@ CORS_ORIGINS: list[str] = (
 
 # Default translation settings
 DEFAULT_MODEL: str = os.environ.get("DEFAULT_MODEL", "gpt-5.6-sol")
+# Keep in sync with buildSystemPrompt() in lib/types.ts. The final sentence
+# matters for scoring: metrics compare the whole reply to the reference, so a
+# preamble or note counts as translation text and lowers BLEU sharply.
 DEFAULT_SYSTEM_PROMPT: str = (
     "You are a medical interpreter. Translate the following Spanish clinical "
-    "text into English, preserving all medical terminology and clinical meaning."
+    "text into English, preserving all medical terminology and clinical meaning. "
+    "Output only the English translation, with no preamble, notes, quotation "
+    "marks, or explanations."
 )
 DEFAULT_TEMPERATURE: float = 0.0
 DEFAULT_MAX_TOKENS: int = 1024

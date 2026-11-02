@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from app.config import CORS_ORIGINS, DEFAULT_MODEL, DEFAULT_SYSTEM_PROMPT, SOURCE_LANGUAGE_COLUMNS
 from app.jobs import InputRow, cancel_job, create_job, execute_job, get_job_results, get_job_status, _db_cleanup_old_jobs
 from app.schemas import JobCreated, JobResults, JobStatusResponse, ModelConfig
-from app.translate import effective_reasoning_effort
+from app.translate import effective_reasoning_effort, effective_temperature
 
 logging.basicConfig(
     level=logging.INFO,
@@ -177,6 +177,10 @@ def _raw_rows_to_input(raw_rows: list[dict[str, str]], source_column: str = "spa
                 spanish_source=source_text,  # backward compat
                 english_reference=raw.get("english_reference", ""),
                 llm_english_translation=raw.get("llm_english_translation", ""),
+                # Optional: lets a metrics-only re-score keep failed rows'
+                # status instead of treating them as untranslated.
+                error=raw.get("error", "") or "",
+                error_kind=raw.get("error_kind", "") or "",
             )
         )
     return rows
@@ -279,11 +283,15 @@ async def submit_job(
 
     rows = _raw_rows_to_input(raw_rows, detected_col)
 
-    # Force deterministic decoding for reproducible metrics across runs.
+    # Request temperature 0 wherever the model accepts it (older OpenAI chat
+    # models). Reasoning models and Claude reject the parameter, so for them
+    # the recorded value is None: nothing was sent and output is not
+    # guaranteed to be deterministic. The ``temperature`` form field is still
+    # accepted for API compatibility but is overridden here.
     config = ModelConfig(
         model=model,
         system_prompt=system_prompt,
-        temperature=0.0,
+        temperature=effective_temperature(model, 0.0),
         max_tokens=max_tokens,
         compute_bertscore=compute_bertscore,
         metrics_only=metrics_only,

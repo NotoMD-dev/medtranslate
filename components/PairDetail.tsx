@@ -25,7 +25,7 @@ export default function PairDetail({ sentence, grade, onGrade, onClose }: Props)
       </div>
 
       {/* Three-column text comparison */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24, marginBottom: 20 }}>
+      <div className="pair-grid">
         <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>Source Text</div>
           <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", maxHeight: 176, overflow: "auto" }}>{sentence.source_text || sentence.spanish_source}</div>
@@ -41,8 +41,8 @@ export default function PairDetail({ sentence, grade, onGrade, onClose }: Props)
       </div>
 
       {/* Metrics row + grading */}
-      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        <div style={{ display: "flex", gap: 12 }}>
+      <div className="pair-footer">
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           {(
             [
               ["METEOR", sentence.meteor],
@@ -55,14 +55,20 @@ export default function PairDetail({ sentence, grade, onGrade, onClose }: Props)
             </div>
           ))}
         </div>
-        <div style={{ marginLeft: "auto" }}>
+        <div className="pair-grade">
           <GradeSelector value={grade} onChange={onGrade} />
         </div>
       </div>
 
+      {sentence.format_warning && (
+        <div style={{ marginTop: 12, padding: 12, background: "var(--warning-light)", border: "1px solid var(--warning-border)", borderRadius: "var(--radius-xs)", color: "var(--warning)", fontSize: 12 }}>
+          <strong>Format warning:</strong> the reply {sentence.format_warning}. The text is scored exactly as returned, so this can lower BLEU without a translation error.
+        </div>
+      )}
+
       {sentence.error && (
-        <div style={{ marginTop: 12, padding: 12, background: "var(--danger-light)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-xs)", color: "var(--danger)", fontSize: 12 }}>
-          {sentence.error}
+        <div style={{ marginTop: 12, padding: 12, background: sentence.error_kind === "refusal" ? "var(--danger-light)" : "var(--warning-light)", border: `1px solid ${sentence.error_kind === "refusal" ? "var(--danger-border)" : "var(--warning-border)"}`, borderRadius: "var(--radius-xs)", color: sentence.error_kind === "refusal" ? "var(--danger)" : "var(--warning)", fontSize: 12 }}>
+          <strong>{sentence.error_kind === "refusal" ? "Refused (scored as 0):" : "Incomplete (not scored):"}</strong> {sentence.error}
         </div>
       )}
     </div>

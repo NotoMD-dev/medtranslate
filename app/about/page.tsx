@@ -24,7 +24,7 @@ const STEPS = [
   },
   {
     title: "Review",
-    text: "Sentences that score poorly on METEOR (below 0.4 by default) are flagged. A physician reads the original, the human translation, and the AI translation side by side and grades how serious any error is, from 0 (no error) to 3 (could change care).",
+    text: "Sentences that score poorly on METEOR (below 0.4 by default) are flagged, and any sentence the model refused to translate goes to the top of the queue. A physician reads the original, the human translation, and the AI translation side by side and grades how serious any error is, from 0 (no error) to 3 (could change care).",
   },
   {
     title: "Compare",
@@ -145,6 +145,7 @@ export default function AboutPage() {
       <div className="anim d3" style={{ marginBottom: 48 }}>
         <SectionLabel>Models and effort</SectionLabel>
         <Card style={{ padding: 0, overflow: "hidden" }}>
+          <div className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -163,11 +164,12 @@ export default function AboutPage() {
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>{m.provider}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{m.effort}</td>
-                  <td style={{ fontSize: 13, lineHeight: 1.6 }}>{m.notes}</td>
+                  <td className="wrap" style={{ fontSize: 13, lineHeight: 1.6, minWidth: 260 }}>{m.notes}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </Card>
         <div style={{ marginTop: 16, display: "grid", gap: 16 }} className="metrics-grid-2">
           <Card style={{ padding: 24 }}>
@@ -213,6 +215,7 @@ export default function AboutPage() {
       <div className="anim d5" style={{ marginBottom: 48 }}>
         <SectionLabel>Physician grading scale</SectionLabel>
         <Card style={{ padding: 0, overflow: "hidden" }}>
+          <div className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -228,11 +231,12 @@ export default function AboutPage() {
                     <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: "50%", background: g.bg, color: g.color, fontWeight: 700, fontSize: 14 }}>{g.grade}</span>
                   </td>
                   <td style={{ fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{g.label}</td>
-                  <td style={{ fontSize: 14, lineHeight: 1.6 }}>{g.description}</td>
+                  <td className="wrap" style={{ fontSize: 14, lineHeight: 1.6, minWidth: 240 }}>{g.description}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </Card>
         <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 12, lineHeight: 1.6 }}>
           Reviewers can also flag the human reference itself when it looks wrong, so a low score caused by a weak reference is not blamed on the AI.

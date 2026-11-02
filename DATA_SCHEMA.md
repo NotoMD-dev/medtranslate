@@ -37,9 +37,16 @@ interface SentenceMetrics {
   llm_english_translation: string;
   meteor: number | null;
   bertscore_f1: number | null;
+  /** Exact error message if the row failed. */
   error: string | null;
+  /** "refusal" (scored 0) | "infrastructure" (unscored, retryable) | "excluded" (reviewer override, unscored) | null */
+  error_kind?: "refusal" | "infrastructure" | "excluded" | null;
+  /** Heuristic note when the reply looks wrapped; the text is never modified. */
+  format_warning?: string | null;
 }
 ```
+
+Row classification helpers live in `lib/metrics.ts`: `isCompleted`, `isRefused`, `isIncomplete`, `isScored` (completed or refused with a METEOR value), `countRun`, and `failureReasons`.
 
 ### `CorpusMetrics`
 
@@ -85,10 +92,17 @@ Translation configuration used for a job.
 interface ModelConfig {
   model: string;
   system_prompt: string;
-  temperature: number;
+  /** Temperature actually sent to the provider, or null if the model rejects it (not sent). */
+  temperature: number | null;
   max_tokens: number;
+  /** Reasoning/thinking effort the backend applied, or null if the model takes none. */
+  reasoning_effort?: string | null;
 }
 ```
+
+`temperature` is `0.0` only for models that accept the parameter (older OpenAI chat models). GPT-5.x reasoning models and current Claude models reject it, so for them the backend sends nothing and records `null`; those runs are not guaranteed to be deterministic.
+
+`reasoning_effort` is set by the backend at job creation from `OPENAI_REASONING_EFFORT` (GPT-5.x reasoning models) or `ANTHROPIC_EFFORT` (Claude 4.6+). It is part of the translation-cache key and is displayed on the Compare page.
 
 ### `JobResults`
 
@@ -122,7 +136,10 @@ interface JobStatusResponse {
   total: number;
   translated: number;
   scored: number;
-  failed_rows: number;
+  failed_rows: number;        // refused_rows + incomplete_rows
+  refused_rows?: number;      // model declined / empty reply (scored 0)
+  incomplete_rows?: number;   // provider / config failure (unscored)
+  excluded_rows?: number;     // reviewer-overridden refusals (unscored)
   error: string | null;
 }
 ```
@@ -163,7 +180,7 @@ Defined in `medtranslate-backend/app/schemas.py`. These mirror the TypeScript in
 | `DatasetCorpusMetrics` | Overall + per-dataset corpus BLEU |
 | `LibraryVersions` | Version strings for reproducibility |
 | `JobResults` | Complete response from GET /v1/jobs/{id}/results |
-| `ModelConfig` | Translation configuration (model, prompt, temp, max_tokens) |
+| `ModelConfig` | Translation configuration (model, prompt, temp, max_tokens, compute_bertscore, metrics_only, reasoning_effort) |
 
 ---
 
@@ -171,16 +188,18 @@ Defined in `medtranslate-backend/app/schemas.py`. These mirror the TypeScript in
 
 ### Input Dataset CSV
 
-Produced by `scripts/build_dataset.py` or manually prepared.
+Produced by `scripts/build_dataset.py`, manually prepared, or one of the bundled demo files in `public/demo/` (`medtranslate_demo_spanish.csv`, `medtranslate_demo_french.csv`; 15 synthetic rows each, `source = "Demo_Synthetic"`).
 
 | Column | Required | Type | Description |
 |---|---|---|---|
-| `spanish_source` | **Yes** | string | Spanish clinical text to be translated |
+| `<language>_source` | **Yes** | string | Source clinical text. The column name follows the selected source language: `spanish_source`, `french_source`, `korean_source`, `chinese_source`, `portuguese_source`, `german_source`, `arabic_source`, `japanese_source`, `russian_source`. A generic `source_text` column is also accepted. |
 | `pair_id` | No | string | Unique row identifier (auto-generated if missing) |
 | `source` | No | string | Corpus origin (defaults to `"ClinSpEn_ClinicalCases"`) |
 | `content_type` | No | string | Document type (defaults to `"clinical_case_report"`) |
 | `english_reference` | No | string | Human reference translation (required for metrics) |
 | `llm_english_translation` | No | string | Pre-existing translation (for re-scoring) |
+| `error` | No | string | Carried over on metrics-only re-scores so a failed row keeps its status |
+| `error_kind` | No | string | `refusal`, `infrastructure`, or `excluded`, paired with `error` |
 
 ### Input XLSX
 
@@ -201,13 +220,21 @@ Exported from the frontend after a job completes.
 | `meteor_score` | float | METEOR score (4 decimal places) |
 | `bertscore_f1` | float | BERTScore F1 (4 decimal places) |
 | `clinical_significance_grade` | integer | Clinical grade (0–3), empty if not graded |
-| `error` | string | Error message if translation failed |
+| `reference_flag_issues` | string | Reviewer's reference-quality flags, `;`-separated |
+| `reference_flag_notes` | string | Reviewer's free-text note on the reference |
+| `status` | string | `completed`, `refused`, `incomplete`, or `pending` |
+| `error` | string | Exact error message if translation failed |
+| `format_warning` | string | Wrapper-text heuristic note, if any |
 
 ---
 
 ## Client-Side Storage
 
 ### localStorage Schema
+
+`medtranslate:reviewThreshold` (number, 0–1) stores the METEOR review threshold set on the Review page; the Metrics page reads it for its "Flagged for Review" count. Absent means the default `0.4`.
+
+`medtranslate:refusalOverrides` (`Record<pair_id, { note: string; at: string }>`) stores reviewer decisions that a refusal was legitimate. Every page applies it with `applyRefusalOverrides()` before computing counts and averages; the Translate page's "Apply reviewer overrides & re-score" sends the rows with `error_kind=excluded` so the backend's corpus BLEU drops them too.
 
 Session state is persisted in the browser's `localStorage` via `lib/session.ts`.
 

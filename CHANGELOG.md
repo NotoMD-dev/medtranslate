@@ -4,6 +4,63 @@ All notable changes to the MedTranslate project are documented in this file. The
 
 ---
 
+## [1.6.0] - 2026-11-02
+
+See [PERFORMANCE_AND_RELIABILITY.md](PERFORMANCE_AND_RELIABILITY.md) for the reasoning behind each change and measured effects.
+
+### Changed — Backend performance and cost
+
+- **Batched translation cache I/O**: one chunked `IN (...)` read before translation and one `executemany` write per chunk, replacing one SQLite connection per sentence
+- **Quadratic progress counting removed** from the translation fan-out loop; a 3,000-row run's bookkeeping dropped from 4.8 s to 0.7 s in the stubbed test
+- **Per-sentence metric cache** (`metric_cache` table): METEOR and BERTScore values are stored per candidate/reference pair and reused on every re-score, so BERTScore-only runs, retries, and override re-scores only compute rows that are new
+- **BERTScore model cache on the persistent disk**: the subprocess sets `HF_HOME` to `<db dir>/hf-cache` unless already set, so roberta-base is downloaded once per deployment, not once per container start
+- **Upload halved**: the submission CSV no longer repeats the source text in a legacy `spanish_source` column
+
+### Added — Reviewer refusal override
+
+- A physician can mark a refusal as legitimate on the Review page (with an optional note). The pair becomes `error_kind: "excluded"`: left out of METEOR, BERTScore, counts, and, after "Apply reviewer overrides & re-score" on the Translate page, corpus BLEU. The decision is stored per `pair_id`, applies to every model's run of that pair, can be undone, and is exported as status `excluded`
+- `JobStatusResponse.excluded_rows`; Metrics shows excluded counts and warns when overrides are not yet reflected in corpus BLEU; Compare shows an "Excluded by reviewer" row
+
+### Changed — Frontend structure
+
+- Translate page re-score flows (BERTScore-only, retry, override) share `beginRun` / `runMetricsOnly` / `commitResults` / `rescore` helpers with one error path
+- `lib/metrics.ts: rowStatus()` is the single source for row state names and colours; CSV exports use it
+
+### Changed — Responsive layout
+
+- `.table-scroll` wrappers on every card table (Compare, About, Metrics, grading-scale modal); `.pair-grid` stacks the three text panels on phones; `.pair-footer`, `.grade-selector`, `.button-row` wrap; `.compare-selectors` stack under 640 px; the BLEU signature wraps. Verified with a 390 px Playwright pass over every page and modal: no clipped controls and the layout viewport equals the device width
+
+### Removed
+
+- `medtranslate-backend/source/` (a committed virtualenv, 749 files) and `medtranslate-backend/worker.py` (placeholder)
+
+---
+
+## [1.5.0] - 2026-11-02
+
+### Changed — Prompt
+
+- The default system prompt (frontend `buildSystemPrompt()` and backend `DEFAULT_SYSTEM_PROMPT`) now ends with: *"Output only the English translation, with no preamble, notes, quotation marks, or explanations."* Metrics score the whole reply, so wrapper text was lowering BLEU sharply (precision-based) while barely moving METEOR (recall-weighted). **Runs made with the old prompt are not comparable with new runs**; the Compare page now warns when two runs used different prompts.
+
+### Added — Failure accounting
+
+- **Error classes.** `translate.TranslationRefused` is raised for content filters, explicit declines, and empty replies; `classify_error()` maps every failure to `"refusal"` or `"infrastructure"`. Each failed row keeps its exact provider message in `error` and its class in `error_kind` (previously collapsed to the string "Translation failed").
+- **Refusals are scored.** A refused row gets METEOR 0, BERTScore 0 (when BERTScore is on), and an empty hypothesis in corpus BLEU, so a model that declines is penalised instead of silently dropped. Infrastructure failures stay unscored.
+- **Counts.** `JobStatusResponse` and the persisted job carry `refused_rows` and `incomplete_rows` (`failed_rows` is their sum). Metrics page shows a Translation Failures section with a reason breakdown; Compare shows Refused and Incomplete rows per model; Translate shows the counts in the header and the real error per row.
+- **Retry incomplete rows.** The Translate page re-translates only infrastructure failures as a fresh job, merges the results, and re-scores the whole set in metrics-only mode so corpus BLEU covers every row. The submission CSV gained optional `error` and `error_kind` columns so a metrics-only re-score keeps failed rows' status.
+- **Format warnings.** `app/output_checks.py: detect_format_warning()` flags replies that start with a preamble, contain a translator's note, are wrapped in quotation marks, use markdown, or add paragraphs the source did not have. Stored as `SentenceMetrics.format_warning`, shown in the Translate table, PairDetail, and the Review queue, and exported. The text itself is never modified.
+- **Review queue.** Refused rows enter the queue first with a "Refused" badge and the error reason; completed rows below the threshold follow in dataset order.
+- **Shared review threshold.** The Review page threshold is saved to the session and the Metrics page "Flagged for Review" count uses it instead of a hard-coded 0.4.
+- **Small-sample caution** on Translate, Metrics, and Compare when fewer than 50 scored rows are present.
+- **Exports** (`medtranslate_results.csv`, `medtranslate_review.csv`) gained `status`, `error`, and `format_warning` columns.
+
+### Fixed
+
+- Rows never attempted because a job was stopped are left pending instead of being marked failed.
+- The Review page labelled every non-ClinSpEn source as "UMass"; it now shows the actual source name.
+
+---
+
 ## [1.4.0] - 2026-11-02
 
 ### Added — Onboarding and Explanations
@@ -16,6 +73,18 @@ All notable changes to the MedTranslate project are documented in this file. The
 ### Fixed
 
 - **Compare tally**: a metric that was not computed for either run (typically BERTScore) was counted as a "tie"; it is now shown as "Not computed" and left out of the win/tie counts, with a hint on how to enable it
+- **Translation cache ignored reasoning effort**: the SQLite cache key was `(model, system_prompt, temperature, source_text)`, so changing `OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT` and re-running the same file silently reused translations produced at the old effort. The effort is now part of the key, and the effort recorded on the job is taken from the same helper that the translator uses, so results and cache agree. Existing cache rows are orphaned (one extra provider call per unique text on the next run)
+
+- **Temperature was reported as `0.0` for every job, including models that never received it**: `POST /v1/jobs` forced `temperature=0.0` into `translation_config` "for deterministic decoding", but GPT-5.x reasoning models and current Claude models reject the parameter and it was never sent. `translation_config.temperature` is now the value actually forwarded (`0.0` for older OpenAI chat models, `null` otherwise), computed by `translate.effective_temperature()` next to the branching that decides what each provider receives. The cache still stores `null`-temperature runs (the model takes no temperature, so there is nothing more deterministic to wait for); non-zero temperatures are still never cached. Frontend `ModelConfig.temperature` is now `number | null`
+
+### Documentation
+
+- **ARCHITECTURE.md**: directory structure (Compare/About pages, MetricGuide, `public/demo/`, `bertscore_worker.py`); pipeline diagram corrected to the real phase order (METEOR → BLEU → BERTScore) with dedupe and cache; new "What Triggers Clinician Review", "Job Store: Memory plus SQLite", "Translation Cache", and "Reasoning Effort Is Recorded" sections replacing the stale "In-Memory Job Store (MVP)"
+- **SECURITY.md**: the "No Persistent PHI Storage" section was wrong; the backend persists jobs and a translation cache to SQLite. Rewritten to describe what is stored, retention, and how to run memory-only; added a note that `public/demo/` is public and must stay synthetic; LLM-provider section now covers Anthropic
+- **METRICS_VALIDATION.md**: which rows are scored, how translations are produced (dedupe, cache, effort, temperature not sent, preamble caveat), and an explicit "What Triggers Clinician Review" table
+- **DATA_SCHEMA.md**: `reasoning_effort` on `ModelConfig`; generalized source-language column; demo files
+- **SYSTEMS_DESIGN.md**: information architecture now lists Compare and About; `MetricGuide` component spec (including the portal rationale); Upload page demo controls; Compare and About page specifications
+- **medtranslate-backend/README.md**: project structure, source-column detection, recorded translation settings, translation cache, additional environment variables
 
 ---
 

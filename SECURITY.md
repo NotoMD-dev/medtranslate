@@ -75,17 +75,22 @@ Client-side XLSX parsing was identified as a **high-severity vulnerability**. Th
 
 ---
 
-## No Persistent PHI Storage
+## PHI Storage
 
 ### Backend
 
-The backend uses an **in-memory job store**. Job data exists only while the server process is running. There is:
+The backend keeps active jobs in memory **and persists them to SQLite** (`DATABASE_PATH`, default `/data/medtranslate.db`, typically a mounted Render Disk). Operators handling PHI must treat that file as containing clinical text:
 
-- No database
-- No persistent file storage
-- No disk writes of clinical text
+- Job rows (source text, reference, LLM translation, metrics) are written on every status change and at completion.
+- A `translation_cache` table stores each unique source text and its translation, keyed on model, prompt, temperature, and reasoning effort, so re-runs do not repeat API calls.
+- Terminal jobs older than 7 days are deleted at startup; the translation cache is not expired automatically.
+- If the path is not writable the backend runs memory-only and nothing is written to disk.
 
-When the server restarts, all job data is cleared.
+To run with no disk persistence, set `DATABASE_PATH` to an unwritable location or an ephemeral directory, and accept that jobs will not survive restarts.
+
+### Demo datasets
+
+`public/demo/` ships two small CSVs that are served as public static files. They are entirely synthetic and contain no real patient data. Do not place real datasets under `public/`; anything there is downloadable by anyone with the site URL.
 
 ### Frontend
 
@@ -97,9 +102,9 @@ Clinical text is stored in the browser's `localStorage` and `IndexedDB`. This is
 
 ### LLM Provider
 
-Clinical text is sent to OpenAI for translation. This is subject to OpenAI's data retention policy. Researchers handling PHI should:
+Clinical text is sent to OpenAI or Anthropic for translation, depending on the model selected. This is subject to each provider's data retention policy. Researchers handling PHI should:
 
-1. Establish a BAA with OpenAI
+1. Establish a BAA with the provider(s) in use
 2. Verify dataset de-identification before uploading
 3. Consider using the offline Python scripts in a controlled environment
 

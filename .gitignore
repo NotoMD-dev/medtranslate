@@ -43,3 +43,6 @@ Thumbs.db
 # Misc
 *.log
 npm-debug.log*
+
+# Local virtualenv inside the backend (was accidentally committed)
+medtranslate-backend/source/

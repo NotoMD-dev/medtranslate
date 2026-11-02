@@ -18,6 +18,34 @@ export interface JobStatusResponse {
   error: string | null;
   bertscore_completed: number;
   bertscore_total: number;
+  /** Model declined or returned nothing; scored as 0. Older backends omit this. */
+  refused_rows?: number;
+  /** Provider/config failure; unscored and retryable. Older backends omit this. */
+  incomplete_rows?: number;
+  /** Refusals a reviewer marked legitimate; excluded from all scores. */
+  excluded_rows?: number;
+}
+
+/**
+ * Why a row has no translation.
+ * - "refusal": the model declined or returned an empty reply. Counts against
+ *   the model (METEOR 0, BERTScore 0, empty BLEU hypothesis) and goes to the
+ *   top of the review queue.
+ * - "infrastructure": rate limit, connection, server, or configuration
+ *   failure. Says nothing about the model; unscored and retryable.
+ */
+export type ErrorKind = "refusal" | "infrastructure" | "excluded";
+
+/**
+ * Reviewer decision that a refusal was legitimate (e.g. the source text is
+ * not translatable or not clinical). Keyed by pair_id in session storage and
+ * applied to every model's run for that pair, since it is a property of the
+ * source sentence, not of the model.
+ */
+export interface RefusalOverride {
+  note: string;
+  /** ISO timestamp of the decision. */
+  at: string;
 }
 
 export interface SentenceMetrics {
@@ -31,7 +59,12 @@ export interface SentenceMetrics {
   llm_english_translation: string;
   meteor: number | null;
   bertscore_f1: number | null;
+  /** Exact error message if the row failed. */
   error: string | null;
+  /** Failure class; null/undefined when the row succeeded (or on older results). */
+  error_kind?: ErrorKind | null;
+  /** Heuristic note when the reply looks wrapped (preamble, note, quotes, markdown). */
+  format_warning?: string | null;
 }
 
 export interface CorpusMetrics {
@@ -56,7 +89,8 @@ export interface LibraryVersions {
 export interface ModelConfig {
   model: string;
   system_prompt: string | null;
-  temperature: number;
+  /** Temperature actually sent to the provider, or null if the model rejects it (not sent). */
+  temperature: number | null;
   max_tokens: number;
   /** Reasoning/thinking effort the backend applied, or null if not applicable. */
   reasoning_effort?: string | null;
@@ -218,8 +252,14 @@ export function resolveModelId(id: string | undefined | null): string {
 // Translation configuration defaults
 // ---------------------------------------------------------------------------
 
+/**
+ * Keep in sync with DEFAULT_SYSTEM_PROMPT in medtranslate-backend/app/config.py.
+ * The final sentence matters for scoring: metrics compare the whole reply to
+ * the reference, so a preamble or note counts as translation text and lowers
+ * BLEU sharply while barely moving METEOR.
+ */
 export function buildSystemPrompt(languageLabel: string): string {
-  return `You are a medical interpreter. Translate the following ${languageLabel} clinical text into English, preserving all medical terminology and clinical meaning.`;
+  return `You are a medical interpreter. Translate the following ${languageLabel} clinical text into English, preserving all medical terminology and clinical meaning. Output only the English translation, with no preamble, notes, quotation marks, or explanations.`;
 }
 
 export const DEFAULT_SYSTEM_PROMPT = buildSystemPrompt("Spanish");
