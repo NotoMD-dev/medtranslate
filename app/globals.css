@@ -497,9 +497,29 @@ table tbody tr:hover td {
   border-left-color: var(--accent);
 }
 
+.about-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.about-nav a.sub {
+  padding: 3px 14px 3px 26px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
 /* Room so a section heading is not hidden under the mobile sticky bar. */
 .about-section {
   scroll-margin-top: 24px;
+}
+
+h3.about-section {
+  margin-top: 28px !important;
+}
+
+h3.about-section:first-of-type {
+  margin-top: 0 !important;
 }
 
 @media (max-width: 900px) {
@@ -515,6 +535,13 @@ table tbody tr:hover td {
     border-bottom: 1px solid var(--border);
   }
   .about-sidebar-title {
+    display: none;
+  }
+  .about-nav-group {
+    flex-direction: row;
+    gap: 6px;
+  }
+  .about-nav a.sub {
     display: none;
   }
   .about-nav {

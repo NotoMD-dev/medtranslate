@@ -184,7 +184,7 @@ IndexedDB (JobResults) + localStorage
     │
     ├──> Translate page (results table)
     ├──> Metrics page (aggregate dashboard)
-    ├──> Safety Review page (flagged pairs for grading)
+    ├──> Physician Review page (flagged pairs for grading)
     └──> Compare page (one saved result set per model id)
 ```
 
@@ -193,7 +193,7 @@ IndexedDB (JobResults) + localStorage
 The review queue is derived entirely in the browser from the backend's per-sentence results:
 
 1. A row must be **reviewable**: either completed (has an `llm_english_translation` and no `error`) or **refused** (`error_kind == "refusal"`, which the backend scores as METEOR 0). Incomplete rows (`error_kind == "infrastructure"`) are not reviewable; they are retried from the Translate page.
-2. The row's **METEOR score must be below the threshold**. The threshold defaults to `0.4`, is set on the Safety Review page, is saved to the session, and is used by the Metrics page's "Flagged for Review" count.
+2. The row's **METEOR score must be below the threshold**. The threshold defaults to `0.4`, is set on the Physician Review page, is saved to the session, and is used by the Metrics page's "Flagged for Review" count.
 3. Rows with no `english_reference` have no METEOR score and are never flagged.
 4. **Refused rows come first** in the queue, labelled "Refused" with the provider's reason; completed rows below the threshold follow in dataset order.
 
@@ -207,7 +207,7 @@ BLEU and BERTScore do not affect flagging. The threshold is a triage heuristic, 
 |---|---|---|---|
 | `refusal` (`TranslationRefused`) | Provider content filter, explicit decline (`stop_reason: refusal`), empty reply | METEOR 0, BERTScore 0, empty hypothesis in corpus BLEU | Physician review (top of queue) |
 | `infrastructure` | Rate limit exhausted after retries, connection error, provider 5xx, bad request, output limit reached before any text | Not scored | "Retry incomplete rows" on the Translate page |
-| `excluded` | Set by a reviewer on the Safety Review page when a refusal was legitimate; sent on the next metrics-only re-score | Not scored, out of corpus BLEU | "Undo exclusion" on the Safety Review page |
+| `excluded` | Set by a reviewer on the Physician Review page when a refusal was legitimate; sent on the next metrics-only re-score | Not scored, out of corpus BLEU | "Undo exclusion" on the Physician Review page |
 
 The retry flow is three backend jobs driven by the frontend: translate only the incomplete rows as fresh input, merge the new rows into the saved result set by `pair_id`, then submit the merged set in `metrics_only` mode (with `error`/`error_kind` columns so refused rows keep their status) so corpus BLEU and the averages cover every row.
 

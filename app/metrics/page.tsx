@@ -20,7 +20,7 @@ export default function MetricsPage() {
     });
     const persistedGrades = getSessionGrades();
     if (persistedGrades) setGrades(persistedGrades);
-    // Same threshold the Safety Review page uses (set there, saved to the session).
+    // Same threshold the Physician Review page uses (set there, saved to the session).
     const savedThreshold = getSessionReviewThreshold();
     if (savedThreshold != null) setThreshold(savedThreshold);
     setOverrides(getSessionRefusalOverrides());
@@ -87,7 +87,7 @@ export default function MetricsPage() {
 
   const corpusBleu = jobResults?.corpus_metrics;
 
-  // Flagged count (same threshold as the Safety Review page)
+  // Flagged count (same threshold as the Physician Review page)
   const flaggedCount = completed.filter((r) => r.meteor != null && r.meteor < threshold).length;
   const flaggedPct = completed.length > 0 ? ((flaggedCount / completed.length) * 100).toFixed(1) : "0";
 
@@ -141,7 +141,7 @@ export default function MetricsPage() {
               <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>Refused by the model</div>
               <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--danger)", lineHeight: 1, marginBottom: 16 }}>{counts.refused}</div>
               <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
-                Declined or empty replies. Counted against the model: METEOR 0, BERTScore 0, empty hypothesis in corpus BLEU. Sent to the top of the Safety Review queue.
+                Declined or empty replies. Counted against the model: METEOR 0, BERTScore 0, empty hypothesis in corpus BLEU. Sent to the top of the Physician Review queue.
                 {counts.excluded > 0 && <> A further <strong>{counts.excluded}</strong> refusal{counts.excluded !== 1 ? "s were" : " was"} judged legitimate by a reviewer and excluded from all scores.</>}
               </div>
             </div>
@@ -171,7 +171,7 @@ export default function MetricsPage() {
                               {f.providerExplanations.map((e) => <li key={e}>&ldquo;{e}&rdquo;</li>)}
                             </ul>
                             {f.count > f.providerExplanations.length && (
-                              <div style={{ color: "var(--text-muted)", marginTop: 2 }}>Open a pair on the Safety Review page to read the explanation for that row.</div>
+                              <div style={{ color: "var(--text-muted)", marginTop: 2 }}>Open a pair on the Physician Review page to read the explanation for that row.</div>
                             )}
                           </div>
                         )}
@@ -263,7 +263,7 @@ export default function MetricsPage() {
             {flaggedCount}
           </div>
           <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6, marginBottom: 12 }}>
-            Threshold: METEOR &lt; {threshold.toFixed(2)} (set on the Safety Review page) &middot; {totalGraded} of {flaggedCount} graded
+            Threshold: METEOR &lt; {threshold.toFixed(2)} (set on the Physician Review page) &middot; {totalGraded} of {flaggedCount} graded
           </div>
           <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--accent-soft)", color: "var(--accent-text)" }}>
             {flaggedPct}% of total

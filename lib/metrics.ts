@@ -231,7 +231,7 @@ const REFUSAL_CATEGORY_NOTES: Record<string, string> = {
 };
 
 const REFUSAL_FOOTER =
-  "The sentence still counts as a failed translation (scored 0) unless a reviewer marks the refusal legitimate on the Safety Review page.";
+  "The sentence still counts as a failed translation (scored 0) unless a reviewer marks the refusal legitimate on the Physician Review page.";
 
 /**
  * Turn a stored refusal error message into a sentence or two that explains
