@@ -5,6 +5,7 @@ const STORAGE_KEYS = {
   data: "medtranslate:data",
   prompt: "medtranslate:prompt",
   rowLimit: "medtranslate:rowLimit",
+  reviewThreshold: "medtranslate:reviewThreshold",
   jobId: "medtranslate:jobId",
   jobResults: "medtranslate:jobResults",
   grades: "medtranslate:grades",
@@ -173,6 +174,17 @@ export function getSessionRowLimit() {
 
 export function setSessionRowLimit(rowLimit: number | undefined) {
   writeJSON(STORAGE_KEYS.rowLimit, rowLimit);
+}
+
+// Review threshold (METEOR below this is flagged). Shared by Review and Metrics.
+
+export function getSessionReviewThreshold(): number | undefined {
+  const v = readJSON<number>(STORAGE_KEYS.reviewThreshold);
+  return typeof v === "number" && v >= 0 && v <= 1 ? v : undefined;
+}
+
+export function setSessionReviewThreshold(threshold: number | undefined) {
+  writeJSON(STORAGE_KEYS.reviewThreshold, threshold);
 }
 
 // Job ID

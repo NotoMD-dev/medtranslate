@@ -20,7 +20,15 @@ A plain-language explanation of the three metrics, written for readers without a
 
 ### Which rows are scored
 
-Only **completed** rows are scored: rows with a non-empty LLM translation and a non-empty `english_reference`. Rows whose translation failed (provider error after retries, refusal, empty output) carry `error: "Translation failed"`, have `meteor` and `bertscore_f1` set to `null`, and are excluded from corpus BLEU. They are therefore invisible to every metric and to the review queue; check the `failed_rows` count in the job status or the "Completed Pairs" row on the Compare page before interpreting a run.
+A row needs a non-empty `english_reference` to be scored at all. Beyond that, scoring depends on how the translation ended:
+
+| Outcome | `error_kind` | METEOR | BERTScore | Corpus BLEU | Review queue |
+|---|---|---|---|---|---|
+| Completed | `null` | computed | computed if enabled | hypothesis = reply | if METEOR < threshold |
+| Refused (model declined / empty reply) | `"refusal"` | `0.0` | `0.0` if enabled | hypothesis = `""` | always, first |
+| Incomplete (provider / config failure) | `"infrastructure"` | `null` | `null` | excluded | never; retry instead |
+
+Scoring refusals as zero is a deliberate study decision: a model that declines a clinical sentence has failed to translate it, and the failure must show in the averages. Infrastructure failures say nothing about the model and are excluded; the `incomplete_rows` count in the job status and the "Incomplete" row on the Compare page show how many rows are missing from the averages. An empty candidate is given BERTScore 0 directly rather than embedded; with rescaling, 0 is the "unrelated sentences" baseline.
 
 ### How translations are produced
 
@@ -28,7 +36,7 @@ Only **completed** rows are scored: rows with a non-empty LLM translation and a 
 - The backend keeps a SQLite translation cache keyed on `(model, system_prompt, temperature, reasoning_effort, source_text)`. A re-run with identical settings returns cached text without calling the provider, so identical output across re-runs is not evidence of model determinism.
 - The reasoning/thinking effort applied (`OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT`, default `medium` for both) is recorded as `translation_config.reasoning_effort` in the results.
 - Temperature is **not** sent to GPT-5.x reasoning models or Claude 4.6+ models; both families reject the parameter. `translation_config.temperature` records what was actually sent: `0.0` for older OpenAI chat models, `null` for the current models. Runs with `null` are not guaranteed to be deterministic; identical text across re-runs comes from the cache, not the model.
-- The system prompt asks the model to translate but does not instruct it to return only the translation. A model that adds a preamble ("Here is the translation:") or a trailing note lowers BLEU sharply (precision-based) while lowering METEOR only modestly (recall-weighted). Inspect raw outputs in the Review panel before attributing a BLEU gap to translation quality.
+- The system prompt ends with "Output only the English translation, with no preamble, notes, quotation marks, or explanations." Replies are still scored exactly as returned. A reply that nonetheless adds a preamble or note lowers BLEU sharply (precision-based) while lowering METEOR only modestly (recall-weighted); `format_warning` flags such replies so a BLEU gap can be traced to formatting before it is attributed to translation quality. Runs made before this sentence was added are not comparable with later runs; the Compare page warns when two runs used different prompts.
 
 ---
 
@@ -154,11 +162,11 @@ A pair enters the review queue when **all** of the following hold:
 
 | Condition | Where it is enforced |
 |---|---|
-| The row has an LLM translation and no `error` | `app/review/page.tsx` (`completed` filter) |
-| The row has a METEOR score (requires an `english_reference`) | backend scoring; `meteor != null` |
-| METEOR is **strictly below** the threshold | Review page threshold box, default `0.4` |
+| The row is completed (translation, no `error`) **or** refused (`error_kind == "refusal"`) | `app/review/page.tsx` via `isCompleted` / `isRefused` in `lib/metrics.ts` |
+| The row has a METEOR score (requires an `english_reference`; refusals are scored 0) | backend scoring; `meteor != null` |
+| METEOR is **strictly below** the threshold | Review page threshold box, default `0.4`, saved to the session |
 
-Nothing else triggers review. BLEU is corpus-level and cannot flag a sentence; BERTScore is optional and is not consulted. The threshold entered on the Review page is not persisted and is not shared with the Metrics page, whose "Flagged for Review" count always uses `0.4`. The threshold is a triage heuristic: it concentrates physician time on the sentences most likely to differ from the reference, but a pair above the threshold can still contain a clinically significant error (a dropped negation moves METEOR very little). Reviewers may also use the "jump to pair" box to grade any flagged pair and the reference-flag control to mark a weak reference.
+Refused rows are listed first with a "Refused" badge and the provider's reason. Incomplete rows (infrastructure failures) never enter the queue; they are retried from the Translate page. Nothing else triggers review. BLEU is corpus-level and cannot flag a sentence; BERTScore is optional and is not consulted. The threshold is shared with the Metrics page's "Flagged for Review" count. The threshold is a triage heuristic: it concentrates physician time on the sentences most likely to differ from the reference, but a pair above the threshold can still contain a clinically significant error (a dropped negation moves METEOR very little). Reviewers may also use the "jump to pair" box to grade any flagged pair and the reference-flag control to mark a weak reference.
 
 ### Review Workflow
 

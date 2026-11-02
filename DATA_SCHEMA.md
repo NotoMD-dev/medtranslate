@@ -37,9 +37,16 @@ interface SentenceMetrics {
   llm_english_translation: string;
   meteor: number | null;
   bertscore_f1: number | null;
+  /** Exact error message if the row failed. */
   error: string | null;
+  /** "refusal" (scored as 0) | "infrastructure" (unscored, retryable) | null */
+  error_kind?: "refusal" | "infrastructure" | null;
+  /** Heuristic note when the reply looks wrapped; the text is never modified. */
+  format_warning?: string | null;
 }
 ```
+
+Row classification helpers live in `lib/metrics.ts`: `isCompleted`, `isRefused`, `isIncomplete`, `isScored` (completed or refused with a METEOR value), `countRun`, and `failureReasons`.
 
 ### `CorpusMetrics`
 
@@ -129,7 +136,9 @@ interface JobStatusResponse {
   total: number;
   translated: number;
   scored: number;
-  failed_rows: number;
+  failed_rows: number;        // refused_rows + incomplete_rows
+  refused_rows?: number;      // model declined / empty reply (scored 0)
+  incomplete_rows?: number;   // provider / config failure (unscored)
   error: string | null;
 }
 ```
@@ -188,6 +197,8 @@ Produced by `scripts/build_dataset.py`, manually prepared, or one of the bundled
 | `content_type` | No | string | Document type (defaults to `"clinical_case_report"`) |
 | `english_reference` | No | string | Human reference translation (required for metrics) |
 | `llm_english_translation` | No | string | Pre-existing translation (for re-scoring) |
+| `error` | No | string | Carried over on metrics-only re-scores so a failed row keeps its status |
+| `error_kind` | No | string | `refusal` or `infrastructure`, paired with `error` |
 
 ### Input XLSX
 
@@ -208,13 +219,19 @@ Exported from the frontend after a job completes.
 | `meteor_score` | float | METEOR score (4 decimal places) |
 | `bertscore_f1` | float | BERTScore F1 (4 decimal places) |
 | `clinical_significance_grade` | integer | Clinical grade (0–3), empty if not graded |
-| `error` | string | Error message if translation failed |
+| `reference_flag_issues` | string | Reviewer's reference-quality flags, `;`-separated |
+| `reference_flag_notes` | string | Reviewer's free-text note on the reference |
+| `status` | string | `completed`, `refused`, `incomplete`, or `pending` |
+| `error` | string | Exact error message if translation failed |
+| `format_warning` | string | Wrapper-text heuristic note, if any |
 
 ---
 
 ## Client-Side Storage
 
 ### localStorage Schema
+
+`medtranslate:reviewThreshold` (number, 0–1) stores the METEOR review threshold set on the Review page; the Metrics page reads it for its "Flagged for Review" count. Absent means the default `0.4`.
 
 Session state is persisted in the browser's `localStorage` via `lib/session.ts`.
 

@@ -18,7 +18,21 @@ export interface JobStatusResponse {
   error: string | null;
   bertscore_completed: number;
   bertscore_total: number;
+  /** Model declined or returned nothing; scored as 0. Older backends omit this. */
+  refused_rows?: number;
+  /** Provider/config failure; unscored and retryable. Older backends omit this. */
+  incomplete_rows?: number;
 }
+
+/**
+ * Why a row has no translation.
+ * - "refusal": the model declined or returned an empty reply. Counts against
+ *   the model (METEOR 0, BERTScore 0, empty BLEU hypothesis) and goes to the
+ *   top of the review queue.
+ * - "infrastructure": rate limit, connection, server, or configuration
+ *   failure. Says nothing about the model; unscored and retryable.
+ */
+export type ErrorKind = "refusal" | "infrastructure";
 
 export interface SentenceMetrics {
   pair_id: string;
@@ -31,7 +45,12 @@ export interface SentenceMetrics {
   llm_english_translation: string;
   meteor: number | null;
   bertscore_f1: number | null;
+  /** Exact error message if the row failed. */
   error: string | null;
+  /** Failure class; null/undefined when the row succeeded (or on older results). */
+  error_kind?: ErrorKind | null;
+  /** Heuristic note when the reply looks wrapped (preamble, note, quotes, markdown). */
+  format_warning?: string | null;
 }
 
 export interface CorpusMetrics {
@@ -219,8 +238,14 @@ export function resolveModelId(id: string | undefined | null): string {
 // Translation configuration defaults
 // ---------------------------------------------------------------------------
 
+/**
+ * Keep in sync with DEFAULT_SYSTEM_PROMPT in medtranslate-backend/app/config.py.
+ * The final sentence matters for scoring: metrics compare the whole reply to
+ * the reference, so a preamble or note counts as translation text and lowers
+ * BLEU sharply while barely moving METEOR.
+ */
 export function buildSystemPrompt(languageLabel: string): string {
-  return `You are a medical interpreter. Translate the following ${languageLabel} clinical text into English, preserving all medical terminology and clinical meaning.`;
+  return `You are a medical interpreter. Translate the following ${languageLabel} clinical text into English, preserving all medical terminology and clinical meaning. Output only the English translation, with no preamble, notes, quotation marks, or explanations.`;
 }
 
 export const DEFAULT_SYSTEM_PROMPT = buildSystemPrompt("Spanish");

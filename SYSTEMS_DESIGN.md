@@ -578,6 +578,19 @@ Expanded detail panel for a single translation pair. Shows three columns of text
 - Grades stored in both localStorage and IndexedDB
 - Grade distribution card updates in real-time
 
+### Failure States (Translate, Review, Metrics, Compare)
+
+Every row carries one of four statuses, derived in `lib/metrics.ts`:
+
+| Status | Pill | Colour tokens | Where |
+|---|---|---|---|
+| Complete | "Complete" | `--success*` | Translate table |
+| Refused | "Refused" | `--danger*` (solid `--danger` badge in the Review queue) | Translate table, Review queue (first), Metrics "Refused" tile, Compare "Refused" row |
+| Incomplete | "Incomplete" | `--warning*` | Translate table, Metrics "Incomplete" tile, Compare "Incomplete" row; "Retry N incomplete rows" button (warning style) on Translate |
+| Pending | "Pending" | `--bg-inset` / `--text-muted` | Translate table |
+
+A reply with a `format_warning` shows a `⚠` glyph in `--warning` before the text in the Translate table, a warning pill in the Review queue header, and a warning box in `PairDetail`. Hovering the glyph or pill shows the reason. Small-sample notes (fewer than 50 scored rows) are a single `--warning` line under the page subtitle on Translate and Metrics, and a `--warning-light` banner on Compare. A prompt mismatch between the two compared runs is a `--danger-light` banner above the winner card with a collapsible view of both prompts.
+
 ### Metrics Page (`/metrics`)
 
 **Purpose**: Aggregate dashboard of all translation quality metrics.

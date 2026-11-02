@@ -23,7 +23,7 @@ Submit a CSV or XLSX file and model configuration to start a translation + metri
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `file` | file (CSV/XLSX) | Yes | — | CSV or XLSX file with at least a `spanish_source` column |
+| `file` | file (CSV/XLSX) | Yes | — | CSV or XLSX file with a source-language column (e.g. `spanish_source`) and `english_reference`. Optional `error` / `error_kind` columns let a metrics-only re-score keep failed rows' status. |
 | `model` | string | No | `"gpt-5.6-sol"` | Model identifier (`gpt-5.6-sol` or `claude-sonnet-5-5`) |
 | `system_prompt` | string | No | *(medical interpreter prompt)* | System prompt for the LLM |
 | `temperature` | float | No | `0.0` | Accepted for compatibility but overridden: the backend sends `0.0` to models that accept temperature and omits it for models that reject it (see `translation_config.temperature` in results) |
@@ -74,6 +74,8 @@ Poll the status and progress of a running job.
   "translated": 450,
   "scored": 320,
   "failed_rows": 2,
+  "refused_rows": 1,
+  "incomplete_rows": 1,
   "error": null
 }
 ```
@@ -85,7 +87,9 @@ Poll the status and progress of a running job.
 | `total` | int | Total rows in the dataset |
 | `translated` | int | Rows translated so far |
 | `scored` | int | Rows with metrics computed so far |
-| `failed_rows` | int | Rows that failed translation |
+| `failed_rows` | int | Rows that failed translation (`refused_rows + incomplete_rows`) |
+| `refused_rows` | int | Model declined or returned an empty reply. Scored as 0. |
+| `incomplete_rows` | int | Provider or configuration failure. Not scored; retryable. |
 | `error` | string \| null | Error message if status is `failed` |
 
 ### Response — Not Found
@@ -135,6 +139,8 @@ Retrieve complete results after a job finishes.
       "english_reference": "The patient presents with acute abdominal pain...",
       "llm_english_translation": "The patient presents with acute abdominal pain...",
       "meteor": 0.8723,
+      "error_kind": null,
+      "format_warning": null,
       "bertscore_f1": 0.9234,
       "error": null
     }
@@ -154,6 +160,14 @@ Retrieve complete results after a job finishes.
   }
 }
 ```
+
+Per-sentence fields added in 1.5.0:
+
+| Field | Type | Description |
+|---|---|---|
+| `error` | string \| null | Exact provider/translator message when the row failed |
+| `error_kind` | `"refusal"` \| `"infrastructure"` \| null | `refusal`: model declined or returned nothing; scored as 0 (METEOR 0, BERTScore 0, empty BLEU hypothesis). `infrastructure`: rate limit, connection, server, or config failure; not scored. |
+| `format_warning` | string \| null | Heuristic note when the reply looks wrapped (preamble, translator's note, quotation marks, markdown, extra paragraphs). The text is never modified. |
 
 `temperature` is the value actually sent to the provider: `0.0` for older OpenAI chat models, `null` for GPT-5.x reasoning models and current Claude models, which reject the parameter. A `null` run is not guaranteed to be deterministic.
 

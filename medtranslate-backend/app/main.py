@@ -177,6 +177,10 @@ def _raw_rows_to_input(raw_rows: list[dict[str, str]], source_column: str = "spa
                 spanish_source=source_text,  # backward compat
                 english_reference=raw.get("english_reference", ""),
                 llm_english_translation=raw.get("llm_english_translation", ""),
+                # Optional: lets a metrics-only re-score keep failed rows'
+                # status instead of treating them as untranslated.
+                error=raw.get("error", "") or "",
+                error_kind=raw.get("error_kind", "") or "",
             )
         )
     return rows

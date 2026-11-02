@@ -4,13 +4,22 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import Header from "@/components/Header";
 import { CLINICAL_GRADES, REFERENCE_FLAG_REASONS } from "@/lib/types";
 import { exportReviewCSV, downloadFile } from "@/lib/csv";
+import { DEFAULT_REVIEW_THRESHOLD, isCompleted, isRefused } from "@/lib/metrics";
 import {
   getSessionJobResultsAsync,
   getSessionGradesAsync,
   setSessionGradesAsync,
   getSessionRefFlagsAsync,
   setSessionRefFlagsAsync,
+  getSessionReviewThreshold,
+  setSessionReviewThreshold,
 } from "@/lib/session";
+
+function sourceLabel(source: string): string {
+  if (source === "ClinSpEn_ClinicalCases") return "ClinSpEn";
+  if (source === "UMass_EHR") return "UMass";
+  return source || "Unknown";
+}
 import type { JobResults, SentenceMetrics, ClinicalGrade, ReferenceFlag, ReferenceFlagReason } from "@/lib/types";
 
 type ReviewView = "queue" | "table";
@@ -19,8 +28,8 @@ export default function ReviewPage() {
   const [jobResults, setJobResults] = useState<JobResults | null>(null);
   const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
   const [refFlags, setRefFlags] = useState<Record<string, ReferenceFlag>>({});
-  const [threshold, setThreshold] = useState(0.4);
-  const [thresholdInput, setThresholdInput] = useState("0.4");
+  const [threshold, setThreshold] = useState(DEFAULT_REVIEW_THRESHOLD);
+  const [thresholdInput, setThresholdInput] = useState(String(DEFAULT_REVIEW_THRESHOLD));
   const [currentIndex, setCurrentIndex] = useState(0);
   const [view, setView] = useState<ReviewView>("queue");
   const [jumpInput, setJumpInput] = useState("");
@@ -28,6 +37,12 @@ export default function ReviewPage() {
   const [showGradeInfo, setShowGradeInfo] = useState(false);
 
   useEffect(() => {
+    // The threshold is shared with the Metrics page's "Flagged for Review" count.
+    const savedThreshold = getSessionReviewThreshold();
+    if (savedThreshold != null) {
+      setThreshold(savedThreshold);
+      setThresholdInput(String(savedThreshold));
+    }
     getSessionJobResultsAsync().then((persisted) => {
       if (persisted) setJobResults(persisted);
     });
@@ -41,16 +56,21 @@ export default function ReviewPage() {
 
   const sentences = jobResults?.sentence_metrics ?? [];
 
+  // Reviewable rows: completed translations plus refusals (scored 0 by the
+  // backend). Incomplete rows (provider/config failures) are not reviewable;
+  // they are retried from the Translate page.
   const completed = useMemo(
-    () => sentences.filter((s) => s.llm_english_translation && !s.error),
+    () => sentences.filter((s) => isCompleted(s) || isRefused(s)),
     [sentences]
   );
 
-  // Filter pairs below the configurable METEOR threshold
-  const flagged = useMemo(
-    () => completed.filter((r) => r.meteor != null && r.meteor < threshold),
-    [completed, threshold]
-  );
+  // Queue: refusals first (they always score 0), then pairs below the
+  // configurable METEOR threshold in dataset order.
+  const flagged = useMemo(() => {
+    const below = completed.filter((r) => r.meteor != null && r.meteor < threshold);
+    return [...below.filter(isRefused), ...below.filter((r) => !isRefused(r))];
+  }, [completed, threshold]);
+  const refusedCount = useMemo(() => flagged.filter(isRefused).length, [flagged]);
 
   const gradedCount = useMemo(
     () => flagged.filter((r) => grades[r.pair_id] != null).length,
@@ -120,6 +140,7 @@ export default function ReviewPage() {
     const val = parseFloat(thresholdInput);
     if (!isNaN(val) && val >= 0 && val <= 1) {
       setThreshold(val);
+      setSessionReviewThreshold(val);
       setCurrentIndex(0);
     }
   }, [thresholdInput]);
@@ -202,6 +223,7 @@ export default function ReviewPage() {
         </button>
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
           {flagged.length} pair{flagged.length === 1 ? "" : "s"} below {threshold}
+          {refusedCount > 0 && <> (incl. <span style={{ color: "var(--danger)", fontWeight: 600 }}>{refusedCount} refused</span>)</>}
         </span>
         <span style={{ flex: 1 }} />
         {/* View toggle */}
@@ -299,11 +321,21 @@ export default function ReviewPage() {
                     color: currentPair.source === "ClinSpEn_ClinicalCases" ? "var(--accent-text)" : undefined,
                   }}
                 >
-                  {currentPair.source === "ClinSpEn_ClinicalCases" ? "ClinSpEn" : "UMass"}
+                  {sourceLabel(currentPair.source)}
                 </span>
+                {isRefused(currentPair) && (
+                  <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: "var(--danger)", color: "#fff", border: "1px solid var(--danger)" }}>
+                    Refused
+                  </span>
+                )}
                 <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--danger-light)", color: "var(--danger)", border: "1px solid var(--danger-border)" }}>
                   METEOR {currentPair.meteor?.toFixed(3) ?? "--"}
                 </span>
+                {currentPair.format_warning && (
+                  <span title={currentPair.format_warning} style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--warning-light)", color: "var(--warning)", border: "1px solid var(--warning-border)" }}>
+                    &#9888; Format: {currentPair.format_warning}
+                  </span>
+                )}
                 {currentPair.bertscore_f1 != null && (
                   <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--bg-inset)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
                     BERTScore {currentPair.bertscore_f1.toFixed(3)}
@@ -329,7 +361,15 @@ export default function ReviewPage() {
                 </div>
                 <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>LLM English Translation</div>
-                  <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", maxHeight: 256, overflow: "auto" }}>{currentPair.llm_english_translation}</div>
+                  {isRefused(currentPair) ? (
+                    <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--danger)", padding: 12, background: "var(--danger-light)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-xs)" }}>
+                      <strong>No translation. The model refused or returned nothing.</strong>
+                      <div style={{ marginTop: 6, fontSize: 12 }}>{currentPair.error}</div>
+                      <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>Scored as 0. Grade the clinical impact of a missing translation for this sentence, or flag the reference if the source text itself is the problem.</div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", maxHeight: 256, overflow: "auto" }}>{currentPair.llm_english_translation}</div>
+                  )}
                 </div>
                 <div style={{ background: "var(--bg-inset)", borderRadius: "var(--radius-sm)", padding: 24 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>English Reference (Gold Standard)</div>
@@ -544,11 +584,14 @@ export default function ReviewPage() {
                           color: r.source === "ClinSpEn_ClinicalCases" ? "var(--accent-text)" : undefined,
                         }}
                       >
-                        {r.source === "ClinSpEn_ClinicalCases" ? "ClinSpEn" : "UMass"}
+                        {sourceLabel(r.source)}
                       </span>
                     </td>
                     <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.source_text || r.spanish_source}</td>
-                    <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.llm_english_translation}</td>
+                    <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: isRefused(r) ? "var(--danger)" : undefined }} title={r.error ?? r.format_warning ?? undefined}>
+                      {isRefused(r) ? <strong>Refused: </strong> : r.format_warning ? <span style={{ color: "var(--warning)" }}>&#9888; </span> : null}
+                      {isRefused(r) ? r.error : r.llm_english_translation}
+                    </td>
                     <td style={{ color: "var(--accent-text)", fontWeight: 600 }}>{r.meteor?.toFixed(3) ?? "--"}</td>
                     <td>
                       {grades[r.pair_id] != null ? (

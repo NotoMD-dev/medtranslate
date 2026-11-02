@@ -31,7 +31,8 @@ from app.schemas import (
     ModelConfig,
     SentenceMetrics,
 )
-from app.translate import effective_reasoning_effort, translate_text
+from app.output_checks import detect_format_warning
+from app.translate import classify_error, effective_reasoning_effort, translate_text
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ class InputRow:
     english_reference: str
     spanish_source: str = ""  # backward compat
     llm_english_translation: str = ""
+    # Carried over on metrics-only re-scores so failed rows keep their status.
+    error: str = ""
+    error_kind: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +71,9 @@ class Job:
 
     translated: int = 0
     scored: int = 0
-    failed_rows: int = 0
+    failed_rows: int = 0          # refused_rows + incomplete_rows
+    refused_rows: int = 0         # model declined / empty reply (scored as 0)
+    incomplete_rows: int = 0      # provider / config failure (unscored, retryable)
 
     sentence_metrics: list[SentenceMetrics] = field(default_factory=list)
     corpus_metrics: Optional[DatasetCorpusMetrics] = None
@@ -173,6 +179,8 @@ def _job_to_dict(job: Job, *, include_rows: bool = True) -> dict:
         "translated": job.translated,
         "scored": job.scored,
         "failed_rows": job.failed_rows,
+        "refused_rows": job.refused_rows,
+        "incomplete_rows": job.incomplete_rows,
         "sentence_metrics": [m.model_dump() for m in job.sentence_metrics],
         "corpus_metrics": job.corpus_metrics.model_dump() if job.corpus_metrics else None,
         "library_versions": job.library_versions.model_dump() if job.library_versions else None,
@@ -191,6 +199,8 @@ def _job_to_dict(job: Job, *, include_rows: bool = True) -> dict:
                 "english_reference": r.english_reference,
                 "spanish_source": r.spanish_source,
                 "llm_english_translation": r.llm_english_translation,
+                "error": r.error,
+                "error_kind": r.error_kind,
             }
             for r in job.rows
         ]
@@ -208,6 +218,8 @@ def _job_from_dict(data: dict) -> Job:
         translated=data.get("translated", 0),
         scored=data.get("scored", 0),
         failed_rows=data.get("failed_rows", 0),
+        refused_rows=data.get("refused_rows", 0),
+        incomplete_rows=data.get("incomplete_rows", 0),
         sentence_metrics=[
             SentenceMetrics.model_validate(m) for m in data.get("sentence_metrics", [])
         ],
@@ -515,6 +527,8 @@ async def get_job_status(job_id: str) -> Optional[JobStatusResponse]:
         translated=job.translated,
         scored=job.scored,
         failed_rows=job.failed_rows,
+        refused_rows=job.refused_rows,
+        incomplete_rows=job.incomplete_rows,
         error=job.error,
         bertscore_completed=job.bertscore_completed,
         bertscore_total=job.bertscore_total,
@@ -544,7 +558,16 @@ async def get_job_results(job_id: str, *, offset: int = 0, limit: int = 0) -> Op
 
 
 def _make_sentence_metrics(row: InputRow, **overrides) -> SentenceMetrics:
-    """Helper to build a SentenceMetrics from an InputRow with optional overrides."""
+    """Helper to build a SentenceMetrics from an InputRow with optional overrides.
+
+    ``format_warning`` is derived from the translation unless given explicitly;
+    the translation text itself is never altered.
+    """
+    translation = overrides.get("llm_english_translation", row.llm_english_translation)
+    if "format_warning" in overrides:
+        format_warning = overrides["format_warning"]
+    else:
+        format_warning = detect_format_warning(translation, row.source_text) if translation else None
     return SentenceMetrics(
         pair_id=row.pair_id,
         source=row.source,
@@ -552,10 +575,12 @@ def _make_sentence_metrics(row: InputRow, **overrides) -> SentenceMetrics:
         source_text=row.source_text,
         spanish_source=row.spanish_source or row.source_text,
         english_reference=row.english_reference,
-        llm_english_translation=overrides.get("llm_english_translation", row.llm_english_translation),
+        llm_english_translation=translation,
         meteor=overrides.get("meteor", None),
         bertscore_f1=overrides.get("bertscore_f1", None),
         error=overrides.get("error", None),
+        error_kind=overrides.get("error_kind", None),
+        format_warning=format_warning,
     )
 
 
@@ -598,22 +623,6 @@ async def execute_job(job_id: str) -> None:
         )
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_TRANSLATIONS)
 
-        async def _translate_one(index: int, row: InputRow):
-            async with semaphore:
-                try:
-                    # Use source_text (the generalized column) for translation
-                    text_to_translate = row.source_text or row.spanish_source
-                    translation = await translate_text(
-                        text_to_translate,
-                        model=model,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                    )
-                    return index, translation, None
-                except Exception as exc:
-                    return index, "", str(exc)
-
         # Pre-populate sentence_metrics with all rows (pending state)
         # so the frontend can display the table immediately during polling.
         job.sentence_metrics = [
@@ -625,12 +634,30 @@ async def execute_job(job_id: str) -> None:
         # Phase 1: Concurrent translation (chunked) — SKIP if metrics_only
         # ------------------------------------------------------------------
         if metrics_only:
-            # In metrics-only mode, use existing translations from the CSV
+            # In metrics-only mode, use existing translations from the CSV.
+            # Rows submitted with an error/error_kind (a previous run's
+            # failures) keep that status so refusals are still scored as 0
+            # and incomplete rows stay unscored.
             logger.info("Job %s: metrics-only mode, skipping translation", job_id)
+            for i, row in enumerate(job.rows):
+                if not row.llm_english_translation and row.error:
+                    kind = row.error_kind if row.error_kind in ("refusal", "infrastructure") else "infrastructure"
+                    job.sentence_metrics[i] = _make_sentence_metrics(
+                        row, llm_english_translation="", error=row.error, error_kind=kind,
+                    )
             job.translated = sum(1 for r in job.rows if r.llm_english_translation)
+            job.refused_rows = sum(
+                1 for m in job.sentence_metrics if m.error_kind == "refusal"
+            )
+            job.incomplete_rows = sum(
+                1 for m in job.sentence_metrics if m.error and m.error_kind != "refusal"
+            )
+            job.failed_rows = job.refused_rows + job.incomplete_rows
         else:
             # --- Deduplication pre-pass: translate each unique source text once ---
             unique_texts: dict[str, str | None] = {}  # source_text -> translation (None = not yet translated)
+            # source_text -> (error message, "refusal" | "infrastructure")
+            unique_errors: dict[str, tuple[str, str]] = {}
             for row in job.rows:
                 text_key = row.source_text or row.spanish_source
                 if text_key and text_key not in unique_texts:
@@ -676,9 +703,9 @@ async def execute_job(job_id: str) -> None:
                             await asyncio.to_thread(_cache_set, ck, translation, temperature)
                         except Exception:
                             pass  # cache write failure is non-critical
-                        return idx, text, translation, None
+                        return idx, text, translation, None, None
                     except Exception as exc:
-                        return idx, text, "", str(exc)
+                        return idx, text, "", str(exc), classify_error(exc)
 
             unique_total = len(texts_to_translate)
             for start in range(0, unique_total, CHUNK_SIZE):
@@ -702,12 +729,15 @@ async def execute_job(job_id: str) -> None:
 
                 results = await asyncio.gather(*tasks)
 
-                for _idx, src_text, translation, error in sorted(results, key=lambda x: x[0]):
+                for _idx, src_text, translation, error, kind in sorted(results, key=lambda x: x[0]):
                     if error is None:
                         unique_texts[src_text] = translation
                     else:
                         unique_texts[src_text] = None
-                        logger.error("Job %s unique text translation failed: %s", job_id, error)
+                        unique_errors[src_text] = (error, kind or "infrastructure")
+                        logger.error(
+                            "Job %s unique text translation failed (%s): %s", job_id, kind, error
+                        )
 
                 # Fan results back to all rows sharing each translated text
                 for i, row in enumerate(job.rows):
@@ -719,16 +749,25 @@ async def execute_job(job_id: str) -> None:
                         job.sentence_metrics[i] = _make_sentence_metrics(
                             row, llm_english_translation=cached,
                         )
-                    elif cached is None and text_key and unique_texts.get(text_key) is None:
-                        # Check if this text was attempted but failed
-                        pass
+                    elif text_key in unique_errors and not row.llm_english_translation:
+                        msg, kind = unique_errors[text_key]
+                        row.error, row.error_kind = msg, kind
+                        job.sentence_metrics[i] = _make_sentence_metrics(
+                            row, llm_english_translation="", error=msg, error_kind=kind,
+                        )
 
-                # Count failures: rows whose unique text was attempted but got None
-                job.failed_rows = sum(
+                # Count failures so far (rows whose unique text was attempted and failed)
+                job.refused_rows = sum(
                     1 for row in job.rows
-                    if not row.llm_english_translation and unique_texts.get(row.source_text or row.spanish_source) is None
-                    and (row.source_text or row.spanish_source) in unique_texts
+                    if not row.llm_english_translation
+                    and unique_errors.get(row.source_text or row.spanish_source, ("", ""))[1] == "refusal"
                 )
+                job.incomplete_rows = sum(
+                    1 for row in job.rows
+                    if not row.llm_english_translation
+                    and unique_errors.get(row.source_text or row.spanish_source, ("", ""))[1] == "infrastructure"
+                )
+                job.failed_rows = job.refused_rows + job.incomplete_rows
 
                 # Lightweight persist: only status/progress, not the full blob
                 await asyncio.to_thread(_db_save_status, job)
@@ -743,17 +782,31 @@ async def execute_job(job_id: str) -> None:
                     job.sentence_metrics[i] = _make_sentence_metrics(
                         row, llm_english_translation=cached,
                     )
-                elif text_key:
-                    # Translation failed for this unique text
+                elif text_key in unique_errors:
+                    # Translation failed for this unique text: keep the real
+                    # message and its class so the row can be scored (refusal)
+                    # or retried (infrastructure).
+                    msg, kind = unique_errors[text_key]
+                    row.error, row.error_kind = msg, kind
                     job.sentence_metrics[i] = _make_sentence_metrics(
-                        row, llm_english_translation="", error="Translation failed",
+                        row, llm_english_translation="", error=msg, error_kind=kind,
+                    )
+                elif text_key and job.cancelled:
+                    # Never attempted because the job was stopped: leave pending.
+                    pass
+                elif text_key:
+                    msg, kind = "Translation was not attempted", "infrastructure"
+                    row.error, row.error_kind = msg, kind
+                    job.sentence_metrics[i] = _make_sentence_metrics(
+                        row, llm_english_translation="", error=msg, error_kind=kind,
                     )
 
             job.translated = sum(1 for r in job.rows if r.llm_english_translation)
-            job.failed_rows = sum(
-                1 for r in job.rows
-                if not r.llm_english_translation and (r.source_text or r.spanish_source)
+            job.refused_rows = sum(1 for m in job.sentence_metrics if m.error_kind == "refusal")
+            job.incomplete_rows = sum(
+                1 for m in job.sentence_metrics if m.error and m.error_kind != "refusal"
             )
+            job.failed_rows = job.refused_rows + job.incomplete_rows
 
         # If cancelled, finalize status and return early with partial results
         if job.cancelled:
@@ -773,6 +826,14 @@ async def execute_job(job_id: str) -> None:
             for i, row in enumerate(job.rows)
             if row.llm_english_translation and row.english_reference
         ]
+        # Refusals are model behaviour and count against it: METEOR 0,
+        # BERTScore 0, and an empty hypothesis in corpus BLEU. Infrastructure
+        # failures stay unscored.
+        refused: list[tuple[int, InputRow]] = [
+            (i, row)
+            for i, row in enumerate(job.rows)
+            if job.sentence_metrics[i].error_kind == "refusal" and row.english_reference
+        ]
 
         def _meteor_pass(rows_subset):
             results = []
@@ -784,7 +845,7 @@ async def execute_job(job_id: str) -> None:
             return results
 
         meteor_scores = await asyncio.to_thread(_meteor_pass, successfully_translated)
-        job.scored = len(meteor_scores)
+        job.scored = len(meteor_scores) + len(refused)
         await asyncio.to_thread(_db_save_status, job)
 
         # Update sentence_metrics with METEOR scores
@@ -793,14 +854,19 @@ async def execute_job(job_id: str) -> None:
             job.sentence_metrics[i] = _make_sentence_metrics(
                 row, llm_english_translation=row.llm_english_translation, meteor=meteor_val,
             )
+        for i, row in refused:
+            existing = job.sentence_metrics[i]
+            job.sentence_metrics[i] = existing.model_copy(
+                update={"meteor": 0.0, "bertscore_f1": 0.0 if compute_bertscore else None}
+            )
 
         # ------------------------------------------------------------------
         # Phase 3: Corpus BLEU (sacrebleu) — computed BEFORE optional BERTScore
         # ------------------------------------------------------------------
         logger.info("Job %s: computing corpus BLEU", job_id)
 
-        all_hyps = [row.llm_english_translation for _, row in successfully_translated]
-        all_refs = [row.english_reference for _, row in successfully_translated]
+        all_hyps = [row.llm_english_translation for _, row in successfully_translated] + ["" for _ in refused]
+        all_refs = [row.english_reference for _, row in successfully_translated] + [row.english_reference for _, row in refused]
 
         try:
             overall_score, overall_sig = compute_corpus_bleu(all_hyps, all_refs)
@@ -822,6 +888,8 @@ async def execute_job(job_id: str) -> None:
             grouped_pairs.setdefault(source_key, []).append(
                 (row.llm_english_translation, row.english_reference)
             )
+        for _, row in refused:
+            grouped_pairs.setdefault(row.source or "Unknown", []).append(("", row.english_reference))
 
         for source_key, pairs in grouped_pairs.items():
             try:
@@ -891,17 +959,7 @@ async def execute_job(job_id: str) -> None:
                     if idx < len(bert_f1_scores) and bert_f1_scores[idx] is not None
                     else None
                 )
-                job.sentence_metrics[i] = SentenceMetrics(
-                    pair_id=existing.pair_id,
-                    source=existing.source,
-                    content_type=existing.content_type,
-                    source_text=existing.source_text,
-                    spanish_source=existing.spanish_source,
-                    english_reference=existing.english_reference,
-                    llm_english_translation=existing.llm_english_translation,
-                    meteor=existing.meteor,
-                    bertscore_f1=bert_val,
-                )
+                job.sentence_metrics[i] = existing.model_copy(update={"bertscore_f1": bert_val})
         else:
             logger.info("Job %s: skipping BERTScore (not requested)", job_id)
 

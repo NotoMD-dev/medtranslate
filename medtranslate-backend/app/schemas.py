@@ -58,6 +58,9 @@ class JobStatusResponse(BaseModel):
     error: Optional[str] = None
     bertscore_completed: int = 0
     bertscore_total: int = 0
+    # failed_rows = refused_rows + incomplete_rows
+    refused_rows: int = 0      # model declined / empty reply: scored as 0
+    incomplete_rows: int = 0   # provider or config failure: unscored, retryable
 
 
 class SentenceMetrics(BaseModel):
@@ -70,7 +73,16 @@ class SentenceMetrics(BaseModel):
     llm_english_translation: str
     meteor: Optional[float] = None
     bertscore_f1: Optional[float] = None
+    # Exact error message from the provider / translator, if the row failed.
     error: Optional[str] = None
+    # "refusal": the model declined or returned nothing; scored as 0 and sent
+    #            to the top of the review queue.
+    # "infrastructure": rate limit / connection / server / config failure;
+    #            unscored and retryable.
+    error_kind: Optional[str] = None
+    # Heuristic description of wrapper text in the reply (preamble, note,
+    # quotation marks, markdown). The text is never modified.
+    format_warning: Optional[str] = None
 
 
 class CorpusMetrics(BaseModel):

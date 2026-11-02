@@ -40,7 +40,8 @@ medtranslate-backend/
 │   ├── main.py           # FastAPI app, CORS, all endpoints
 │   ├── jobs.py           # Job store (memory + SQLite), translation cache, async execution
 │   ├── metrics.py        # SacreBLEU corpus BLEU, NLTK METEOR, BERTScore (via subprocess)
-│   ├── translate.py      # OpenAI / Anthropic translation with retry, effort handling
+│   ├── translate.py      # OpenAI / Anthropic translation with retry, effort handling, failure classes
+│   ├── output_checks.py  # Heuristic format warnings on raw replies (never modifies text)
 │   ├── schemas.py        # Pydantic request/response models
 │   ├── config.py         # Environment variable configuration
 │   └── __init__.py
@@ -68,6 +69,15 @@ The `POST /v1/jobs` endpoint accepts both CSV and XLSX files via multipart form 
 ### Translation Settings Recorded With Results
 
 `GET /v1/jobs/{id}/results` returns `translation_config` with the model, system prompt, `temperature`, `max_tokens`, and `reasoning_effort`. `reasoning_effort` is the value of `OPENAI_REASONING_EFFORT` or `ANTHROPIC_EFFORT` that was in force when the job ran (`null` for models that take no effort setting). `temperature` is the value actually sent: `0.0` for older OpenAI chat models, `null` for current GPT-5.x and Claude models, which reject the parameter. A `null` run is not guaranteed to be deterministic; the translation cache, not the model, is what makes re-runs identical.
+
+### Failure Handling
+
+Every failed row keeps the exact provider message in `error` and a class in `error_kind`:
+
+- `refusal` (`TranslationRefused`): content filter, explicit decline, or empty reply. Scored as METEOR 0 / BERTScore 0 with an empty hypothesis in corpus BLEU, and counted in `refused_rows`.
+- `infrastructure`: rate limit exhausted after 6 retries, connection error, provider 5xx, bad request, or output limit reached before any text. Not scored; counted in `incomplete_rows`. The frontend can resubmit just these rows and then re-score the merged set in `metrics_only` mode; the optional `error` / `error_kind` CSV columns keep refused rows' status on that re-score.
+
+`output_checks.detect_format_warning()` records a `format_warning` on replies that look wrapped (preamble, translator's note, quotation marks, markdown, extra paragraphs). The reply text is never changed.
 
 ### Translation Cache
 

@@ -4,6 +4,31 @@ All notable changes to the MedTranslate project are documented in this file. The
 
 ---
 
+## [1.5.0] - 2026-11-02
+
+### Changed — Prompt
+
+- The default system prompt (frontend `buildSystemPrompt()` and backend `DEFAULT_SYSTEM_PROMPT`) now ends with: *"Output only the English translation, with no preamble, notes, quotation marks, or explanations."* Metrics score the whole reply, so wrapper text was lowering BLEU sharply (precision-based) while barely moving METEOR (recall-weighted). **Runs made with the old prompt are not comparable with new runs**; the Compare page now warns when two runs used different prompts.
+
+### Added — Failure accounting
+
+- **Error classes.** `translate.TranslationRefused` is raised for content filters, explicit declines, and empty replies; `classify_error()` maps every failure to `"refusal"` or `"infrastructure"`. Each failed row keeps its exact provider message in `error` and its class in `error_kind` (previously collapsed to the string "Translation failed").
+- **Refusals are scored.** A refused row gets METEOR 0, BERTScore 0 (when BERTScore is on), and an empty hypothesis in corpus BLEU, so a model that declines is penalised instead of silently dropped. Infrastructure failures stay unscored.
+- **Counts.** `JobStatusResponse` and the persisted job carry `refused_rows` and `incomplete_rows` (`failed_rows` is their sum). Metrics page shows a Translation Failures section with a reason breakdown; Compare shows Refused and Incomplete rows per model; Translate shows the counts in the header and the real error per row.
+- **Retry incomplete rows.** The Translate page re-translates only infrastructure failures as a fresh job, merges the results, and re-scores the whole set in metrics-only mode so corpus BLEU covers every row. The submission CSV gained optional `error` and `error_kind` columns so a metrics-only re-score keeps failed rows' status.
+- **Format warnings.** `app/output_checks.py: detect_format_warning()` flags replies that start with a preamble, contain a translator's note, are wrapped in quotation marks, use markdown, or add paragraphs the source did not have. Stored as `SentenceMetrics.format_warning`, shown in the Translate table, PairDetail, and the Review queue, and exported. The text itself is never modified.
+- **Review queue.** Refused rows enter the queue first with a "Refused" badge and the error reason; completed rows below the threshold follow in dataset order.
+- **Shared review threshold.** The Review page threshold is saved to the session and the Metrics page "Flagged for Review" count uses it instead of a hard-coded 0.4.
+- **Small-sample caution** on Translate, Metrics, and Compare when fewer than 50 scored rows are present.
+- **Exports** (`medtranslate_results.csv`, `medtranslate_review.csv`) gained `status`, `error`, and `format_warning` columns.
+
+### Fixed
+
+- Rows never attempted because a job was stopped are left pending instead of being marked failed.
+- The Review page labelled every non-ClinSpEn source as "UMass"; it now shows the actual source name.
+
+---
+
 ## [1.4.0] - 2026-11-02
 
 ### Added — Onboarding and Explanations

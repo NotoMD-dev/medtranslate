@@ -6,7 +6,8 @@ import PairDetail from "@/components/PairDetail";
 import { pairsToCSVFile, sentenceMetricsToCSVFile, exportResultsCSV, downloadFile } from "@/lib/csv";
 import { submitJob, pollUntilDone, fetchJobResults, cancelJob } from "@/lib/api";
 import { DEFAULT_SYSTEM_PROMPT, MODEL_OPTIONS, resolveModelId } from "@/lib/types";
-import type { JobStatusResponse, JobResults, ClinicalGrade } from "@/lib/types";
+import { countRun, isIncomplete, isRefused, bleuBand, bandStyle, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
+import type { JobStatusResponse, JobResults, ClinicalGrade, SentenceMetrics } from "@/lib/types";
 import {
   getSessionDataAsync,
   getSessionPrompt,
@@ -317,6 +318,103 @@ export default function TranslatePage() {
     }
   }, [jobResults]);
 
+  /**
+   * Retry only the rows that failed for infrastructure reasons (rate limit,
+   * connection, server, configuration). Refusals are model behaviour and are
+   * not retried. Flow: translate the incomplete rows as a fresh job, merge
+   * the new translations into the existing results, then re-score the whole
+   * set in metrics-only mode so corpus BLEU and the averages are consistent.
+   */
+  const handleRetryIncomplete = useCallback(async () => {
+    if (!jobResults) return;
+    const incomplete = jobResults.sentence_metrics.filter(isIncomplete);
+    if (incomplete.length === 0) return;
+
+    preRunResultsRef.current = jobResults;
+    setPageState("submitting");
+    setError(null);
+    setJobStatus(null);
+    abortRef.current = false;
+    lastPartialFetchRef.current = 0;
+    lastOffsetRef.current = 0;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const systemPrompt = getSessionPrompt() || DEFAULT_SYSTEM_PROMPT;
+      const model = resolveModelId(getSessionModel());
+      const keepBert = jobResults.sentence_metrics.some((s) => s.bertscore_f1 != null);
+
+      // Step 1: translate the incomplete rows as fresh input.
+      const retryFile = sentenceMetricsToCSVFile(incomplete, "retry.csv", false);
+      const { job_id } = await submitJob(retryFile, {
+        model, systemPrompt, temperature: 0, maxTokens: 1024, computeBertscore: false,
+      });
+      setSessionJobId(job_id);
+      setRowCount(incomplete.length);
+      setPageState("running");
+      const retryResults = await pollUntilDone(
+        job_id,
+        async (status) => { if (!abortRef.current) setJobStatus(status); },
+        2000,
+        controller.signal,
+      );
+
+      // Step 2: merge the retried rows back into the previous result set.
+      const fresh = new Map(retryResults.sentence_metrics.map((s) => [s.pair_id, s]));
+      const merged: SentenceMetrics[] = jobResults.sentence_metrics.map((s) =>
+        fresh.has(s.pair_id) ? { ...s, ...fresh.get(s.pair_id)! } : s,
+      );
+      const recovered = retryResults.sentence_metrics.filter((s) => s.llm_english_translation).length;
+
+      // Step 3: re-score everything together so corpus BLEU covers all rows.
+      let finalResults: JobResults = { ...jobResults, sentence_metrics: merged };
+      if (recovered > 0) {
+        const rescoreFile = sentenceMetricsToCSVFile(merged, "rescore.csv", true);
+        const rescore = await submitJob(rescoreFile, {
+          model, systemPrompt, temperature: 0, maxTokens: 1024,
+          computeBertscore: keepBert, metricsOnly: true,
+        });
+        setSessionJobId(rescore.job_id);
+        setRowCount(merged.length);
+        const rescored = await pollUntilDone(
+          rescore.job_id,
+          async (status) => { if (!abortRef.current) setJobStatus(status); },
+          2000,
+          controller.signal,
+        );
+        if (rescored.status === "complete") {
+          finalResults = {
+            ...rescored,
+            translation_config: jobResults.translation_config ?? rescored.translation_config,
+          };
+        }
+      }
+
+      setJobResults(finalResults);
+      setRowCount(finalResults.sentence_metrics.length);
+      await setSessionJobResultsAsync(finalResults);
+      const comp = (await getSessionComparisonResultsAsync()) || {};
+      comp[model] = finalResults;
+      await setSessionComparisonResultsAsync(comp);
+      preRunResultsRef.current = null;
+      setPageState("complete");
+      if (recovered < incomplete.length) {
+        setError(`${incomplete.length - recovered} of ${incomplete.length} retried rows failed again. You can retry once the provider recovers.`);
+      }
+    } catch (err) {
+      if (!abortRef.current) {
+        if (preRunResultsRef.current) {
+          setJobResults(preRunResultsRef.current);
+          setRowCount(preRunResultsRef.current.sentence_metrics.length);
+        }
+        preRunResultsRef.current = null;
+        setError((err as Error).message);
+        setPageState("complete");
+      }
+    }
+  }, [jobResults]);
+
   const handleAbort = useCallback(async () => {
     abortRef.current = true;
     abortControllerRef.current?.abort();
@@ -348,8 +446,8 @@ export default function TranslatePage() {
   }, [jobResults, grades]);
 
   const sentences = jobResults?.sentence_metrics ?? [];
-  const completedCount = sentences.filter((s) => s.llm_english_translation && !s.error).length;
-  const errorCount = sentences.filter((s) => s.error).length;
+  const counts = countRun(sentences);
+  const completedCount = counts.completed;
 
   const progressPct = jobStatus && jobStatus.total > 0
     ? (jobStatus.translated / jobStatus.total) * 100
@@ -361,8 +459,9 @@ export default function TranslatePage() {
   const isBertscorePhase = !!jobStatus && jobStatus.bertscore_total > 0;
 
   const hasBertscore = sentences.some((s) => s.bertscore_f1 != null);
-  const canRunBertOnly =
-    pageState !== "running" && pageState !== "submitting" && completedCount > 0;
+  const idle = pageState !== "running" && pageState !== "submitting";
+  const canRunBertOnly = idle && completedCount > 0;
+  const canRetry = idle && counts.incomplete > 0;
 
   return (
     <div className="page-container">
@@ -376,9 +475,27 @@ export default function TranslatePage() {
         <p style={{ fontSize: 15, color: "var(--text-muted)", margin: 0 }}>
           <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{rowCount}</strong> pairs
           {" "}&middot; Model: <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{modelLabel}</strong>
-          {pageState === "complete" && <>{" "}&middot; {completedCount} completed &middot; {errorCount} errors</>}
-          {pageState === "running" && jobStatus && <>{" "}&middot; {jobStatus.translated} translated</>}
+          {pageState === "complete" && (
+            <>
+              {" "}&middot; {completedCount} completed
+              {counts.refused > 0 && <> &middot; <span style={{ color: "var(--danger)" }}>{counts.refused} refused</span></>}
+              {counts.incomplete > 0 && <> &middot; <span style={{ color: "var(--warning)" }}>{counts.incomplete} incomplete</span></>}
+              {counts.formatWarnings > 0 && <> &middot; <span style={{ color: "var(--warning)" }}>{counts.formatWarnings} format warning{counts.formatWarnings !== 1 ? "s" : ""}</span></>}
+            </>
+          )}
+          {pageState === "running" && jobStatus && (
+            <>
+              {" "}&middot; {jobStatus.translated} translated
+              {(jobStatus.refused_rows ?? 0) > 0 && <> &middot; {jobStatus.refused_rows} refused</>}
+              {(jobStatus.incomplete_rows ?? 0) > 0 && <> &middot; {jobStatus.incomplete_rows} incomplete</>}
+            </>
+          )}
         </p>
+        {pageState === "complete" && counts.scored > 0 && counts.scored < SMALL_SAMPLE_THRESHOLD && (
+          <p style={{ fontSize: 12, color: "var(--warning)", margin: "8px 0 0" }}>
+            Small sample: {counts.scored} scored rows. Corpus BLEU and the averages will move a lot with each added sentence; treat this run as a smoke test.
+          </p>
+        )}
       </div>
 
       {/* Corpus BLEU hero metric */}
@@ -389,8 +506,8 @@ export default function TranslatePage() {
             <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--accent-text)", lineHeight: 1, marginBottom: 16 }}>
               {jobResults.corpus_metrics.overall.bleu_score.toFixed(2)}
             </div>
-            <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--warning-light)", color: "var(--warning)", border: "1px solid var(--warning-border)" }}>
-              Moderate
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, ...bandStyle(bleuBand(jobResults.corpus_metrics.overall.bleu_score).tone) }}>
+              {bleuBand(jobResults.corpus_metrics.overall.bleu_score).label}
             </span>
           </div>
         </div>
@@ -430,6 +547,20 @@ export default function TranslatePage() {
             >
               {pageState === "complete" || pageState === "failed" ? "Re-run Translations" : "Run Translations"}
             </button>
+            {canRetry && (
+              <button
+                onClick={handleRetryIncomplete}
+                title="Re-translate only the rows that failed for provider or configuration reasons, then re-score the whole set."
+                style={{
+                  fontFamily: "var(--font)", fontSize: 13, fontWeight: 500, borderRadius: "var(--radius-sm)",
+                  padding: "10px 24px", cursor: "pointer",
+                  background: "var(--warning-light)", color: "var(--warning)",
+                  border: "1px solid var(--warning-border)", transition: "all 0.2s",
+                }}
+              >
+                Retry {counts.incomplete} incomplete row{counts.incomplete !== 1 ? "s" : ""}
+              </button>
+            )}
             {canRunBertOnly && (
               <button
                 onClick={handleRunBertscoreOnly}
@@ -563,7 +694,12 @@ export default function TranslatePage() {
               <tbody>
                 {sentences.slice(0, 200).map((r, i) => {
                   const hasError = !!r.error;
+                  const refused = isRefused(r);
                   const hasTranslation = !!r.llm_english_translation;
+                  const statusLabel = refused ? "Refused" : hasError ? "Incomplete" : hasTranslation ? "Complete" : "Pending";
+                  const statusBg = refused ? "var(--danger-light)" : hasError ? "var(--warning-light)" : hasTranslation ? "var(--success-light)" : "var(--bg-inset)";
+                  const statusColor = refused ? "var(--danger)" : hasError ? "var(--warning)" : hasTranslation ? "var(--success)" : "var(--text-muted)";
+                  const statusBorder = refused ? "var(--danger-border)" : hasError ? "var(--warning-border)" : hasTranslation ? "var(--success-border)" : "var(--border)";
                   return (
                     <tr
                       key={`${r.pair_id}-${i}`}
@@ -585,8 +721,9 @@ export default function TranslatePage() {
                         </span>
                       </td>
                       <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.source_text || r.spanish_source}</td>
-                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: hasTranslation ? "var(--text-primary)" : "var(--text-muted)" }}>
-                        {r.llm_english_translation || (hasError ? "Failed" : "...")}
+                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: hasTranslation ? "var(--text-primary)" : "var(--text-muted)" }} title={r.format_warning ? `Format warning: ${r.format_warning}` : r.error ?? undefined}>
+                        {r.format_warning && <span style={{ color: "var(--warning)", marginRight: 6 }} aria-label="Format warning">&#9888;</span>}
+                        {r.llm_english_translation || (hasError ? r.error : "...")}
                       </td>
                       <td style={{ color: "var(--accent-text)", fontWeight: 600 }}>
                         {r.meteor != null ? r.meteor.toFixed(3) : "--"}
@@ -597,13 +734,11 @@ export default function TranslatePage() {
                         </td>
                       )}
                       <td>
-                        <span style={{
+                        <span title={r.error ?? undefined} style={{
                           display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, border: "1px solid",
-                          background: hasError ? "var(--danger-light)" : hasTranslation ? "var(--success-light)" : "var(--bg-inset)",
-                          color: hasError ? "var(--danger)" : hasTranslation ? "var(--success)" : "var(--text-muted)",
-                          borderColor: hasError ? "var(--danger-border)" : hasTranslation ? "var(--success-border)" : "var(--border)",
+                          background: statusBg, color: statusColor, borderColor: statusBorder,
                         }}>
-                          {hasError ? "Error" : hasTranslation ? "Complete" : "Pending"}
+                          {statusLabel}
                         </span>
                       </td>
                     </tr>

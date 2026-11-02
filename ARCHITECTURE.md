@@ -193,11 +193,25 @@ IndexedDB (JobResults) + localStorage
 
 The review queue is derived entirely in the browser from the backend's per-sentence results:
 
-1. A row must be **completed**: it has an `llm_english_translation` and no `error`. Rows whose translation failed (API error, refusal, empty output) are excluded from the queue and from all metrics; they are only visible in the Translate table and the "Completed Pairs" row on the Compare page.
-2. The row's **METEOR score must be below the threshold**. The Review page threshold defaults to `0.4` and can be changed in the threshold box; the Metrics page "Flagged for Review" count always uses `0.4`.
+1. A row must be **reviewable**: either completed (has an `llm_english_translation` and no `error`) or **refused** (`error_kind == "refusal"`, which the backend scores as METEOR 0). Incomplete rows (`error_kind == "infrastructure"`) are not reviewable; they are retried from the Translate page.
+2. The row's **METEOR score must be below the threshold**. The threshold defaults to `0.4`, is set on the Review page, is saved to the session, and is used by the Metrics page's "Flagged for Review" count.
 3. Rows with no `english_reference` have no METEOR score and are never flagged.
+4. **Refused rows come first** in the queue, labelled "Refused" with the provider's reason; completed rows below the threshold follow in dataset order.
 
 BLEU and BERTScore do not affect flagging. The threshold is a triage heuristic, not a safety guarantee: a translation can score above it and still contain a clinically significant error.
+
+### How Failures Are Classified and Scored
+
+`translate.classify_error()` sorts every translation failure into two classes, recorded on the row as `error_kind` with the exact message in `error`:
+
+| Class | Raised for | Scoring | Recovery |
+|---|---|---|---|
+| `refusal` (`TranslationRefused`) | Provider content filter, explicit decline (`stop_reason: refusal`), empty reply | METEOR 0, BERTScore 0, empty hypothesis in corpus BLEU | Physician review (top of queue) |
+| `infrastructure` | Rate limit exhausted after retries, connection error, provider 5xx, bad request, output limit reached before any text | Not scored | "Retry incomplete rows" on the Translate page |
+
+The retry flow is three backend jobs driven by the frontend: translate only the incomplete rows as fresh input, merge the new rows into the saved result set by `pair_id`, then submit the merged set in `metrics_only` mode (with `error`/`error_kind` columns so refused rows keep their status) so corpus BLEU and the averages cover every row.
+
+`app/output_checks.py: detect_format_warning()` runs on every successful reply and records a `format_warning` when the reply looks wrapped (preamble, translator's note, quotation marks, markdown, extra paragraphs). It never modifies the text; the study scores raw output.
 
 ### What the Frontend Does NOT Do
 

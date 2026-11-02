@@ -4,13 +4,14 @@ import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import MetricGuideLink from "@/components/MetricGuide";
 import { CLINICAL_GRADES } from "@/lib/types";
-import { summarizeMetric } from "@/lib/metrics";
+import { summarizeMetric, countRun, failureReasons, isScored, bleuBand, meteorBand, bandStyle, DEFAULT_REVIEW_THRESHOLD, SMALL_SAMPLE_THRESHOLD } from "@/lib/metrics";
 import type { JobResults, ClinicalGrade } from "@/lib/types";
-import { getSessionJobResultsAsync, getSessionGrades } from "@/lib/session";
+import { getSessionJobResultsAsync, getSessionGrades, getSessionReviewThreshold } from "@/lib/session";
 
 export default function MetricsPage() {
   const [jobResults, setJobResults] = useState<JobResults | null>(null);
   const [grades, setGrades] = useState<Record<string, ClinicalGrade>>({});
+  const [threshold, setThreshold] = useState(DEFAULT_REVIEW_THRESHOLD);
 
   useEffect(() => {
     getSessionJobResultsAsync().then((persisted) => {
@@ -18,12 +19,17 @@ export default function MetricsPage() {
     });
     const persistedGrades = getSessionGrades();
     if (persistedGrades) setGrades(persistedGrades);
+    // Same threshold the Review page uses (set there, saved to the session).
+    const savedThreshold = getSessionReviewThreshold();
+    if (savedThreshold != null) setThreshold(savedThreshold);
   }, []);
 
   const sentences = jobResults?.sentence_metrics ?? [];
-  const completed = sentences.filter(
-    (s) => s.llm_english_translation && !s.error
-  );
+  const counts = countRun(sentences);
+  // Scored rows: completed translations plus refusals (scored 0 by the backend).
+  // Incomplete rows (provider/config failures) carry no score and are excluded.
+  const completed = sentences.filter(isScored);
+  const failures = failureReasons(sentences);
 
   // Aggregate metric values from backend results
   const meteorValues = completed
@@ -75,8 +81,8 @@ export default function MetricsPage() {
 
   const corpusBleu = jobResults?.corpus_metrics;
 
-  // Flagged count
-  const flaggedCount = completed.filter((r) => r.meteor != null && r.meteor < 0.4).length;
+  // Flagged count (same threshold as the Review page)
+  const flaggedCount = completed.filter((r) => r.meteor != null && r.meteor < threshold).length;
   const flaggedPct = completed.length > 0 ? ((flaggedCount / completed.length) * 100).toFixed(1) : "0";
 
   // Grade distribution colors mapped to design system
@@ -93,14 +99,67 @@ export default function MetricsPage() {
           Aggregate Metrics
         </h1>
         <p style={{ fontSize: 15, color: "var(--text-muted)", margin: "0 0 10px" }}>
-          {completed.length > 0 ? (
-            <><strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{completed.length}</strong> of {sentences.length} translations completed</>
+          {sentences.length > 0 ? (
+            <>
+              <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{counts.completed}</strong> of {sentences.length} translations completed
+              {counts.refused > 0 && <> &middot; <span style={{ color: "var(--danger)" }}>{counts.refused} refused (scored 0)</span></>}
+              {counts.incomplete > 0 && <> &middot; <span style={{ color: "var(--warning)" }}>{counts.incomplete} incomplete (not scored)</span></>}
+            </>
           ) : (
             "Run translations first to see metrics here."
           )}
         </p>
+        {completed.length > 0 && completed.length < SMALL_SAMPLE_THRESHOLD && (
+          <p style={{ fontSize: 12, color: "var(--warning)", margin: "0 0 10px" }}>
+            Small sample: {completed.length} scored rows. Corpus BLEU and the averages are unstable below {SMALL_SAMPLE_THRESHOLD}; treat these numbers as a smoke test.
+          </p>
+        )}
         <MetricGuideLink />
       </div>
+
+      {/* Translation failures */}
+      {(counts.refused > 0 || counts.incomplete > 0) && (
+        <div className="anim d1" style={{ marginBottom: 48 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+            Translation Failures
+            <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+          <div className="metrics-grid-2">
+            <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>Refused by the model</div>
+              <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--danger)", lineHeight: 1, marginBottom: 16 }}>{counts.refused}</div>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
+                Declined or empty replies. Counted against the model: METEOR 0, BERTScore 0, empty hypothesis in corpus BLEU. Sent to the top of the review queue.
+              </div>
+            </div>
+            <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 12 }}>Incomplete (provider / config)</div>
+              <div style={{ fontSize: 52, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--warning)", lineHeight: 1, marginBottom: 16 }}>{counts.incomplete}</div>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
+                Rate limits, connection or server errors, output limits. Not scored. Use &ldquo;Retry incomplete rows&rdquo; on the Translate page.
+              </div>
+            </div>
+          </div>
+          {failures.length > 0 && (
+            <div style={{ marginTop: 16, background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 0, boxShadow: "var(--shadow)", overflow: "hidden" }}>
+              <table>
+                <thead>
+                  <tr><th>Reason</th><th style={{ width: 130 }}>Kind</th><th style={{ width: 90, textAlign: "right" }}>Rows</th></tr>
+                </thead>
+                <tbody>
+                  {failures.slice(0, 8).map((f) => (
+                    <tr key={`${f.kind}|${f.reason}`}>
+                      <td style={{ fontSize: 13 }}>{f.reason}</td>
+                      <td style={{ fontSize: 12, color: f.kind === "refusal" ? "var(--danger)" : "var(--warning)", fontWeight: 600 }}>{f.kind === "refusal" ? "Refused" : "Incomplete"}</td>
+                      <td style={{ textAlign: "right", fontWeight: 600 }}>{f.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Corpus-Level Scores */}
       {corpusBleu && (
@@ -118,8 +177,8 @@ export default function MetricsPage() {
               <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6, marginBottom: 12 }}>
                 {corpusBleu.overall.bleu_signature}
               </div>
-              <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--warning-light)", color: "var(--warning)", border: "1px solid var(--warning-border)" }}>
-                Moderate
+              <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, ...bandStyle(bleuBand(corpusBleu.overall.bleu_score).tone) }}>
+                {bleuBand(corpusBleu.overall.bleu_score).label}
               </span>
             </div>
             <div style={{ background: "var(--bg-surface)", borderRadius: "var(--radius)", padding: 32, boxShadow: "var(--shadow)" }}>
@@ -131,8 +190,8 @@ export default function MetricsPage() {
                 WordNet + stemming (NLTK)<br />n = {meteorValues.length}
               </div>
               {meteorValues.length > 0 && (
-                <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--success-light)", color: "var(--success)", border: "1px solid var(--success-border)" }}>
-                  Strong
+                <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, ...bandStyle(meteorBand(meteorSummary.mean).tone) }}>
+                  {meteorBand(meteorSummary.mean).label}
                 </span>
               )}
             </div>
@@ -175,7 +234,7 @@ export default function MetricsPage() {
             {flaggedCount}
           </div>
           <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6, marginBottom: 12 }}>
-            Threshold: METEOR &lt; 0.40 &middot; {totalGraded} of {flaggedCount} graded
+            Threshold: METEOR &lt; {threshold.toFixed(2)} (set on the Review page) &middot; {totalGraded} of {flaggedCount} graded
           </div>
           <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "var(--accent-soft)", color: "var(--accent-text)" }}>
             {flaggedPct}% of total

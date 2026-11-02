@@ -24,7 +24,7 @@ const STEPS = [
   },
   {
     title: "Review",
-    text: "Sentences that score poorly on METEOR (below 0.4 by default) are flagged. A physician reads the original, the human translation, and the AI translation side by side and grades how serious any error is, from 0 (no error) to 3 (could change care).",
+    text: "Sentences that score poorly on METEOR (below 0.4 by default) are flagged, and any sentence the model refused to translate goes to the top of the queue. A physician reads the original, the human translation, and the AI translation side by side and grades how serious any error is, from 0 (no error) to 3 (could change care).",
   },
   {
     title: "Compare",

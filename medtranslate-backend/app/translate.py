@@ -30,6 +30,29 @@ from app.config import (
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Failure classification
+# ---------------------------------------------------------------------------
+
+
+class TranslationRefused(RuntimeError):
+    """The model answered but produced no translation (content filter,
+    explicit refusal, or an empty reply). This is model behaviour and is
+    scored as a failed translation, unlike infrastructure errors."""
+
+
+def classify_error(exc: BaseException) -> str:
+    """Return ``"refusal"`` or ``"infrastructure"`` for a translation error.
+
+    Refusals count against the model. Everything else (rate limits exhausted,
+    connection errors, provider 5xx, bad configuration, output limit reached
+    before any text was produced) says nothing about translation quality and
+    is reported as incomplete so the rows can be retried.
+    """
+    return "refusal" if isinstance(exc, TranslationRefused) else "infrastructure"
+
+
 # ---------------------------------------------------------------------------
 # Lazy-loaded clients
 # ---------------------------------------------------------------------------
@@ -213,7 +236,11 @@ async def _translate_openai(
                     "raise max_tokens or REASONING_HEADROOM_TOKENS"
                 )
             if not content and choice.finish_reason == "content_filter":
-                raise RuntimeError("Model declined to translate this text (content filter)")
+                raise TranslationRefused("Model declined to translate this text (content filter)")
+            if not content:
+                raise TranslationRefused(
+                    f"Model returned an empty reply (finish_reason: {choice.finish_reason})"
+                )
             return content
 
         except openai.RateLimitError as exc:
@@ -310,12 +337,16 @@ async def _translate_anthropic(
             if response.stop_reason == "refusal":
                 details = getattr(response, "stop_details", None)
                 category = getattr(details, "category", None) or "unspecified"
-                raise RuntimeError(f"Model declined to translate this text (category: {category})")
+                raise TranslationRefused(f"Model declined to translate this text (category: {category})")
             content = _anthropic_text(response).strip()
             if not content and response.stop_reason == "max_tokens":
                 raise RuntimeError(
                     "Output limit reached before any translation was produced; "
                     "raise max_tokens or REASONING_HEADROOM_TOKENS"
+                )
+            if not content:
+                raise TranslationRefused(
+                    f"Model returned an empty reply (stop_reason: {response.stop_reason})"
                 )
             return content
 
